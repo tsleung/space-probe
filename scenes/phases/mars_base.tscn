@@ -1,0 +1,265 @@
+[gd_scene load_steps=2 format=3 uid="uid://b5mt2yqkh8c1x"]
+
+[ext_resource type="Script" path="res://scripts/phases/mars_base.gd" id="1_mars"]
+
+[node name="MarsBase" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_mars")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.15, 0.08, 0.05, 1)
+
+[node name="TopBar" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 20.0
+offset_top = 10.0
+offset_right = -20.0
+offset_bottom = 50.0
+theme_override_constants/separation = 40
+
+[node name="TitleLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "MARS SURFACE OPERATIONS"
+
+[node name="Spacer" type="Control" parent="TopBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SolLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Sol: 1"
+
+[node name="MissionDayLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Mission Day: 180"
+
+[node name="SamplesLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Samples: 0"
+
+[node name="MainContent" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 60.0
+offset_right = -10.0
+offset_bottom = -60.0
+theme_override_constants/separation = 10
+
+[node name="LeftPanel" type="VBoxContainer" parent="MainContent"]
+custom_minimum_size = Vector2(280, 0)
+layout_mode = 2
+
+[node name="CrewSection" type="Panel" parent="MainContent/LeftPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Label" type="Label" parent="MainContent/LeftPanel/CrewSection"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 100.0
+offset_bottom = 30.0
+text = "Crew Status"
+theme_override_font_sizes/font_size = 16
+
+[node name="CrewContainer" type="VBoxContainer" parent="MainContent/LeftPanel/CrewSection"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 35.0
+offset_right = -10.0
+offset_bottom = -10.0
+
+[node name="ActivityPanel" type="Panel" parent="MainContent/LeftPanel"]
+visible = false
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MainContent/LeftPanel/ActivityPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 5.0
+offset_right = 150.0
+offset_bottom = 25.0
+text = "Assign Activity"
+
+[node name="ActivityList" type="ItemList" parent="MainContent/LeftPanel/ActivityPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 30.0
+offset_right = -10.0
+offset_bottom = -40.0
+
+[node name="AssignButton" type="Button" parent="MainContent/LeftPanel/ActivityPanel"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = -35.0
+offset_right = -10.0
+offset_bottom = -5.0
+text = "Assign"
+
+[node name="CenterPanel" type="Panel" parent="MainContent"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="MainContent/CenterPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 150.0
+offset_bottom = 30.0
+text = "Experiments"
+theme_override_font_sizes/font_size = 16
+
+[node name="ExperimentList" type="ItemList" parent="MainContent/CenterPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 35.0
+offset_right = -10.0
+offset_bottom = -200.0
+
+[node name="ExperimentInfo" type="RichTextLabel" parent="MainContent/CenterPanel"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = -190.0
+offset_right = -10.0
+offset_bottom = -80.0
+bbcode_enabled = true
+text = "Select an experiment to view details."
+
+[node name="CrewLabel" type="Label" parent="MainContent/CenterPanel"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = -70.0
+offset_right = 100.0
+offset_bottom = -50.0
+text = "Assign Crew:"
+
+[node name="CrewSelect" type="OptionButton" parent="MainContent/CenterPanel"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 110.0
+offset_top = -75.0
+offset_right = -10.0
+offset_bottom = -50.0
+
+[node name="RunExperimentButton" type="Button" parent="MainContent/CenterPanel"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = -40.0
+offset_right = -10.0
+offset_bottom = -10.0
+text = "Run Experiment"
+
+[node name="RightPanel" type="VBoxContainer" parent="MainContent"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+
+[node name="MissionPanel" type="Panel" parent="MainContent/RightPanel"]
+custom_minimum_size = Vector2(0, 200)
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MainContent/RightPanel/MissionPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 150.0
+offset_bottom = 30.0
+text = "Mission Status"
+theme_override_font_sizes/font_size = 16
+
+[node name="MissionStatus" type="RichTextLabel" parent="MainContent/RightPanel"]
+custom_minimum_size = Vector2(0, 180)
+layout_mode = 2
+bbcode_enabled = true
+text = "Mission status..."
+
+[node name="LogPanel" type="Panel" parent="MainContent/RightPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Label" type="Label" parent="MainContent/RightPanel/LogPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 5.0
+offset_right = 100.0
+offset_bottom = 25.0
+text = "Event Log"
+
+[node name="EventLog" type="RichTextLabel" parent="MainContent/RightPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+scroll_following = true
+
+[node name="BottomBar" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = -50.0
+offset_right = -20.0
+offset_bottom = -10.0
+theme_override_constants/separation = 20
+
+[node name="Spacer" type="Control" parent="BottomBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="AdvanceButton" type="Button" parent="BottomBar"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+text = "Advance Sol"
+
+[node name="ReturnButton" type="Button" parent="BottomBar"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+disabled = true
+text = "Return to Earth"

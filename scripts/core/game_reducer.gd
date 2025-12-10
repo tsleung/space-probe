@@ -26,6 +26,7 @@ enum ActionType {
 	ADD_CREW_MEMBER,
 	REMOVE_CREW_MEMBER,
 	UPDATE_CREW,
+	ASSIGN_CREW_ACTIVITY,
 
 	# Budget
 	SPEND_BUDGET,
@@ -33,6 +34,14 @@ enum ActionType {
 
 	# Cargo
 	UPDATE_CARGO,
+
+	# Travel
+	START_TRAVEL,
+	ADVANCE_TRAVEL_DAY,
+
+	# Mars Base
+	START_MARS_OPERATIONS,
+	CONDUCT_EXPERIMENT,
 
 	# Events
 	APPLY_EVENT,
@@ -80,6 +89,16 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_apply_event(state, action)
 		ActionType.ADD_LOG_ENTRY:
 			return _reduce_add_log(state, action)
+		ActionType.ASSIGN_CREW_ACTIVITY:
+			return _reduce_assign_activity(state, action)
+		ActionType.START_TRAVEL:
+			return _reduce_start_travel(state, action)
+		ActionType.ADVANCE_TRAVEL_DAY:
+			return _reduce_advance_travel_day(state, action)
+		ActionType.START_MARS_OPERATIONS:
+			return _reduce_start_mars_operations(state, action)
+		ActionType.CONDUCT_EXPERIMENT:
+			return _reduce_conduct_experiment(state, action)
 		_:
 			return state
 
@@ -187,6 +206,38 @@ static func action_add_log(message: String, event_type: String = "info") -> Dict
 		"type": ActionType.ADD_LOG_ENTRY,
 		"message": message,
 		"event_type": event_type
+	}
+
+static func action_assign_activity(crew_id: String, activity_id: String) -> Dictionary:
+	return {
+		"type": ActionType.ASSIGN_CREW_ACTIVITY,
+		"crew_id": crew_id,
+		"activity_id": activity_id
+	}
+
+static func action_start_travel(travel_days: int) -> Dictionary:
+	return {
+		"type": ActionType.START_TRAVEL,
+		"travel_days": travel_days
+	}
+
+static func action_advance_travel_day(random_values: Array) -> Dictionary:
+	return {
+		"type": ActionType.ADVANCE_TRAVEL_DAY,
+		"random_values": random_values
+	}
+
+static func action_start_mars_operations() -> Dictionary:
+	return {
+		"type": ActionType.START_MARS_OPERATIONS
+	}
+
+static func action_conduct_experiment(experiment_id: String, crew_id: String, random_value: float) -> Dictionary:
+	return {
+		"type": ActionType.CONDUCT_EXPERIMENT,
+		"experiment_id": experiment_id,
+		"crew_id": crew_id,
+		"random_value": random_value
 	}
 
 # ============================================================================
@@ -502,3 +553,186 @@ static func _generate_default_grid_positions() -> Array:
 		for r in range(-5, 6):
 			positions.append(Vector2i(q, r))
 	return positions
+
+# ============================================================================
+# TRAVEL PHASE REDUCERS
+# ============================================================================
+
+static func _reduce_assign_activity(state: Dictionary, action: Dictionary) -> Dictionary:
+	var activities = TravelLogic.get_available_activities()
+	var activity = null
+	for a in activities:
+		if a.id == action.activity_id:
+			activity = a
+			break
+
+	if activity == null:
+		return state
+
+	var new_crew: Array = []
+	for crew in state.crew:
+		if crew.id == action.crew_id:
+			new_crew.append(TravelLogic.apply_activity(crew, activity))
+		else:
+			new_crew.append(crew)
+
+	return GameTypes.with_field(state, "crew", new_crew)
+
+static func _reduce_start_travel(state: Dictionary, action: Dictionary) -> Dictionary:
+	var new_log = state.mission_log.duplicate()
+	new_log.append(GameTypes.create_log_entry(
+		state.current_day,
+		"Departure from lunar orbit. Beginning %d-day journey to Mars." % action.travel_days,
+		"success"
+	))
+
+	return GameTypes.with_fields(state, {
+		"current_phase": GameTypes.GamePhase.TRAVEL_TO_MARS,
+		"travel_day": 0,
+		"travel_total_days": action.travel_days,
+		"mission_log": new_log
+	})
+
+static func _reduce_advance_travel_day(state: Dictionary, action: Dictionary) -> Dictionary:
+	var travel_day = state.get("travel_day", 0) + 1
+	var travel_total = state.get("travel_total_days", 180)
+	var new_day = state.current_day + 1
+
+	var updates = {
+		"current_day": new_day,
+		"travel_day": travel_day
+	}
+
+	# Update crew daily
+	var new_crew: Array = []
+	var rand_idx = 0
+	for crew in state.crew:
+		var rand_val = action.random_values[rand_idx] if rand_idx < action.random_values.size() else 0.5
+		new_crew.append(CrewLogic.apply_daily_update(crew, rand_val))
+		rand_idx += 1
+	updates["crew"] = new_crew
+
+	# Check for travel event
+	if action.random_values.size() >= rand_idx + 3:
+		var event_result = TravelLogic.check_daily_event(
+			GameTypes.with_fields(state, updates),
+			travel_day,
+			action.random_values[rand_idx],
+			action.random_values[rand_idx + 1],
+			action.random_values[rand_idx + 2]
+		)
+		if event_result.triggered and event_result.event:
+			# Apply event effects
+			for key in event_result.event.effects.keys():
+				updates[key] = event_result.event.effects[key]
+
+			var new_log = state.mission_log.duplicate()
+			new_log.append(GameTypes.create_log_entry(
+				new_day,
+				event_result.event.description,
+				"event"
+			))
+			updates["mission_log"] = new_log
+
+	# Check for arrival
+	if travel_day >= travel_total:
+		var arrival_status = TravelLogic.check_arrival_status(GameTypes.with_fields(state, updates))
+		var new_log = updates.get("mission_log", state.mission_log).duplicate()
+
+		if arrival_status.can_land:
+			new_log.append(GameTypes.create_log_entry(
+				new_day,
+				"Mars orbit achieved! Preparing for landing sequence.",
+				"success"
+			))
+			updates["current_phase"] = GameTypes.GamePhase.MARS_BASE
+			updates["mars_arrival_status"] = arrival_status
+		else:
+			for issue in arrival_status.issues:
+				new_log.append(GameTypes.create_log_entry(new_day, issue, "error"))
+			new_log.append(GameTypes.create_log_entry(
+				new_day,
+				"Mission failed - unable to complete Mars orbital insertion.",
+				"error"
+			))
+			updates["current_phase"] = GameTypes.GamePhase.GAME_OVER
+			updates["game_over_reason"] = "arrival_failure"
+
+		updates["mission_log"] = new_log
+
+	return GameTypes.with_fields(state, updates)
+
+# ============================================================================
+# MARS BASE REDUCERS
+# ============================================================================
+
+static func _reduce_start_mars_operations(state: Dictionary, action: Dictionary) -> Dictionary:
+	var new_log = state.mission_log.duplicate()
+	new_log.append(GameTypes.create_log_entry(
+		state.current_day,
+		"Landing successful! Mars surface operations begin.",
+		"success"
+	))
+
+	return GameTypes.with_fields(state, {
+		"mars_sol": 1,
+		"base_established": true,
+		"experiments_completed": [],
+		"samples_collected": {
+			"soil": 0,
+			"ice": 0,
+			"atmosphere": 0
+		},
+		"mission_log": new_log
+	})
+
+static func _reduce_conduct_experiment(state: Dictionary, action: Dictionary) -> Dictionary:
+	var experiments_completed = state.get("experiments_completed", []).duplicate()
+
+	if action.experiment_id in experiments_completed:
+		return state  # Already done
+
+	# Find crew member
+	var crew_member = null
+	for crew in state.crew:
+		if crew.id == action.crew_id:
+			crew_member = crew
+			break
+
+	if crew_member == null:
+		return state
+
+	# Calculate success based on crew effectiveness and random value
+	var effectiveness = CrewLogic.calc_effectiveness(crew_member)
+	var success_threshold = 0.3 + (effectiveness * 0.5)  # 30-80% base success
+	var success = action.random_value < success_threshold
+
+	var new_log = state.mission_log.duplicate()
+
+	if success:
+		experiments_completed.append(action.experiment_id)
+		new_log.append(GameTypes.create_log_entry(
+			state.current_day,
+			"%s successfully completed %s experiment." % [crew_member.display_name, action.experiment_id],
+			"success"
+		))
+	else:
+		new_log.append(GameTypes.create_log_entry(
+			state.current_day,
+			"%s experiment failed. May retry tomorrow." % action.experiment_id,
+			"error"
+		))
+
+	# Apply fatigue to crew
+	var new_crew: Array = []
+	for crew in state.crew:
+		if crew.id == action.crew_id:
+			new_crew.append(CrewLogic.apply_work(crew, 6.0))  # 6 hours work
+		else:
+			new_crew.append(crew)
+
+	return GameTypes.with_fields(state, {
+		"experiments_completed": experiments_completed,
+		"crew": new_crew,
+		"mission_log": new_log
+	})

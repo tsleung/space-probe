@@ -189,6 +189,55 @@ func change_phase(phase: GameTypes.GamePhase) -> void:
 	dispatch(GameReducer.action_change_phase(phase))
 
 # ============================================================================
+# TRAVEL PHASE ACTIONS
+# ============================================================================
+
+func start_travel() -> void:
+	var engine = get_engine()
+	var ship_mass = ShipLogic.calc_total_mass(_state.ship_components)
+	var days_past = maxi(0, _state.current_day - _state.launch_window_day)
+	var travel_days = TravelLogic.calc_travel_days(engine, ship_mass, days_past)
+
+	dispatch(GameReducer.action_start_travel(travel_days))
+
+func advance_travel_day() -> void:
+	var random_values: Array = []
+	for i in range(_state.crew.size() + 10):
+		random_values.append(_rng.randf())
+
+	dispatch(GameReducer.action_advance_travel_day(random_values))
+
+func assign_crew_activity(crew_id: String, activity_id: String) -> void:
+	dispatch(GameReducer.action_assign_activity(crew_id, activity_id))
+
+func get_travel_progress() -> Dictionary:
+	var travel_day = _state.get("travel_day", 0)
+	var travel_total = _state.get("travel_total_days", 180)
+	return TravelLogic.calc_distance_progress(travel_day, travel_total)
+
+func get_available_activities() -> Array:
+	return TravelLogic.get_available_activities()
+
+# ============================================================================
+# MARS BASE ACTIONS
+# ============================================================================
+
+func start_mars_operations() -> void:
+	dispatch(GameReducer.action_start_mars_operations())
+
+func conduct_experiment(experiment_id: String, crew_id: String) -> void:
+	dispatch(GameReducer.action_conduct_experiment(experiment_id, crew_id, _rng.randf()))
+
+func get_mars_sol() -> int:
+	return _state.get("mars_sol", 0)
+
+func get_experiments_completed() -> Array:
+	return _state.get("experiments_completed", []).duplicate()
+
+func get_samples_collected() -> Dictionary:
+	return _state.get("samples_collected", {}).duplicate()
+
+# ============================================================================
 # RANDOM EVENT CHECKING (side effect: uses RNG)
 # ============================================================================
 

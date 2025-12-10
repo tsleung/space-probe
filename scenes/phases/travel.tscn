@@ -1,0 +1,246 @@
+[gd_scene load_steps=2 format=3 uid="uid://dkwm3x8t1vqe"]
+
+[ext_resource type="Script" path="res://scripts/phases/travel.gd" id="1_travel"]
+
+[node name="Travel" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_travel")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.02, 0.02, 0.08, 1)
+
+[node name="Stars" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.05, 0.05, 0.1, 0.5)
+
+[node name="TopBar" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 20.0
+offset_top = 10.0
+offset_right = -20.0
+offset_bottom = 50.0
+theme_override_constants/separation = 40
+
+[node name="TitleLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "TRANSIT TO MARS"
+
+[node name="Spacer" type="Control" parent="TopBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DayLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Mission Day: 1"
+
+[node name="ProgressLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Day 0 of 180"
+
+[node name="DistanceLabel" type="Label" parent="TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "0 km traveled"
+
+[node name="MainContent" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 60.0
+offset_right = -10.0
+offset_bottom = -60.0
+theme_override_constants/separation = 10
+
+[node name="LeftPanel" type="VBoxContainer" parent="MainContent"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+
+[node name="ProgressSection" type="Panel" parent="MainContent/LeftPanel"]
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MainContent/LeftPanel/ProgressSection"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 150.0
+offset_bottom = 30.0
+text = "Journey Progress"
+theme_override_font_sizes/font_size = 16
+
+[node name="ProgressBar" type="ProgressBar" parent="MainContent/LeftPanel/ProgressSection"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 10.0
+offset_top = 40.0
+offset_right = -10.0
+offset_bottom = 65.0
+max_value = 100.0
+step = 0.1
+
+[node name="ETALabel" type="Label" parent="MainContent/LeftPanel/ProgressSection"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 70.0
+offset_right = 290.0
+offset_bottom = 90.0
+text = "ETA: 180 days remaining"
+
+[node name="CrewSection" type="Panel" parent="MainContent/LeftPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Label" type="Label" parent="MainContent/LeftPanel/CrewSection"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 100.0
+offset_bottom = 30.0
+text = "Crew Status"
+theme_override_font_sizes/font_size = 16
+
+[node name="CrewContainer" type="VBoxContainer" parent="MainContent/LeftPanel/CrewSection"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 35.0
+offset_right = -10.0
+offset_bottom = -10.0
+
+[node name="ActivityPanel" type="Panel" parent="MainContent/LeftPanel"]
+visible = false
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MainContent/LeftPanel/ActivityPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 5.0
+offset_right = 150.0
+offset_bottom = 25.0
+text = "Assign Activity"
+
+[node name="ActivityList" type="ItemList" parent="MainContent/LeftPanel/ActivityPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 30.0
+offset_right = -10.0
+offset_bottom = -40.0
+
+[node name="AssignButton" type="Button" parent="MainContent/LeftPanel/ActivityPanel"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = -35.0
+offset_right = -10.0
+offset_bottom = -5.0
+text = "Assign"
+
+[node name="CenterPanel" type="Panel" parent="MainContent"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="MainContent/CenterPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 150.0
+offset_bottom = 30.0
+text = "Ship Systems"
+theme_override_font_sizes/font_size = 16
+
+[node name="ShipStatus" type="RichTextLabel" parent="MainContent/CenterPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 40.0
+offset_right = -10.0
+offset_bottom = -10.0
+bbcode_enabled = true
+text = "Ship status..."
+
+[node name="RightPanel" type="Panel" parent="MainContent"]
+custom_minimum_size = Vector2(350, 0)
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MainContent/RightPanel"]
+layout_mode = 1
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 100.0
+offset_bottom = 30.0
+text = "Mission Log"
+theme_override_font_sizes/font_size = 16
+
+[node name="EventLog" type="RichTextLabel" parent="MainContent/RightPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 35.0
+offset_right = -10.0
+offset_bottom = -10.0
+bbcode_enabled = true
+scroll_following = true
+
+[node name="BottomBar" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = -50.0
+offset_right = -20.0
+offset_bottom = -10.0
+theme_override_constants/separation = 20
+
+[node name="Spacer" type="Control" parent="BottomBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="AdvanceButton" type="Button" parent="BottomBar"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+text = "Advance Day"
+
+[node name="AdvanceWeekButton" type="Button" parent="BottomBar"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+text = "Advance Week"
+
+[node name="AutoTravelButton" type="Button" parent="BottomBar"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+text = "Auto Travel"

@@ -101,8 +101,8 @@ func _on_test_pressed():
 func _on_launch_pressed():
 	var check = GameStore.get_launch_check()
 	if check.can_launch:
-		if GameStore.launch_ship():
-			get_tree().change_scene_to_file("res://scenes/phases/travel.tscn")
+		GameStore.start_travel()
+		get_tree().change_scene_to_file("res://scenes/phases/travel.tscn")
 	else:
 		for issue in check.issues:
 			GameStore.add_log("[color=red]Cannot launch: %s[/color]" % issue, "error")
