@@ -228,8 +228,18 @@ func start_mars_operations() -> void:
 func conduct_experiment(experiment_id: String, crew_id: String) -> void:
 	dispatch(GameReducer.action_conduct_experiment(experiment_id, crew_id, _rng.randf()))
 
+func collect_samples(sample_type: String, amount: int) -> void:
+	var samples = _state.get("samples_collected", {}).duplicate()
+	samples[sample_type] = samples.get(sample_type, 0) + amount
+	_state = GameTypes.with_field(_state, "samples_collected", samples)
+	add_log("Collected %d %s samples." % [amount, sample_type], "success")
+	state_changed.emit(_state)
+
 func get_mars_sol() -> int:
 	return _state.get("mars_sol", 0)
+
+func advance_mars_sol() -> void:
+	dispatch(GameReducer.action_advance_mars_sol())
 
 func get_experiments_completed() -> Array:
 	return _state.get("experiments_completed", []).duplicate()

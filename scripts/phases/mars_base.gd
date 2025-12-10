@@ -81,6 +81,16 @@ func _populate_activities():
 	for activity in MarsLogic.get_mars_activities():
 		activity_list.add_item("%s (%dh)" % [activity.name, activity.hours])
 
+func _do_sample_collection(activity: Dictionary):
+	# Sample collection activity gives samples
+	if activity.id == "sample_collection":
+		var sample_types = ["soil", "ice", "atmosphere"]
+		var rng = RandomNumberGenerator.new()
+		rng.seed = int(Time.get_unix_time_from_system())
+		var sample_type = sample_types[rng.randi() % sample_types.size()]
+		var amount = 1 + rng.randi() % 3  # 1-3 samples
+		GameStore.collect_samples(sample_type, amount)
+
 # ============================================================================
 # UI SYNC
 # ============================================================================
@@ -212,9 +222,20 @@ func _on_phase_changed(new_phase: GameTypes.GamePhase):
 		get_tree().change_scene_to_file("res://scenes/ui/game_over.tscn")
 
 func _on_advance_sol():
-	# Advance one Martian sol (slightly longer than Earth day)
+	# Advance one Martian sol
 	GameStore.advance_day(1)
-	# TODO: Add Mars-specific daily events
+	GameStore.advance_mars_sol()
+	# Check for Mars events
+	_check_mars_events()
+
+func _check_mars_events():
+	var rng = RandomNumberGenerator.new()
+	rng.seed = int(Time.get_unix_time_from_system())
+	var state = GameStore.get_state()
+	var sol = state.get("mars_sol", 1)
+	var event_result = MarsLogic.check_daily_event(state, sol, rng.randf(), rng.randf(), rng.randf())
+	if event_result.triggered and event_result.event:
+		GameStore.add_log(event_result.event.description, "event")
 
 func _on_return_to_earth():
 	var mission_check = MarsLogic.check_mission_complete(GameStore.get_state())
@@ -262,7 +283,18 @@ func _on_run_experiment():
 		return
 
 	var crew_member = crew[selected_idx]
+
+	# Check if experiment will succeed (for sample collection)
+	var old_completed = GameStore.get_experiments_completed().duplicate()
+
 	GameStore.conduct_experiment(_selected_experiment.id, crew_member.id)
+
+	# If experiment was completed, collect its samples
+	var new_completed = GameStore.get_experiments_completed()
+	if new_completed.size() > old_completed.size():
+		var exp = _selected_experiment
+		if exp.sample_type and exp.samples_required > 0:
+			GameStore.collect_samples(exp.sample_type, exp.samples_required)
 
 func _select_crew(crew_id: String):
 	_selected_crew_id = crew_id
@@ -284,6 +316,9 @@ func _on_assign_activity():
 
 	# Apply activity through store
 	GameStore.assign_crew_activity(_selected_crew_id, activity.id)
+
+	# If it's sample collection, actually collect samples
+	_do_sample_collection(activity)
 
 	activity_panel.visible = false
 	_selected_crew_id = ""

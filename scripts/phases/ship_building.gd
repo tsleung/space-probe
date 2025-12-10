@@ -13,6 +13,11 @@ extends Control
 @onready var launch_window_label: Label = $TopBar/LaunchWindowLabel
 @onready var component_list: ItemList = $HBoxContainer/SidePanel/TabContainer/Components/ComponentList
 @onready var engine_list: ItemList = $HBoxContainer/SidePanel/TabContainer/Engines/EngineList
+@onready var crew_list: ItemList = $HBoxContainer/SidePanel/TabContainer/Crew/VBox/CrewList
+@onready var crew_options: OptionButton = $HBoxContainer/SidePanel/TabContainer/Crew/VBox/CrewOptions
+@onready var hire_button: Button = $HBoxContainer/SidePanel/TabContainer/Crew/VBox/HireButton
+@onready var mav_check: CheckBox = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/MAVCheck
+@onready var rovers_check: CheckBox = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/RoversCheck
 @onready var info_panel: Panel = $HBoxContainer/SidePanel/InfoPanel
 @onready var info_name: Label = $HBoxContainer/SidePanel/InfoPanel/VBox/NameLabel
 @onready var info_desc: RichTextLabel = $HBoxContainer/SidePanel/InfoPanel/VBox/DescLabel
@@ -30,14 +35,17 @@ extends Control
 
 var _available_components: Array = []
 var _available_engines: Array = []
+var _available_crew: Array = []
 var _selected_catalog_item: Dictionary = {}
 var _selected_placed_component: Dictionary = {}
+var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # ============================================================================
 # LIFECYCLE
 # ============================================================================
 
 func _ready():
+	_rng.seed = int(Time.get_unix_time_from_system())
 	_load_catalog()
 	_populate_lists()
 	_connect_signals()
@@ -46,6 +54,7 @@ func _ready():
 func _load_catalog():
 	_available_components = ComponentLogic.get_all_components()
 	_available_engines = EngineLogic.get_all_engines()
+	_generate_available_crew()
 
 func _populate_lists():
 	component_list.clear()
@@ -57,6 +66,32 @@ func _populate_lists():
 		var suffix = " [Space Assembly]" if engine.requires_space_assembly else ""
 		engine_list.add_item("%s ($%s)%s" % [engine.display_name, _format_money(engine.base_cost), suffix])
 
+	_populate_crew_options()
+
+func _generate_available_crew():
+	_available_crew = []
+	var names_by_specialty = {
+		GameTypes.CrewSpecialty.COMMANDER: ["Cmdr. Torres", "Cmdr. Patel", "Cmdr. Volkov"],
+		GameTypes.CrewSpecialty.PILOT: ["Lt. Chen", "Lt. Williams", "Lt. Nakamura"],
+		GameTypes.CrewSpecialty.ENGINEER: ["Dr. Kowalski", "Dr. Singh", "Dr. Okonkwo"],
+		GameTypes.CrewSpecialty.SCIENTIST_GEOLOGY: ["Dr. Martinez", "Dr. Kim", "Dr. Johansson"],
+		GameTypes.CrewSpecialty.MEDIC: ["Dr. Hassan", "Dr. Garcia", "Dr. Ivanova"]
+	}
+
+	for specialty in names_by_specialty.keys():
+		var names = names_by_specialty[specialty]
+		var name = names[_rng.randi() % names.size()]
+		var rand_vals: Array = []
+		for i in range(6):
+			rand_vals.append(_rng.randf())
+		_available_crew.append(CrewLogic.create_crew_member(name, specialty, rand_vals))
+
+func _populate_crew_options():
+	crew_options.clear()
+	for crew in _available_crew:
+		var specialty_name = CrewLogic.get_specialty_name(crew.specialty)
+		crew_options.add_item("%s (%s)" % [crew.display_name, specialty_name])
+
 func _connect_signals():
 	# UI signals
 	component_list.item_selected.connect(_on_component_selected)
@@ -65,6 +100,11 @@ func _connect_signals():
 	test_button.pressed.connect(_on_test_pressed)
 	launch_button.pressed.connect(_on_launch_pressed)
 	advance_day_button.pressed.connect(_on_advance_day_pressed)
+
+	# Crew and cargo signals
+	hire_button.pressed.connect(_on_hire_crew_pressed)
+	mav_check.toggled.connect(_on_mav_toggled)
+	rovers_check.toggled.connect(_on_rovers_toggled)
 
 	# Hex grid signals
 	hex_grid_view.cell_clicked.connect(_on_grid_cell_clicked)
@@ -113,7 +153,11 @@ func _on_advance_day_pressed():
 func _on_grid_cell_clicked(hex_pos: Vector2i):
 	if not _selected_catalog_item.is_empty():
 		# Try to place selected catalog item
-		if GameStore.place_component(_selected_catalog_item.duplicate(true), hex_pos):
+		var item = _selected_catalog_item.duplicate(true)
+		if GameStore.place_component(item, hex_pos):
+			# If this is an engine, also select it as the ship's engine
+			if item.has("engine_class"):
+				GameStore.select_engine(item)
 			_selected_catalog_item = {}
 			hex_grid_view.clear_selection()
 	else:
@@ -123,12 +167,37 @@ func _on_grid_cell_clicked(hex_pos: Vector2i):
 			_selected_placed_component = component
 			_update_info_panel_placed(component)
 
+func _on_hire_crew_pressed():
+	var selected_idx = crew_options.selected
+	if selected_idx < 0 or selected_idx >= _available_crew.size():
+		return
+
+	var crew = _available_crew[selected_idx]
+	if GameStore.add_crew_member(crew):
+		_available_crew.remove_at(selected_idx)
+		_populate_crew_options()
+		_sync_crew_list()
+
+func _on_mav_toggled(toggled: bool):
+	GameStore.update_cargo("mav", toggled)
+
+func _on_rovers_toggled(toggled: bool):
+	GameStore.update_cargo("rovers", 2 if toggled else 0)
+
+func _sync_crew_list():
+	crew_list.clear()
+	for crew in GameStore.get_crew():
+		var specialty = CrewLogic.get_specialty_name(crew.specialty)
+		crew_list.add_item("%s - %s" % [crew.display_name, specialty])
+
 # ============================================================================
 # STORE EVENT HANDLERS (reactive)
 # ============================================================================
 
 func _on_state_changed(_new_state: Dictionary):
 	_sync_ui_to_state()
+	_sync_crew_list()
+	_sync_cargo_ui()
 
 func _on_log_entry_added(entry: Dictionary):
 	var color = "white"
@@ -163,6 +232,9 @@ func _sync_ui_to_state():
 	readiness_bar.value = readiness
 	launch_button.disabled = not check.can_launch
 
+	# Disable hire button if max crew
+	hire_button.disabled = GameStore.get_crew().size() >= 4
+
 	# Update hex grid display
 	hex_grid_view.sync_grid(GameStore.get_hex_grid())
 
@@ -175,6 +247,11 @@ func _sync_ui_to_state():
 		if not updated.is_empty():
 			_selected_placed_component = updated
 			_update_info_panel_placed(updated)
+
+func _sync_cargo_ui():
+	var cargo = GameStore.get_cargo()
+	mav_check.set_pressed_no_signal(cargo.get("mav", false))
+	rovers_check.set_pressed_no_signal(cargo.get("rovers", 0) > 0)
 
 # ============================================================================
 # INFO PANEL RENDERING

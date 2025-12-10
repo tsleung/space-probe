@@ -94,6 +94,69 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
+[node name="Crew" type="Panel" parent="HBoxContainer/SidePanel/TabContainer"]
+visible = false
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="HBoxContainer/SidePanel/TabContainer/Crew"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 5.0
+offset_top = 5.0
+offset_right = -5.0
+offset_bottom = -5.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="CrewList" type="ItemList" parent="HBoxContainer/SidePanel/TabContainer/Crew/VBox"]
+custom_minimum_size = Vector2(0, 120)
+layout_mode = 2
+
+[node name="HireLabel" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Crew/VBox"]
+layout_mode = 2
+text = "Hire Crew:"
+
+[node name="CrewOptions" type="OptionButton" parent="HBoxContainer/SidePanel/TabContainer/Crew/VBox"]
+layout_mode = 2
+
+[node name="HireButton" type="Button" parent="HBoxContainer/SidePanel/TabContainer/Crew/VBox"]
+layout_mode = 2
+text = "Hire Selected Crew"
+
+[node name="Cargo" type="Panel" parent="HBoxContainer/SidePanel/TabContainer"]
+visible = false
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="HBoxContainer/SidePanel/TabContainer/Cargo"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 5.0
+offset_top = 5.0
+offset_right = -5.0
+offset_bottom = -5.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="CargoLabel" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+text = "Essential Cargo:"
+
+[node name="MAVCheck" type="CheckBox" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+text = "MAV (Mars Ascent Vehicle) - Required"
+
+[node name="RoversCheck" type="CheckBox" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+text = "Surface Rovers (2)"
+
+[node name="SuppliesLabel" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+text = "Supplies loaded automatically"
+
 [node name="InfoPanel" type="Panel" parent="HBoxContainer/SidePanel"]
 visible = false
 custom_minimum_size = Vector2(0, 200)

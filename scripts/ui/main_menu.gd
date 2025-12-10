@@ -25,6 +25,12 @@ func _on_load_pressed():
 				get_tree().change_scene_to_file("res://scenes/phases/ship_building.tscn")
 			GameTypes.GamePhase.TRAVEL_TO_MARS:
 				get_tree().change_scene_to_file("res://scenes/phases/travel.tscn")
+			GameTypes.GamePhase.MARS_BASE:
+				get_tree().change_scene_to_file("res://scenes/phases/mars_base.tscn")
+			GameTypes.GamePhase.TRAVEL_TO_EARTH:
+				get_tree().change_scene_to_file("res://scenes/phases/return_journey.tscn")
+			GameTypes.GamePhase.GAME_OVER:
+				get_tree().change_scene_to_file("res://scenes/ui/game_over.tscn")
 			_:
 				get_tree().change_scene_to_file("res://scenes/phases/ship_building.tscn")
 

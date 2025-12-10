@@ -42,6 +42,7 @@ enum ActionType {
 	# Mars Base
 	START_MARS_OPERATIONS,
 	CONDUCT_EXPERIMENT,
+	ADVANCE_MARS_SOL,
 
 	# Events
 	APPLY_EVENT,
@@ -99,6 +100,8 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_start_mars_operations(state, action)
 		ActionType.CONDUCT_EXPERIMENT:
 			return _reduce_conduct_experiment(state, action)
+		ActionType.ADVANCE_MARS_SOL:
+			return _reduce_advance_mars_sol(state, action)
 		_:
 			return state
 
@@ -238,6 +241,11 @@ static func action_conduct_experiment(experiment_id: String, crew_id: String, ra
 		"experiment_id": experiment_id,
 		"crew_id": crew_id,
 		"random_value": random_value
+	}
+
+static func action_advance_mars_sol() -> Dictionary:
+	return {
+		"type": ActionType.ADVANCE_MARS_SOL
 	}
 
 # ============================================================================
@@ -736,3 +744,7 @@ static func _reduce_conduct_experiment(state: Dictionary, action: Dictionary) ->
 		"crew": new_crew,
 		"mission_log": new_log
 	})
+
+static func _reduce_advance_mars_sol(state: Dictionary, _action: Dictionary) -> Dictionary:
+	var current_sol = state.get("mars_sol", 0)
+	return GameTypes.with_field(state, "mars_sol", current_sol + 1)
