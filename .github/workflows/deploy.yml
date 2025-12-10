@@ -1,0 +1,106 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: 4.3
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup export templates
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable/* ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+
+      - name: Create export presets
+        run: |
+          mkdir -p build/web
+          cat > export_presets.cfg << 'EOF'
+          [preset.0]
+
+          name="Web"
+          platform="Web"
+          runnable=true
+          dedicated_server=false
+          custom_features=""
+          export_filter="all_resources"
+          include_filter=""
+          exclude_filter=""
+          export_path="build/web/index.html"
+          encryption_include_filters=""
+          encryption_exclude_filters=""
+          encrypt_pck=false
+          encrypt_directory=false
+
+          [preset.0.options]
+
+          custom_template/debug=""
+          custom_template/release=""
+          variant/extensions_support=false
+          vram_texture_compression/for_desktop=true
+          vram_texture_compression/for_mobile=false
+          html/export_icon=true
+          html/custom_html_shell=""
+          html/head_include=""
+          html/canvas_resize_policy=2
+          html/focus_canvas_on_start=true
+          html/experimental_virtual_keyboard=false
+          progressive_web_app/enabled=true
+          progressive_web_app/offline_page=""
+          progressive_web_app/display=1
+          progressive_web_app/orientation=0
+          progressive_web_app/icon_144x144=""
+          progressive_web_app/icon_180x180=""
+          progressive_web_app/icon_512x512=""
+          progressive_web_app/background_color=Color(0, 0, 0, 1)
+          EOF
+
+      - name: Build Web export
+        run: |
+          godot --headless --verbose --export-release "Web" build/web/index.html
+
+      - name: Add coi-serviceworker for SharedArrayBuffer
+        run: |
+          cd build/web
+          # Download coi-serviceworker to enable SharedArrayBuffer
+          curl -L https://raw.githubusercontent.com/nicovank/coi-serviceworker/master/coi-serviceworker.min.js -o coi-serviceworker.js
+          # Inject the script into index.html
+          sed -i 's/<head>/<head><script src="coi-serviceworker.js"><\/script>/' index.html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
