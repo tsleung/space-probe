@@ -639,6 +639,10 @@ static func get_available_activities() -> Array:
 static func apply_activity(crew: Dictionary, activity: Dictionary) -> Dictionary:
 	var updates = {}
 
+	# Track hours used
+	var hours = activity.get("hours", 0)
+	updates["hours_used_today"] = crew.get("hours_used_today", 0) + hours
+
 	if activity.has("fatigue_change"):
 		updates["fatigue"] = clampf(crew.fatigue + activity.fatigue_change, 0.0, 100.0)
 
@@ -679,12 +683,17 @@ static func apply_repair_activity(
 	if worst_component == null:
 		return {"success": false, "reason": "No components need repair"}
 
-	# Calculate repair amount based on engineer skill
+	# Calculate repair amount based on engineer skill (SIGNIFICANT impact!)
 	var skill = crew.get("skill_engineering", 50.0)
-	var base_repair = 15.0
-	var skill_bonus = (skill - 50.0) / 50.0 * 10.0  # -10 to +10 based on skill
+	var base_repair = 10.0  # Lower base, more skill dependent
+	var skill_bonus = (skill - 50.0) / 50.0 * 25.0  # -25 to +25 based on skill (unskilled: 5-15, expert: 25-45)
 	var random_factor = 0.8 + random_value * 0.4  # 0.8 to 1.2
-	var repair_amount = (base_repair + skill_bonus) * random_factor
+
+	# Specialty bonus - engineers get 20% more effectiveness
+	var specialty = crew.get("specialty", -1)
+	var specialty_mult = 1.2 if specialty == GameTypes.CrewSpecialty.ENGINEER else 1.0
+
+	var repair_amount = (base_repair + skill_bonus) * random_factor * specialty_mult
 
 	# Apply repair
 	var new_components = components.duplicate()
@@ -717,16 +726,23 @@ static func apply_medical_activity(
 	var updates = {}
 	var results = []
 
-	# Heal health
-	var base_heal = 25.0
-	var skill_bonus = (medic_skill - 50.0) / 50.0 * 15.0  # -15 to +15
-	var heal_amount = (base_heal + skill_bonus) * (0.8 + random_value * 0.4)
+	# Specialty bonus - medics get 25% more effectiveness
+	var specialty = medic.get("specialty", -1)
+	var specialty_mult = 1.25 if specialty == GameTypes.CrewSpecialty.MEDIC else 1.0
+
+	# Heal health (SIGNIFICANT skill impact!)
+	var base_heal = 15.0  # Lower base, more skill dependent
+	var skill_bonus = (medic_skill - 50.0) / 50.0 * 25.0  # -25 to +25 (unskilled: 5-20, expert: 30-50)
+	var heal_amount = (base_heal + skill_bonus) * (0.8 + random_value * 0.4) * specialty_mult
 	updates["health"] = minf(100.0, patient.health + heal_amount)
 	results.append("Restored %.0f health" % heal_amount)
 
-	# Try to cure sickness
+	# Try to cure sickness (skill matters A LOT!)
 	if patient.is_sick:
-		var cure_chance = 0.5 + (medic_skill / 200.0)  # 50-100% based on skill
+		# Cure chance: 30% base, up to 90% with high skill (non-medics struggle)
+		var cure_chance = 0.3 + (medic_skill / 100.0) * 0.6  # 30-90% based on skill
+		if specialty == GameTypes.CrewSpecialty.MEDIC:
+			cure_chance = minf(0.95, cure_chance + 0.15)  # Medics get +15% cure chance
 		if random_value < cure_chance:
 			updates["is_sick"] = false
 			updates["sickness_type"] = ""

@@ -31,6 +31,15 @@ extends Control
 @onready var speed_label: Label = $BottomBar/SpeedLabel
 @onready var return_button: Button = $BottomBar/ReturnButton
 
+# Departure checklist panel
+@onready var departure_panel: Panel = $DeparturePanel
+@onready var departure_checklist: RichTextLabel = $DeparturePanel/VBox/ChecklistText
+@onready var confirm_departure_button: Button = $DeparturePanel/VBox/ConfirmButton
+@onready var cancel_departure_button: Button = $DeparturePanel/VBox/CancelButton
+
+# Event popup
+@onready var event_popup = $EventPopup
+
 # ============================================================================
 # LOCAL STATE
 # ============================================================================
@@ -40,12 +49,18 @@ var _selected_experiment: Dictionary = {}
 var _auto_advance: bool = false
 var _auto_advance_timer: float = 0.0
 var _auto_advance_speed: float = 0.2
+var _departure_panel_open: bool = false
+var _event_paused: bool = false
+var _pending_event: Dictionary = {}
+var _triggered_events: Array = []
+var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # ============================================================================
 # LIFECYCLE
 # ============================================================================
 
 func _ready():
+	_rng.seed = int(Time.get_unix_time_from_system())
 	_connect_signals()
 	_populate_experiments()
 	_populate_activities()
@@ -56,8 +71,12 @@ func _ready():
 	if GameStore.get_mars_sol() == 0:
 		GameStore.start_mars_operations()
 
+	# Hide departure panel initially
+	if departure_panel:
+		departure_panel.visible = false
+
 func _process(delta: float):
-	if _auto_advance:
+	if _auto_advance and not _event_paused:
 		_auto_advance_timer += delta
 		if _auto_advance_timer >= _auto_advance_speed:
 			_auto_advance_timer = 0.0
@@ -77,6 +96,17 @@ func _connect_signals():
 	run_experiment_button.pressed.connect(_on_run_experiment)
 	assign_button.pressed.connect(_on_assign_activity)
 	activity_list.item_selected.connect(_on_activity_selected)
+
+	# Connect departure panel buttons if they exist
+	if confirm_departure_button:
+		confirm_departure_button.pressed.connect(_on_confirm_departure)
+	if cancel_departure_button:
+		cancel_departure_button.pressed.connect(_on_cancel_departure)
+
+	# Connect event popup signals
+	if event_popup:
+		event_popup.choice_made.connect(_on_event_choice_made)
+		event_popup.popup_closed.connect(_on_event_popup_closed)
 
 func _init_log():
 	event_log.clear()
@@ -264,18 +294,187 @@ func _sync_auto_ui():
 	auto_button.text = "Stop" if _auto_advance else "Auto"
 
 func _check_mars_events():
-	var rng = RandomNumberGenerator.new()
-	rng.seed = int(Time.get_unix_time_from_system())
 	var state = GameStore.get_state()
 	var sol = state.get("mars_sol", 1)
-	var event_result = MarsLogic.check_daily_event(state, sol, rng.randf(), rng.randf(), rng.randf())
+
+	# Check for interactive event (Oregon Trail style)
+	if InteractiveEvents.should_event_trigger(GameTypes.GamePhase.MARS_BASE, sol, _rng.randf()):
+		var event = InteractiveEvents.select_event(GameTypes.GamePhase.MARS_BASE, _rng.randf())
+
+		# Don't repeat same event type too often
+		if not event.is_empty() and not event.id in _triggered_events:
+			_show_interactive_event(event)
+			_triggered_events.append(event.id)
+
+			# Clear old triggered events after a while
+			if _triggered_events.size() > 5:
+				_triggered_events.pop_front()
+			return  # Don't also check for MarsLogic events
+
+	# Fallback to MarsLogic events (non-interactive)
+	var event_result = MarsLogic.check_daily_event(state, sol, _rng.randf(), _rng.randf(), _rng.randf())
 	if event_result.triggered and event_result.event:
 		GameStore.add_log(event_result.event.description, "event")
 
+func _show_interactive_event(event: Dictionary):
+	_event_paused = true
+	_pending_event = event
+	if event_popup:
+		event_popup.show_event(event)
+	GameStore.add_log("[color=yellow]EVENT: %s[/color]" % event.title, "event")
+
+func _on_event_choice_made(event: Dictionary, choice_id: String):
+	# Apply the choice effects using InteractiveEvents pure function
+	var new_state = InteractiveEvents.apply_choice_effects(GameStore.get_state(), event, choice_id)
+
+	# Find the choice for logging
+	var choice_text = ""
+	for choice in event.choices:
+		if choice.id == choice_id:
+			choice_text = choice.consequence_text
+			break
+
+	# Log the choice
+	GameStore.add_log("You chose: %s" % choice_text, "info")
+
+	# Apply state changes through GameStore
+	_apply_event_state_changes(new_state)
+
+func _on_event_popup_closed():
+	_event_paused = false
+	_pending_event = {}
+	_sync_ui()
+
+func _apply_event_state_changes(new_state: Dictionary):
+	# Apply crew changes
+	if new_state.has("crew"):
+		for i in range(new_state.crew.size()):
+			var crew_member = new_state.crew[i]
+			GameStore.dispatch(GameReducer.action_update_crew(crew_member.id, crew_member))
+
+	# Apply supply changes
+	if new_state.has("supplies"):
+		GameStore.set_supplies(new_state.supplies)
+
+	# Apply component changes
+	if new_state.has("ship_components"):
+		for comp in new_state.ship_components:
+			GameStore.dispatch(GameReducer.action_update_component(comp.hex_position, comp))
+
+	# Apply samples changes
+	if new_state.has("samples_collected"):
+		var samples = new_state.samples_collected
+		for sample_type in samples.keys():
+			var current = GameStore.get_samples_collected().get(sample_type, 0)
+			var diff = samples[sample_type] - current
+			if diff > 0:
+				GameStore.collect_samples(sample_type, diff)
+
+	# Apply science points
+	if new_state.has("science_points"):
+		GameStore.add_log("Earned %d science points!" % new_state.get("science_points", 0), "success")
+
 func _on_return_to_earth():
+	# Show departure checklist panel
+	_show_departure_panel()
+
+func _show_departure_panel():
+	if not departure_panel:
+		# If no panel exists, just do the transition directly
+		_do_departure()
+		return
+
+	_departure_panel_open = true
+	departure_panel.visible = true
+
+	# Build checklist
+	var state = GameStore.get_state()
+	var mission_check = MarsLogic.check_mission_complete(state)
+	var samples = GameStore.get_samples_collected()
+	var crew = GameStore.get_crew()
+	var components = GameStore.get_components()
+
+	var text = "[center][b]DEPARTURE CHECKLIST[/b][/center]\n\n"
+
+	# MAV Status
+	var has_mav = state.get("cargo_manifest", {}).get("mav", false)
+	var mav_color = "green" if has_mav else "red"
+	text += "[color=%s]%s MAV (Mars Ascent Vehicle)[/color]\n" % [mav_color, "[X]" if has_mav else "[ ]"]
+
+	# Crew alive check
+	var alive_count = 0
+	for member in crew:
+		if member.health > 0:
+			alive_count += 1
+	var crew_color = "green" if alive_count > 0 else "red"
+	text += "[color=%s][X] Crew for return: %d alive[/color]\n" % [crew_color, alive_count]
+
+	# Experiments check
+	var exp_done = mission_check.experiments_done >= 2
+	var exp_color = "green" if exp_done else "yellow"
+	text += "[color=%s]%s Minimum experiments: %d/2[/color]\n" % [exp_color, "[X]" if exp_done else "[ ]", mission_check.experiments_done]
+
+	# Samples check
+	var total_samples = samples.get("soil", 0) + samples.get("ice", 0) + samples.get("atmosphere", 0)
+	var samples_ok = total_samples >= 10
+	var samples_color = "green" if samples_ok else "yellow"
+	text += "[color=%s]%s Sample collection: %d/10[/color]\n" % [samples_color, "[X]" if samples_ok else "[ ]", total_samples]
+
+	# Ship systems check
+	var critical_systems_ok = true
+	var heat_shield_quality = 50.0
+	var nav_quality = 50.0
+
+	for comp in components:
+		if comp.id == "heat_shield":
+			heat_shield_quality = comp.quality
+		if comp.id == "navigation" or comp.id == "computer":
+			nav_quality = comp.quality
+
+	var heat_ok = heat_shield_quality >= 40.0
+	var heat_color = "green" if heat_ok else "red"
+	text += "[color=%s]%s Heat shield integrity: %.0f%%[/color]\n" % [heat_color, "[X]" if heat_ok else "[!]", heat_shield_quality]
+
+	var nav_ok = nav_quality >= 40.0
+	var nav_color = "green" if nav_ok else "yellow"
+	text += "[color=%s]%s Navigation systems: %.0f%%[/color]\n" % [nav_color, "[X]" if nav_ok else "[!]", nav_quality]
+
+	text += "\n"
+
+	# Warning if systems are degraded
+	if not heat_ok:
+		text += "[color=red]WARNING: Heat shield is critically degraded!\nReentry survival is at risk![/color]\n\n"
+	elif heat_shield_quality < 70.0:
+		text += "[color=yellow]CAUTION: Heat shield shows wear.\nReentry may be turbulent.[/color]\n\n"
+
+	# Final check
+	if mission_check.can_return:
+		text += "[color=green]Ready for departure.[/color]\n"
+		text += "Return journey: ~%d days" % int(state.get("travel_total_days", 180) * 1.1)
+		confirm_departure_button.disabled = false
+	else:
+		text += "[color=red]Cannot depart yet.[/color]\n"
+		text += "Complete more objectives."
+		confirm_departure_button.disabled = true
+
+	departure_checklist.text = text
+
+func _on_confirm_departure():
+	_departure_panel_open = false
+	if departure_panel:
+		departure_panel.visible = false
+	_do_departure()
+
+func _on_cancel_departure():
+	_departure_panel_open = false
+	if departure_panel:
+		departure_panel.visible = false
+
+func _do_departure():
 	var mission_check = MarsLogic.check_mission_complete(GameStore.get_state())
 	if mission_check.can_return:
 		GameStore.add_log("Initiating Mars departure sequence...", "success")
+		GameStore.add_log("MAV lifting off from Martian surface!", "event")
 		GameStore.change_phase(GameTypes.GamePhase.TRAVEL_TO_EARTH)
 
 func _on_experiment_selected(index: int):

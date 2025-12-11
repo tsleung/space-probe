@@ -68,10 +68,11 @@ static func generate_travel_event(state, event_roll, type_roll, severity_roll) -
 ## Game Flow
 
 1. **MAIN_MENU** → New Game starts at SHIP_BUILDING
-2. **SHIP_BUILDING** → Place components on hex grid, select engine, recruit crew
-3. **TRAVEL_TO_MARS** → Daily events, crew management, resource consumption
-4. **MARS_BASE** → Surface operations (not yet implemented)
-5. **TRAVEL_TO_EARTH** → Return journey (not yet implemented)
+2. **SHIP_BUILDING** → Place components on hex grid, select engine, recruit crew, load supplies
+3. **TRAVEL_TO_MARS** → Daily events, crew management, supply consumption, interactive events
+4. **MARS_BASE** → Surface operations, experiments, sample collection, departure checklist
+5. **TRAVEL_TO_EARTH** → Return journey with scarce supplies, reentry sequence with quality checks
+6. **GAME_OVER** → Mission results with ending tiers (Gold/Silver/Bronze/Pyrrhic/Failure)
 
 ## Hex Grid System
 

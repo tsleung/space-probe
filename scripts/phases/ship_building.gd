@@ -30,6 +30,7 @@ extends Control
 @onready var med_kits_spin: SpinBox = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/MedKitsHBox/MedKitsSpin
 @onready var med_kits_cost: Label = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/MedKitsHBox/MedKitsCost
 @onready var supply_cost_label: Label = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/SupplyCostLabel
+@onready var survival_preview: RichTextLabel = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/SurvivalPreview
 @onready var info_panel: Panel = $HBoxContainer/SidePanel/InfoPanel
 @onready var info_name: Label = $HBoxContainer/SidePanel/InfoPanel/VBox/NameLabel
 @onready var info_desc: RichTextLabel = $HBoxContainer/SidePanel/InfoPanel/VBox/DescLabel
@@ -45,6 +46,10 @@ extends Control
 @onready var readiness_bar: ProgressBar = $BottomBar/ReadinessBar
 @onready var log_text: RichTextLabel = $HBoxContainer/SidePanel/LogPanel/LogText
 @onready var launch_sequence = $LaunchSequence
+@onready var event_popup = $EventPopup
+@onready var primary_hint: RichTextLabel = $HBoxContainer/SidePanel/HintsPanel/HintsVBox/PrimaryHint
+@onready var secondary_hints: Label = $HBoxContainer/SidePanel/HintsPanel/HintsVBox/SecondaryHints
+@onready var tab_container: TabContainer = $HBoxContainer/SidePanel/TabContainer
 
 # ============================================================================
 # LOCAL UI STATE (not game state)
@@ -62,6 +67,11 @@ var _auto_advance: bool = false
 var _auto_advance_timer: float = 0.0
 var _auto_advance_speed: float = 0.2  # seconds per day
 
+# Event state
+var _event_paused: bool = false
+var _pending_event: Dictionary = {}
+var _triggered_events: Array = []
+
 # ============================================================================
 # LIFECYCLE
 # ============================================================================
@@ -73,13 +83,14 @@ func _ready():
 	_connect_signals()
 	_sync_ui_to_state()
 	_update_supply_display()  # Initialize supply cost display
+	_update_hints()  # Initialize hints panel
 
 func _process(delta: float):
-	if _auto_advance:
+	if _auto_advance and not _event_paused:
 		_auto_advance_timer += delta
 		if _auto_advance_timer >= _auto_advance_speed:
 			_auto_advance_timer = 0.0
-			GameStore.advance_day(1)
+			_advance_day_with_events()
 
 func _load_catalog():
 	_available_components = ComponentLogic.get_all_components()
@@ -89,12 +100,12 @@ func _load_catalog():
 func _populate_lists():
 	component_list.clear()
 	for comp in _available_components:
-		component_list.add_item("%s ($%s)" % [comp.display_name, _format_money(comp.base_cost)])
+		component_list.add_item("%s ($%s)" % [comp.display_name, GameTypes.format_money(comp.base_cost)])
 
 	engine_list.clear()
 	for engine in _available_engines:
 		var suffix = " [Space Assembly]" if engine.requires_space_assembly else ""
-		engine_list.add_item("%s ($%s)%s" % [engine.display_name, _format_money(engine.base_cost), suffix])
+		engine_list.add_item("%s ($%s)%s" % [engine.display_name, GameTypes.format_money(engine.base_cost), suffix])
 
 	_populate_crew_options()
 
@@ -144,6 +155,11 @@ func _connect_signals():
 
 	# Launch sequence
 	launch_sequence.sequence_complete.connect(_on_launch_sequence_complete)
+
+	# Event popup signals
+	if event_popup:
+		event_popup.choice_made.connect(_on_event_choice_made)
+		event_popup.popup_closed.connect(_on_event_popup_closed)
 
 # ============================================================================
 # UI EVENT HANDLERS
@@ -202,10 +218,88 @@ func _on_launch_sequence_complete():
 	get_tree().change_scene_to_file("res://scenes/phases/travel.tscn")
 
 func _on_advance_day_pressed():
-	GameStore.advance_day(1)
+	_advance_day_with_events()
 
 func _on_advance_week_pressed():
-	GameStore.advance_day(7)
+	for i in range(7):
+		if _event_paused:
+			break
+		_advance_day_with_events()
+
+func _advance_day_with_events():
+	GameStore.advance_day(1)
+	_check_for_interactive_event()
+
+func _check_for_interactive_event():
+	var day = GameStore.get_current_day()
+
+	# Check if we should trigger an interactive event (lower frequency in ship building)
+	if InteractiveEvents.should_event_trigger(GameTypes.GamePhase.SHIP_BUILDING, day, _rng.randf()):
+		var event = InteractiveEvents.select_event(GameTypes.GamePhase.SHIP_BUILDING, _rng.randf())
+
+		# Don't repeat same event type too often
+		if not event.is_empty() and not event.id in _triggered_events:
+			_show_interactive_event(event)
+			_triggered_events.append(event.id)
+
+			# Clear old triggered events after a while
+			if _triggered_events.size() > 5:
+				_triggered_events.pop_front()
+
+func _show_interactive_event(event: Dictionary):
+	_event_paused = true
+	_pending_event = event
+	if event_popup:
+		event_popup.show_event(event)
+	GameStore.add_log("[color=yellow]EVENT: %s[/color]" % event.title, "event")
+
+func _on_event_choice_made(event: Dictionary, choice_id: String):
+	# Apply the choice effects using InteractiveEvents pure function
+	var new_state = InteractiveEvents.apply_choice_effects(GameStore.get_state(), event, choice_id)
+
+	# Find the choice for logging
+	var choice_text = ""
+	for choice in event.choices:
+		if choice.id == choice_id:
+			choice_text = choice.consequence_text
+			break
+
+	# Log the choice
+	GameStore.add_log("You chose: %s" % choice_text, "info")
+
+	# Apply state changes through GameStore
+	_apply_event_state_changes(new_state)
+
+func _on_event_popup_closed():
+	_event_paused = false
+	_pending_event = {}
+	_sync_ui_to_state()
+
+func _apply_event_state_changes(new_state: Dictionary):
+	# Apply crew changes
+	if new_state.has("crew"):
+		for i in range(new_state.crew.size()):
+			var crew_member = new_state.crew[i]
+			GameStore.dispatch(GameReducer.action_update_crew(crew_member.id, crew_member))
+
+	# Apply component changes
+	if new_state.has("ship_components"):
+		for comp in new_state.ship_components:
+			GameStore.dispatch(GameReducer.action_update_component(comp.hex_position, comp))
+
+	# Apply budget changes
+	if new_state.has("budget"):
+		var current = GameStore.get_budget()
+		var diff = new_state.budget - current
+		if diff > 0:
+			GameStore.dispatch(GameReducer.action_add_budget(diff))
+		elif diff < 0:
+			GameStore.dispatch(GameReducer.action_spend_budget(-diff))
+
+	# Apply days lost (skip ahead)
+	if new_state.has("days_lost") and new_state.days_lost > 0:
+		GameStore.advance_day(new_state.days_lost)
+		GameStore.add_log("Lost %d days due to event." % new_state.days_lost, "event")
 
 func _on_auto_advance_toggled(toggled: bool):
 	_auto_advance = toggled
@@ -265,22 +359,23 @@ func _update_supply_display():
 	water_value_label.text = "%d%%" % int(water_slider.value)
 	oxygen_value_label.text = "%d%%" % int(oxygen_slider.value)
 
-	# Calculate costs
-	# Spare parts: $1M each
-	# Med kits: $1M each
-	# Extra supplies beyond 100%: $100K per percentage point per resource
+	# Calculate costs - EXPENSIVE! Real trade-offs required
+	# Spare parts: $2M each (critical for repairs)
+	# Med kits: $2M each (critical for crew survival)
+	# Base supply cost: $30M for 100% supplies
+	# Extra supplies: $500K/% food, $300K/% water, $400K/% oxygen
 	var spare_parts_count = int(spare_parts_spin.value)
 	var med_kits_count = int(med_kits_spin.value)
 
-	var spare_cost = spare_parts_count * 1_000_000
-	var med_cost = med_kits_count * 1_000_000
+	var spare_cost = spare_parts_count * 2_000_000
+	var med_cost = med_kits_count * 2_000_000
 
-	# Supply costs - more than 100% costs extra, less than 100% saves money
-	var food_extra = (food_slider.value - 100) * 100_000  # $100K per % over 100%
-	var water_extra = (water_slider.value - 100) * 50_000  # $50K per % (water is cheaper)
-	var oxygen_extra = (oxygen_slider.value - 100) * 80_000  # $80K per %
+	# Supply costs - significant investment required
+	var food_extra = (food_slider.value - 100) * 500_000  # $500K per % over 100%
+	var water_extra = (water_slider.value - 100) * 300_000  # $300K per %
+	var oxygen_extra = (oxygen_slider.value - 100) * 400_000  # $400K per %
 
-	var base_supply_cost = 10_000_000  # $10M base for minimum supplies
+	var base_supply_cost = 30_000_000  # $30M base for minimum supplies
 	var supply_total = base_supply_cost + food_extra + water_extra + oxygen_extra
 
 	var total_cost = spare_cost + med_cost + supply_total
@@ -290,10 +385,13 @@ func _update_supply_display():
 
 	if total_cost >= 0:
 		supply_cost_label.text = "Supply Cost: $%dM" % (total_cost / 1_000_000)
-		supply_cost_label.modulate = Color.WHITE
+		if total_cost > 50_000_000:
+			supply_cost_label.modulate = Color.ORANGE  # Warn about high cost
+		else:
+			supply_cost_label.modulate = Color.WHITE
 	else:
-		supply_cost_label.text = "Supply Savings: -$%dM (risky!)" % (absi(int(total_cost)) / 1_000_000)
-		supply_cost_label.modulate = Color.ORANGE
+		supply_cost_label.text = "Supply Savings: -$%dM (DANGEROUS!)" % (absi(int(total_cost)) / 1_000_000)
+		supply_cost_label.modulate = Color.RED
 
 	# Store supply settings for launch
 	_supply_settings = {
@@ -305,7 +403,71 @@ func _update_supply_display():
 		"total_cost": total_cost
 	}
 
+	# Update survival preview
+	_update_survival_preview()
+
 var _supply_settings: Dictionary = {}
+
+func _update_survival_preview():
+	# Calculate estimated journey length based on selected engine
+	var engine = GameStore.get_engine()
+	var ship_mass = ShipLogic.calc_total_mass(GameStore.get_components())
+	var days_past = maxi(0, GameStore.get_current_day() - GameStore.get_launch_window_day())
+
+	var travel_days = TravelLogic.calc_travel_days(engine, ship_mass, days_past)
+
+	# Calculate supply duration with selected settings
+	var crew_count = GameStore.get_crew().size()
+	if crew_count == 0:
+		crew_count = 4  # Assume full crew for preview
+
+	# Get daily consumption (assume 70% life support quality)
+	var daily = TravelLogic.calc_daily_consumption(crew_count, 70.0)
+
+	# Calculate base supplies for 100% (180 day reference journey)
+	var base_journey_days = 180
+	var base_food = daily.food_kg * base_journey_days
+	var base_water = daily.water_kg * base_journey_days
+	var base_oxygen = daily.oxygen_kg * base_journey_days
+
+	# Apply player's supply percentages
+	var actual_food = base_food * (food_slider.value / 100.0)
+	var actual_water = base_water * (water_slider.value / 100.0)
+	var actual_oxygen = base_oxygen * (oxygen_slider.value / 100.0)
+
+	# Calculate how many days each supply lasts
+	var food_days = actual_food / daily.food_kg if daily.food_kg > 0 else 999
+	var water_days = actual_water / daily.water_kg if daily.water_kg > 0 else 999
+	var oxygen_days = actual_oxygen / daily.oxygen_kg if daily.oxygen_kg > 0 else 999
+
+	# The limiting factor is the supply that runs out first
+	var min_supply_days = mini(int(food_days), mini(int(water_days), int(oxygen_days)))
+	var margin_days = min_supply_days - travel_days
+
+	# Build the preview text
+	var text = "[b]Journey Preview[/b]\n"
+	text += "Est. travel: %d days\n" % travel_days
+
+	# Show supply days with color coding
+	var food_color = "green" if food_days >= travel_days + 14 else ("yellow" if food_days >= travel_days else "red")
+	var water_color = "green" if water_days >= travel_days + 14 else ("yellow" if water_days >= travel_days else "red")
+	var oxygen_color = "green" if oxygen_days >= travel_days + 14 else ("yellow" if oxygen_days >= travel_days else "red")
+
+	text += "[color=%s]Food: %d days[/color]\n" % [food_color, int(food_days)]
+	text += "[color=%s]Water: %d days[/color]\n" % [water_color, int(water_days)]
+	text += "[color=%s]Oxygen: %d days[/color]\n" % [oxygen_color, int(oxygen_days)]
+
+	# Show overall margin
+	if margin_days >= 14:
+		text += "\n[color=green]Margin: +%d days (SAFE)[/color]" % margin_days
+	elif margin_days >= 7:
+		text += "\n[color=yellow]Margin: +%d days (TIGHT)[/color]" % margin_days
+	elif margin_days >= 0:
+		text += "\n[color=orange]Margin: +%d days (RISKY!)[/color]" % margin_days
+	else:
+		text += "\n[color=red]DEFICIT: %d days (DEATH!)[/color]" % abs(margin_days)
+
+	survival_preview.text = text
 
 func _on_crew_option_selected(index: int):
 	if index >= 0 and index < _available_crew.size():
@@ -360,6 +522,8 @@ func _on_state_changed(_new_state: Dictionary):
 	_sync_ui_to_state()
 	_sync_crew_list()
 	_sync_cargo_ui()
+	_update_survival_preview()  # Recalculate when engine/crew changes
+	_update_hints()  # Update guidance panel
 
 func _on_log_entry_added(entry: Dictionary):
 	var color = "white"
@@ -381,7 +545,7 @@ func _sync_ui_to_state():
 	var readiness = GameStore.get_readiness()
 	var check = GameStore.get_launch_check()
 
-	budget_label.text = "Budget: $%s" % _format_money(budget)
+	budget_label.text = "Budget: $%s" % GameTypes.format_money(budget)
 	days_label.text = "Day: %d" % day
 
 	if days_to_launch >= 0:
@@ -425,7 +589,7 @@ func _update_info_panel_catalog(item: Dictionary):
 	info_desc.text = item.description
 
 	var stats = ""
-	stats += "[b]Cost:[/b] $%s\n" % _format_money(item.base_cost)
+	stats += "[b]Cost:[/b] $%s\n" % GameTypes.format_money(item.base_cost)
 	stats += "[b]Build Time:[/b] %d days\n" % item.build_days
 	stats += "[b]Mass:[/b] %.0f kg\n" % item.mass_kg
 	stats += "[b]Size:[/b] %d hex(es)\n" % item.hex_size
@@ -464,17 +628,120 @@ func _update_info_panel_placed(item: Dictionary):
 	build_button.visible = false
 	test_button.visible = item.is_built
 	test_button.disabled = item.test_cost_per_cycle > GameStore.get_budget()
-	test_button.text = "Test ($%s, %dd)" % [_format_money(item.test_cost_per_cycle), item.test_days_per_cycle]
+	test_button.text = "Test ($%s, %dd)" % [GameTypes.format_money(item.test_cost_per_cycle), item.test_days_per_cycle]
 
 # ============================================================================
-# UTILITIES
+# HINTS PANEL (contextual guidance)
 # ============================================================================
 
-static func _format_money(amount: int) -> String:
-	if amount >= 1_000_000_000:
-		return "%.2fB" % (amount / 1_000_000_000.0)
-	elif amount >= 1_000_000:
-		return "%.1fM" % (amount / 1_000_000.0)
-	elif amount >= 1_000:
-		return "%.0fK" % (amount / 1_000.0)
-	return str(amount)
+func _update_hints():
+	var hints = _get_current_hints()
+
+	if hints.primary.is_empty():
+		primary_hint.text = "[color=green]Ready to launch![/color]"
+		secondary_hints.text = "Click LAUNCH when ready"
+	else:
+		primary_hint.text = hints.primary
+		secondary_hints.text = hints.secondary
+
+func _get_current_hints() -> Dictionary:
+	var components = GameStore.get_components()
+	var engine = GameStore.get_engine()
+	var crew = GameStore.get_crew()
+
+	# Check what's missing in priority order
+	var has_cockpit = _has_component(components, "cockpit")
+	var has_engine_mount = _has_component(components, "engine_mount")
+	var has_life_support = _has_component(components, "life_support")
+	var crew_rooms = _count_component(components, "crew_room")
+	var has_engine = not engine.is_empty()
+	var has_mav_dock = _has_component(components, "mav_dock")
+
+	# Priority 1: Cockpit (required first)
+	if not has_cockpit:
+		return {
+			"primary": "[b]1.[/b] Place a [color=yellow]Cockpit[/color] on the grid",
+			"secondary": "Select it from Components tab, then click grid"
+		}
+
+	# Priority 2: Engine Mount
+	if not has_engine_mount:
+		return {
+			"primary": "[b]2.[/b] Add an [color=yellow]Engine Mount[/color]",
+			"secondary": "Required to install your engine"
+		}
+
+	# Priority 3: Select an engine
+	if not has_engine:
+		return {
+			"primary": "[b]3.[/b] Choose an [color=yellow]Engine[/color]",
+			"secondary": "Go to Engines tab - this determines travel time"
+		}
+
+	# Priority 4: Life Support
+	if not has_life_support:
+		return {
+			"primary": "[b]4.[/b] Add [color=yellow]Life Support[/color]",
+			"secondary": "Critical for crew survival"
+		}
+
+	# Priority 5: Crew
+	if crew.size() == 0:
+		return {
+			"primary": "[b]5.[/b] Hire your [color=yellow]Crew[/color]",
+			"secondary": "Go to Crew tab - need at least 1"
+		}
+
+	# Priority 6: Crew Rooms (match crew count)
+	if crew_rooms < crew.size():
+		return {
+			"primary": "[b]6.[/b] Add [color=yellow]Crew Quarters[/color]",
+			"secondary": "Need %d more (1 per crew member)" % (crew.size() - crew_rooms)
+		}
+
+	# Priority 7: MAV Dock (for return trip)
+	if not has_mav_dock:
+		return {
+			"primary": "[b]7.[/b] Add [color=yellow]MAV Docking Bay[/color]",
+			"secondary": "Required for the return journey"
+		}
+
+	# Check for components still building
+	var building_count = 0
+	for comp in components:
+		if not comp.is_built:
+			building_count += 1
+
+	if building_count > 0:
+		return {
+			"primary": "[color=cyan]Waiting...[/color] %d component(s) building" % building_count,
+			"secondary": "Use +1 Day or Auto to advance time"
+		}
+
+	# Check for low quality components
+	var low_quality = []
+	for comp in components:
+		if comp.quality < 70:
+			low_quality.append(comp.display_name)
+
+	if low_quality.size() > 0:
+		return {
+			"primary": "[color=orange]Optional:[/color] Test low-quality parts",
+			"secondary": "%s at <70%% - click to test" % low_quality[0]
+		}
+
+	# All good!
+	return {"primary": "", "secondary": ""}
+
+func _has_component(components: Array, id: String) -> bool:
+	for comp in components:
+		if comp.id == id:
+			return true
+	return false
+
+func _count_component(components: Array, id: String) -> int:
+	var count = 0
+	for comp in components:
+		if comp.id == id:
+			count += 1
+	return count

@@ -602,6 +602,18 @@ static func _reduce_assign_activity(state: Dictionary, action: Dictionary) -> Di
 	if actor == null:
 		return state
 
+	# Check if crew member has enough hours for this activity
+	var hours_needed = activity.get("hours", 0)
+	var hours_used = actor.get("hours_used_today", 0)
+	var hours_available = actor.get("hours_per_day", 16) - hours_used
+
+	if hours_needed > hours_available:
+		var new_log = state.mission_log.duplicate()
+		new_log.append(GameTypes.create_log_entry(state.current_day,
+			"%s doesn't have enough time today (%d hours needed, %d available)" % [actor.display_name, hours_needed, hours_available],
+			"event"))
+		return GameTypes.with_field(state, "mission_log", new_log)
+
 	var updates = {}
 	var new_log = state.mission_log.duplicate()
 	var supplies = state.get("supplies", {}).duplicate()
@@ -746,12 +758,15 @@ static func _reduce_advance_travel_day(state: Dictionary, action: Dictionary) ->
 		"travel_day": travel_day
 	}
 
-	# Update crew daily
+	# Update crew daily and reset their time budget
 	var new_crew: Array = []
 	var rand_idx = 0
 	for crew in state.crew:
 		var rand_val = action.random_values[rand_idx] if rand_idx < action.random_values.size() else 0.5
-		new_crew.append(CrewLogic.apply_daily_update(crew, rand_val))
+		var updated = CrewLogic.apply_daily_update(crew, rand_val)
+		# Reset hours for new day
+		updated = GameTypes.with_field(updated, "hours_used_today", 0)
+		new_crew.append(updated)
 		rand_idx += 1
 	updates["crew"] = new_crew
 
@@ -784,6 +799,25 @@ static func _reduce_advance_travel_day(state: Dictionary, action: Dictionary) ->
 				event.message,
 				"error" if event.type == "critical" else "event"
 			))
+
+	# COMPONENT DEGRADATION - Wear and tear on ship systems
+	var components = state.ship_components.duplicate(true)
+	var degraded_components: Array = []
+	for i in range(components.size()):
+		var rand_val = action.random_values[rand_idx + i] if rand_idx + i < action.random_values.size() else 0.5
+		var degraded = ComponentLogic.apply_daily_wear(components[i], rand_val)
+		degraded_components.append(degraded)
+	updates["ship_components"] = degraded_components
+
+	# Also update hex grid with degraded components
+	var new_hex_grid = state.ship_hex_grid.duplicate(true)
+	for comp in degraded_components:
+		if comp.has("hex_position"):
+			new_hex_grid[comp.hex_position] = comp
+	updates["ship_hex_grid"] = new_hex_grid
+
+	# DEGRADATION WARNINGS - Build tension before things go critical
+	new_log = _add_degradation_warnings(new_log, new_day, updates["crew"], degraded_components, updates.get("supplies", state.get("supplies", {})))
 
 	# Check for crew deaths
 	var deaths_this_day: Array = []
@@ -965,3 +999,90 @@ static func _reduce_update_component(state: Dictionary, action: Dictionary) -> D
 		"ship_components": new_components,
 		"ship_hex_grid": new_grid
 	})
+
+# ============================================================================
+# DEGRADATION WARNING SYSTEM
+# ============================================================================
+
+## Add warning log entries when things start to degrade (builds narrative tension)
+static func _add_degradation_warnings(
+	log: Array,
+	day: int,
+	crew: Array,
+	components: Array,
+	supplies: Dictionary
+) -> Array:
+	var new_log = log.duplicate()
+
+	# Track what we've already warned about to avoid spam (check last few entries)
+	var recent_warnings: Array = []
+	for i in range(maxi(0, log.size() - 10), log.size()):
+		if log[i].event_type == "warning":
+			recent_warnings.append(log[i].message)
+
+	# Component warnings
+	for comp in components:
+		if comp.quality <= 50 and comp.quality > 30:
+			var msg = "%s is showing signs of wear (%.0f%% integrity)." % [comp.display_name, comp.quality]
+			if msg not in recent_warnings:
+				new_log.append(GameTypes.create_log_entry(day, msg, "warning"))
+		elif comp.quality <= 30 and comp.quality > 15:
+			var msg = "%s is failing! Repairs urgently needed (%.0f%% integrity)." % [comp.display_name, comp.quality]
+			if msg not in recent_warnings:
+				new_log.append(GameTypes.create_log_entry(day, msg, "event"))
+
+	# Crew warnings
+	for member in crew:
+		if member.health <= 0:
+			continue
+
+		# Health warnings
+		if member.health <= 50 and member.health > 30:
+			var msg = "%s is showing signs of malnutrition. Consider medical treatment." % member.display_name
+			if msg not in recent_warnings:
+				new_log.append(GameTypes.create_log_entry(day, msg, "warning"))
+		elif member.health <= 30 and member.health > 15:
+			var msg = "%s is in critical condition! Immediate medical attention required!" % member.display_name
+			if msg not in recent_warnings:
+				new_log.append(GameTypes.create_log_entry(day, msg, "event"))
+
+		# Morale warnings
+		if member.morale <= 40 and member.morale > 20:
+			var msg = "%s's morale is concerning. The crew should talk." % member.display_name
+			if msg not in recent_warnings:
+				new_log.append(GameTypes.create_log_entry(day, msg, "warning"))
+		elif member.morale <= 20:
+			var msg = "%s is on the verge of a breakdown. Morale is critical!" % member.display_name
+			if msg not in recent_warnings:
+				new_log.append(GameTypes.create_log_entry(day, msg, "event"))
+
+		# Fatigue warnings
+		if member.fatigue >= 70 and member.fatigue < 90:
+			var msg = "%s is exhausted. They need rest." % member.display_name
+			if msg not in recent_warnings:
+				new_log.append(GameTypes.create_log_entry(day, msg, "warning"))
+		elif member.fatigue >= 90:
+			var msg = "%s is dangerously exhausted! Rest is essential!" % member.display_name
+			if msg not in recent_warnings:
+				new_log.append(GameTypes.create_log_entry(day, msg, "event"))
+
+	# Supply warnings (check if spare parts or medical kits are low)
+	if supplies.get("spare_parts", 0) == 1:
+		var msg = "Last spare part in storage. Any equipment failure could be catastrophic."
+		if msg not in recent_warnings:
+			new_log.append(GameTypes.create_log_entry(day, msg, "warning"))
+	elif supplies.get("spare_parts", 0) == 0:
+		var msg = "No spare parts remain! Pray nothing breaks."
+		if msg not in recent_warnings:
+			new_log.append(GameTypes.create_log_entry(day, msg, "event"))
+
+	if supplies.get("medical_kits", 0) == 1:
+		var msg = "Last medical kit in storage. Any injury could prove fatal."
+		if msg not in recent_warnings:
+			new_log.append(GameTypes.create_log_entry(day, msg, "warning"))
+	elif supplies.get("medical_kits", 0) == 0:
+		var msg = "Medical supplies exhausted. Crew injuries cannot be treated."
+		if msg not in recent_warnings:
+			new_log.append(GameTypes.create_log_entry(day, msg, "event"))
+
+	return new_log

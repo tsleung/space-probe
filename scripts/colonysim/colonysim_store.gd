@@ -140,7 +140,7 @@ func start_new_colony(founder_count: int = 12) -> void:
 	for i in range(founder_count):
 		var colonist = ColonySimTypes.create_colonist()
 		colonist.id = "founder_%03d" % i
-		colonist.generation = ColonySimTypes.Generation.FOUNDER
+		colonist.generation = ColonySimTypes.Generation.EARTH_BORN
 		colonist.age = 25 + _rng.randi_range(0, 15)
 		colonist.life_stage = ColonySimTypes.LifeStage.ADULT
 
@@ -151,7 +151,7 @@ func start_new_colony(founder_count: int = 12) -> void:
 			ColonySimTypes.Specialty.MEDIC,
 			ColonySimTypes.Specialty.FARMER,
 			ColonySimTypes.Specialty.PILOT,
-			ColonySimTypes.Specialty.LEADER
+			ColonySimTypes.Specialty.ADMINISTRATOR
 		]
 		colonist.specialty = specialty_pool[i % specialty_pool.size()]
 

@@ -1,0 +1,245 @@
+[gd_scene load_steps=3 format=3 uid="uid://c6fcw1main"]
+
+[ext_resource type="Script" path="res://scripts/fcw/fcw_main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/fcw/fcw_store.gd" id="2_store"]
+
+[node name="FCWMain" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_main")
+
+[node name="FCWStore" type="Node" parent="."]
+script = ExtResource("2_store")
+
+[node name="MainContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Header" type="HBoxContainer" parent="MainContainer"]
+layout_mode = 2
+
+[node name="TurnLabel" type="Label" parent="MainContainer/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "TURN 1 | ~8 turns until Earth assault"
+
+[node name="LivesLabel" type="Label" parent="MainContainer/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "EVACUATED: 0"
+
+[node name="ThreatLabel" type="Label" parent="MainContainer/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "HERALD: 50 -> Kuiper Belt"
+
+[node name="GameArea" type="HBoxContainer" parent="MainContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="MapPanel" type="PanelContainer" parent="MainContainer/GameArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 2.0
+
+[node name="MapContainer" type="VBoxContainer" parent="MainContainer/GameArea/MapPanel"]
+layout_mode = 2
+
+[node name="MapTitle" type="Label" parent="MainContainer/GameArea/MapPanel/MapContainer"]
+layout_mode = 2
+text = "=== SOL SYSTEM ==="
+horizontal_alignment = 1
+
+[node name="SidePanel" type="VBoxContainer" parent="MainContainer/GameArea"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ResourcesPanel" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
+layout_mode = 2
+
+[node name="ResourcesTitle" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel/VBox"]
+layout_mode = 2
+text = "=== RESOURCES ==="
+
+[node name="OreLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
+layout_mode = 2
+text = "Ore: 100"
+
+[node name="SteelLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
+layout_mode = 2
+text = "Steel: 50"
+
+[node name="EnergyLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
+layout_mode = 2
+text = "Energy: 100"
+
+[node name="ElectronicsLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
+layout_mode = 2
+text = "Electronics: 20"
+
+[node name="RareLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
+layout_mode = 2
+text = "Rare: 30"
+
+[node name="WeaponsLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
+layout_mode = 2
+text = "Weapons: 10"
+
+[node name="FleetPanel" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="MainContainer/GameArea/SidePanel/FleetPanel"]
+layout_mode = 2
+
+[node name="FleetTitle" type="Label" parent="MainContainer/GameArea/SidePanel/FleetPanel/VBox"]
+layout_mode = 2
+text = "=== FLEET ==="
+
+[node name="FleetList" type="ItemList" parent="MainContainer/GameArea/SidePanel/FleetPanel"]
+custom_minimum_size = Vector2(0, 100)
+layout_mode = 2
+
+[node name="BuildButtons" type="HBoxContainer" parent="MainContainer/GameArea/SidePanel/FleetPanel"]
+layout_mode = 2
+
+[node name="FrigateBtn" type="Button" parent="MainContainer/GameArea/SidePanel/FleetPanel/BuildButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Frigate"
+
+[node name="CruiserBtn" type="Button" parent="MainContainer/GameArea/SidePanel/FleetPanel/BuildButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Cruiser"
+
+[node name="CarrierBtn" type="Button" parent="MainContainer/GameArea/SidePanel/FleetPanel/BuildButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Carrier"
+
+[node name="DreadBtn" type="Button" parent="MainContainer/GameArea/SidePanel/FleetPanel/BuildButtons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Dread"
+
+[node name="ProductionLabel" type="Label" parent="MainContainer/GameArea/SidePanel/FleetPanel"]
+layout_mode = 2
+text = "Production: Idle (8 slots)"
+
+[node name="ZoneDetailPanel" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
+visible = false
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel"]
+layout_mode = 2
+
+[node name="ZoneNameLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
+layout_mode = 2
+text = "Zone Name"
+
+[node name="ZoneStatusLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
+layout_mode = 2
+text = "Status: CONTROLLED"
+
+[node name="ZonePopLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
+layout_mode = 2
+text = "Population: 1M"
+
+[node name="ZoneDefenseLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
+layout_mode = 2
+text = "Defense: 100"
+
+[node name="AssignFleet" type="HBoxContainer" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
+layout_mode = 2
+
+[node name="EventLog" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="VBox" type="VBoxContainer" parent="MainContainer/GameArea/SidePanel/EventLog"]
+layout_mode = 2
+
+[node name="LogTitle" type="Label" parent="MainContainer/GameArea/SidePanel/EventLog/VBox"]
+layout_mode = 2
+text = "=== EVENT LOG ==="
+
+[node name="LogText" type="RichTextLabel" parent="MainContainer/GameArea/SidePanel/EventLog"]
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+text = "T1: War begins..."
+
+[node name="Footer" type="HBoxContainer" parent="MainContainer"]
+layout_mode = 2
+
+[node name="EndTurnBtn" type="Button" parent="MainContainer/Footer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "END TURN"
+
+[node name="MainMenuBtn" type="Button" parent="MainContainer/Footer"]
+layout_mode = 2
+text = "Main Menu"
+
+[node name="GameOverPanel" type="PanelContainer" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -150.0
+offset_right = 200.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="GameOverPanel"]
+layout_mode = 2
+
+[node name="GameOverTitle" type="Label" parent="GameOverPanel/VBox"]
+layout_mode = 2
+text = "=== EARTH HAS FALLEN ==="
+horizontal_alignment = 1
+
+[node name="VictoryTierLabel" type="Label" parent="GameOverPanel/VBox"]
+layout_mode = 2
+text = "HEROIC"
+horizontal_alignment = 1
+
+[node name="VictoryDescLabel" type="Label" parent="GameOverPanel/VBox"]
+layout_mode = 2
+text = "Enough to rebuild"
+horizontal_alignment = 1
+
+[node name="FinalStatsLabel" type="Label" parent="GameOverPanel/VBox"]
+layout_mode = 2
+text = "Lives Evacuated: 250M
+Lives Lost: 7.75B
+Turns Survived: 22"
+
+[node name="Buttons" type="HBoxContainer" parent="GameOverPanel/VBox"]
+layout_mode = 2
+
+[node name="NewGameBtn" type="Button" parent="GameOverPanel/VBox/Buttons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "New Game"
+
+[node name="MenuBtn" type="Button" parent="GameOverPanel/VBox/Buttons"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Main Menu"

@@ -121,6 +121,9 @@ static func create_crew_member(overrides: Dictionary = {}) -> Dictionary:
 		"is_injured": false,
 		"sickness_type": "",
 		"days_sick": 0,
+		# TIME BUDGET - 16 hours available per day for activities
+		"hours_used_today": 0,
+		"hours_per_day": 16,
 		# PERSONALITY - Makes crew feel like real people
 		"personality": PersonalityTrait.OPTIMIST,  # Primary personality trait
 		"backstory": "",                           # Short backstory snippet
@@ -236,3 +239,17 @@ static func with_field(record: Dictionary, field: String, value) -> Dictionary:
 ## Update multiple fields immutably
 static func with_fields(record: Dictionary, updates: Dictionary) -> Dictionary:
 	return _merge(record, updates)
+
+# ============================================================================
+# UTILITY - Formatting
+# ============================================================================
+
+## Format money amount for display
+static func format_money(amount: int) -> String:
+	if amount >= 1_000_000_000:
+		return "%.2fB" % (amount / 1_000_000_000.0)
+	elif amount >= 1_000_000:
+		return "%.1fM" % (amount / 1_000_000.0)
+	elif amount >= 1_000:
+		return "%.0fK" % (amount / 1_000.0)
+	return str(amount)

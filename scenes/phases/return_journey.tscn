@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3 uid="uid://c3qkr8m2vwy5p"]
+[gd_scene load_steps=3 format=3 uid="uid://c3qkr8m2vwy5p"]
 
 [ext_resource type="Script" path="res://scripts/phases/return_journey.gd" id="1_return"]
+[ext_resource type="PackedScene" uid="uid://bqxe4r8nwvjsd" path="res://scenes/ui/event_popup.tscn" id="2_popup"]
 
 [node name="ReturnJourney" type="Control"]
 layout_mode = 3
@@ -204,3 +205,67 @@ value = 5.0
 [node name="SpeedLabel" type="Label" parent="BottomBar"]
 layout_mode = 2
 text = "5x"
+
+[node name="ReentrySequence" type="Panel" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -250.0
+offset_top = -200.0
+offset_right = 250.0
+offset_bottom = 200.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Background" type="ColorRect" parent="ReentrySequence"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.1, 0.1, 0.15, 0.95)
+
+[node name="VBox" type="VBoxContainer" parent="ReentrySequence"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+theme_override_constants/separation = 15
+
+[node name="TitleLabel" type="Label" parent="ReentrySequence/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "EARTH REENTRY"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="ReentrySequence/VBox"]
+layout_mode = 2
+
+[node name="StatusText" type="RichTextLabel" parent="ReentrySequence/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+text = "Preparing for atmospheric entry..."
+
+[node name="ProgressBar" type="ProgressBar" parent="ReentrySequence/VBox"]
+custom_minimum_size = Vector2(0, 25)
+layout_mode = 2
+max_value = 100.0
+value = 0.0
+show_percentage = false
+
+[node name="ContinueButton" type="Button" parent="ReentrySequence/VBox"]
+visible = false
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+text = "Continue"
+
+[node name="EventPopup" parent="." instance=ExtResource("2_popup")]
+visible = false

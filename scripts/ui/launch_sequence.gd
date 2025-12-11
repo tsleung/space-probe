@@ -82,6 +82,8 @@ func _animate_countdown():
 	var counts = ["10", "9", "8", "7", "6", "5", "4", "3", "2", "1"]
 	for i in range(counts.size()):
 		countdown_label.text = counts[i]
+		# Play countdown beep
+		AudioManager.play_countdown_beep()
 		# Flash effect
 		countdown_label.modulate = Color.WHITE
 		var tween = create_tween()
@@ -95,6 +97,8 @@ func _animate_countdown():
 
 	countdown_label.text = "IGNITION"
 	countdown_label.modulate = Color(1, 0.5, 0.2)
+	# Play launch sound!
+	AudioManager.play_launch()
 	await get_tree().create_timer(1.0).timeout
 
 	_current_stage += 1

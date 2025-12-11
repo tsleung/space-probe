@@ -128,6 +128,7 @@ func _initialize_hex_grid() -> void:
 
 func advance_day(days: int = 1) -> void:
 	dispatch_with_random(GameReducer.action_advance_day(days))
+	AudioManager.play_day_advance()
 
 	# Check for random events
 	_check_random_events()
@@ -176,6 +177,15 @@ func update_cargo(key: String, value) -> void:
 
 func add_log(message: String, event_type: String = "info") -> void:
 	dispatch(GameReducer.action_add_log(message, event_type))
+	# Play appropriate sound based on event type
+	match event_type:
+		"error":
+			AudioManager.play_error()
+		"success":
+			AudioManager.play_success()
+		"event":
+			# Event popup plays its own alert sound
+			pass
 
 func launch_ship() -> bool:
 	var check = get_launch_check()
@@ -274,7 +284,7 @@ func get_crew_deaths() -> int:
 
 func _check_random_events() -> void:
 	if _state.current_phase == GameTypes.GamePhase.SHIP_BUILDING:
-		var event_result = EventLogic.check_delay_events(
+		var event_result = InteractiveEvents.check_delay_events(
 			_state,
 			_rng.randf(),
 			_rng.randf(),
@@ -284,7 +294,7 @@ func _check_random_events() -> void:
 			dispatch(GameReducer.action_apply_event(event_result.event))
 
 	elif _state.current_phase == GameTypes.GamePhase.TRAVEL_TO_MARS:
-		var event_result = EventLogic.generate_travel_event(
+		var event_result = InteractiveEvents.generate_travel_event(
 			_state,
 			_rng.randf(),
 			_rng.randf(),

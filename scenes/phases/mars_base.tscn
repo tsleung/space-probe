@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3 uid="uid://b5mt2yqkh8c1x"]
+[gd_scene load_steps=3 format=3 uid="uid://b5mt2yqkh8c1x"]
 
 [ext_resource type="Script" path="res://scripts/phases/mars_base.gd" id="1_mars"]
+[ext_resource type="PackedScene" uid="uid://bqxe4r8nwvjsd" path="res://scenes/ui/event_popup.tscn" id="2_popup"]
 
 [node name="MarsBase" type="Control"]
 layout_mode = 3
@@ -285,3 +286,68 @@ custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
 disabled = true
 text = "Return to Earth"
+
+[node name="DeparturePanel" type="Panel" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -250.0
+offset_top = -200.0
+offset_right = 250.0
+offset_bottom = 200.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Background" type="ColorRect" parent="DeparturePanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.1, 0.08, 0.06, 0.95)
+
+[node name="VBox" type="VBoxContainer" parent="DeparturePanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+theme_override_constants/separation = 10
+
+[node name="TitleLabel" type="Label" parent="DeparturePanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Prepare for Departure"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="DeparturePanel/VBox"]
+layout_mode = 2
+
+[node name="ChecklistText" type="RichTextLabel" parent="DeparturePanel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+text = "Loading checklist..."
+
+[node name="ButtonRow" type="HBoxContainer" parent="DeparturePanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="CancelButton" type="Button" parent="DeparturePanel/VBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "Continue Operations"
+
+[node name="ConfirmButton" type="Button" parent="DeparturePanel/VBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+text = "Begin Return Journey"
+
+[node name="EventPopup" parent="." instance=ExtResource("2_popup")]
+visible = false

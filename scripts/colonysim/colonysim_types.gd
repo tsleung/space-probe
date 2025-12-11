@@ -289,6 +289,10 @@ static func create_political_state(overrides: Dictionary = {}) -> Dictionary:
 		"authority_level": 10,  # 1-10, 10 = full autocracy
 		"stability": 70.0,
 
+		# Leadership
+		"current_leader": "",
+		"ruling_faction": Faction.FOUNDERS,
+
 		# Factions
 		"faction_standings": {
 			Faction.EARTHERS: 50.0,

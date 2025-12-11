@@ -20,6 +20,7 @@ config/icon="res://icon.svg"
 
 GameStore="*res://scripts/autoload/game_store.gd"
 VNPStore="*res://scripts/vnp/vnp_store.gd"
+AudioManager="*res://scripts/autoload/audio_manager.gd"
 
 [display]
 

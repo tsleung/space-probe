@@ -123,14 +123,31 @@ func _process(delta: float):
 	galaxy_view.queue_redraw()
 
 func _input(event: InputEvent):
+	# Handle keyboard camera controls anywhere
+	if event is InputEventKey and event.pressed:
+		var move_speed = 20.0 / galaxy_camera.zoom.x
+		match event.keycode:
+			KEY_W, KEY_UP:
+				galaxy_camera.position.y -= move_speed
+			KEY_S, KEY_DOWN:
+				galaxy_camera.position.y += move_speed
+			KEY_A, KEY_LEFT:
+				galaxy_camera.position.x -= move_speed
+			KEY_D, KEY_RIGHT:
+				galaxy_camera.position.x += move_speed
+			KEY_SPACE:
+				# Advance turn with space
+				if not VNPStore.is_game_over():
+					VNPStore.advance_turn()
+
 	if not galaxy_view.get_global_rect().has_point(get_global_mouse_position()):
 		return
 
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
-				_handle_galaxy_click(event.position)
-		elif event.button_index == MOUSE_BUTTON_MIDDLE:
+				_handle_galaxy_click(get_global_mouse_position())
+		elif event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT:
 			_camera_drag = event.pressed
 			if event.pressed:
 				_camera_drag_start = get_global_mouse_position()
@@ -142,7 +159,7 @@ func _input(event: InputEvent):
 			galaxy_camera.zoom = galaxy_camera.zoom.clamp(Vector2(0.3, 0.3), Vector2(3.0, 3.0))
 
 	if event is InputEventMouseMotion:
-		_update_hover_system(event.position)
+		_update_hover_system(get_global_mouse_position())
 
 # ============================================================================
 # UI SYNC
@@ -279,6 +296,14 @@ func draw_galaxy_on(canvas: CanvasItem):
 	var state = VNPStore.get_state()
 	var zoom = galaxy_camera.zoom.x
 
+	# Get reachable systems if we have an idle probe selected
+	var reachable_systems: Array = []
+	var selected_probe = VNPStore.get_probe(_selected_probe_id)
+	if not selected_probe.is_empty() and selected_probe.status == VNPTypes.ProbeStatus.IDLE:
+		var probe_sys = systems.get(selected_probe.current_system, {})
+		if not probe_sys.is_empty():
+			reachable_systems = probe_sys.get("connections", [])
+
 	# Draw connections first
 	for sys_id in systems.keys():
 		var sys = systems[sys_id]
@@ -339,6 +364,10 @@ func draw_galaxy_on(canvas: CanvasItem):
 		if sys_id == state.home_system:
 			canvas.draw_arc(pos, size + 8 * zoom, 0, TAU, 16, Color.CYAN, 1.0)
 
+		# Reachable system indicator (green dashed)
+		if sys_id in reachable_systems:
+			canvas.draw_arc(pos, size + 10 * zoom, 0, TAU, 16, Color(0.3, 1.0, 0.3, 0.6), 2.0)
+
 	# Draw probes
 	for probe in probes.values():
 		var world_pos: Vector2
@@ -390,17 +419,19 @@ func draw_galaxy_on(canvas: CanvasItem):
 # INPUT HANDLERS
 # ============================================================================
 
-func _handle_galaxy_click(screen_pos: Vector2):
-	var galaxy_rect = galaxy_view.get_global_rect()
+# Transform screen position to world position (inverse of _world_to_screen)
+func _screen_to_world(screen_pos: Vector2) -> Vector2:
 	var local_pos = screen_pos - galaxy_view.global_position
+	var center = galaxy_view.size / 2.0
+	return (local_pos - center) / galaxy_camera.zoom.x + galaxy_camera.position
 
-	# Transform to world coordinates
-	var world_pos = (local_pos - galaxy_view.size / 2) / galaxy_camera.zoom + galaxy_camera.position
+func _handle_galaxy_click(screen_pos: Vector2):
+	var world_pos = _screen_to_world(screen_pos)
 
 	# Find clicked system
 	var systems = VNPStore.get_systems()
 	var closest_id = ""
-	var closest_dist = 30.0  # Click radius
+	var closest_dist = 30.0 / galaxy_camera.zoom.x  # Click radius (adjusted for zoom)
 
 	for sys_id in systems.keys():
 		var sys = systems[sys_id]
@@ -425,12 +456,11 @@ func _handle_galaxy_click(screen_pos: Vector2):
 		_sync_action_buttons()
 
 func _update_hover_system(screen_pos: Vector2):
-	var local_pos = screen_pos - galaxy_view.global_position
-	var world_pos = (local_pos - galaxy_view.size / 2) / galaxy_camera.zoom + galaxy_camera.position
+	var world_pos = _screen_to_world(screen_pos)
 
 	var systems = VNPStore.get_systems()
 	var closest_id = ""
-	var closest_dist = 30.0
+	var closest_dist = 30.0 / galaxy_camera.zoom.x  # Adjusted for zoom
 
 	for sys_id in systems.keys():
 		var sys = systems[sys_id]
@@ -453,7 +483,8 @@ func _on_auto_pressed():
 	auto_button.text = "Stop" if _auto_advance else "Auto"
 
 func _on_speed_changed(value: float):
-	_auto_speed = 1.0 - (value * 0.9)  # 0.1 to 1.0 seconds
+	# Slider is 0-100, convert to delay between turns (1.0 to 0.1 seconds)
+	_auto_speed = 1.0 - (value / 100.0 * 0.9)  # 0.1 to 1.0 seconds
 
 func _on_mine_pressed():
 	if not _selected_probe_id.is_empty():

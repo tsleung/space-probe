@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3 uid="uid://cdy8qk3v4xw2h"]
+[gd_scene load_steps=5 format=3 uid="uid://cdy8qk3v4xw2h"]
 
 [ext_resource type="Script" path="res://scripts/phases/ship_building.gd" id="1_building"]
 [ext_resource type="Script" path="res://scripts/components/hex_grid.gd" id="2_hexgrid"]
 [ext_resource type="PackedScene" uid="uid://c6qnmvt5p2rxd" path="res://scenes/ui/launch_sequence.tscn" id="3_launch"]
+[ext_resource type="PackedScene" uid="uid://bqxe4r8nwvjsd" path="res://scenes/ui/event_popup.tscn" id="4_popup"]
 
 [node name="ShipBuilding" type="Control"]
 layout_mode = 3
@@ -67,6 +68,32 @@ grow_vertical = 2
 [node name="SidePanel" type="VBoxContainer" parent="HBoxContainer"]
 custom_minimum_size = Vector2(320, 0)
 layout_mode = 2
+
+[node name="HintsPanel" type="PanelContainer" parent="HBoxContainer/SidePanel"]
+layout_mode = 2
+
+[node name="HintsVBox" type="VBoxContainer" parent="HBoxContainer/SidePanel/HintsPanel"]
+layout_mode = 2
+
+[node name="HintsHeader" type="Label" parent="HBoxContainer/SidePanel/HintsPanel/HintsVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.4, 0.8, 1.0, 1)
+theme_override_font_sizes/font_size = 14
+text = "NEXT STEPS"
+
+[node name="PrimaryHint" type="RichTextLabel" parent="HBoxContainer/SidePanel/HintsPanel/HintsVBox"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+bbcode_enabled = true
+text = "[b]1.[/b] Place a [color=yellow]Cockpit[/color] on the grid"
+fit_content = true
+
+[node name="SecondaryHints" type="Label" parent="HBoxContainer/SidePanel/HintsPanel/HintsVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
+theme_override_font_sizes/font_size = 12
+text = "Then: Add Engine Mount, Life Support..."
+autowrap_mode = 2
 
 [node name="TabContainer" type="TabContainer" parent="HBoxContainer/SidePanel"]
 custom_minimum_size = Vector2(0, 300)
@@ -269,6 +296,18 @@ layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.8, 0.2, 1)
 text = "Total Supply Cost: $15M"
 
+[node name="Sep4" type="HSeparator" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+
+[node name="SurvivalPreview" type="RichTextLabel" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+custom_minimum_size = Vector2(0, 60)
+layout_mode = 2
+bbcode_enabled = true
+text = "[b]Journey Preview[/b]
+Estimated: 180 days
+Margin: +27 days"
+fit_content = true
+
 [node name="InfoPanel" type="Panel" parent="HBoxContainer/SidePanel"]
 visible = false
 custom_minimum_size = Vector2(0, 200)
@@ -439,4 +478,7 @@ disabled = true
 text = "LAUNCH"
 
 [node name="LaunchSequence" parent="." instance=ExtResource("3_launch")]
+visible = false
+
+[node name="EventPopup" parent="." instance=ExtResource("4_popup")]
 visible = false

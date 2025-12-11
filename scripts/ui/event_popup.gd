@@ -29,6 +29,9 @@ func show_event(event: Dictionary):
 	_selected_choice = {}
 	_showing_consequence = false
 
+	# Play alert sound
+	AudioManager.play_alert()
+
 	title_label.text = event.title
 	description_label.text = event.description
 
@@ -57,6 +60,9 @@ func show_event(event: Dictionary):
 func _on_choice_pressed(choice: Dictionary):
 	_selected_choice = choice
 	_showing_consequence = true
+
+	# Play click sound
+	AudioManager.play_click()
 
 	# Hide choice buttons
 	for child in choices_container.get_children():

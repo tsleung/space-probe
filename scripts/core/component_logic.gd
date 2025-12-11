@@ -306,3 +306,71 @@ static func get_component_by_id(id: String) -> Dictionary:
 		if comp.id == id:
 			return comp
 	return {}
+
+# ============================================================================
+# COMPONENT DEGRADATION (for journey phases)
+# ============================================================================
+
+## Calculate daily wear on a component (pure)
+## Base degradation is 0.02% per day, modified by component type and usage
+static func calc_daily_degradation(component: Dictionary, is_active: bool = true) -> float:
+	var base_rate = 0.02  # 0.02% per day base
+
+	# Some components wear faster
+	var type_multiplier = 1.0
+	match component.id:
+		"life_support":
+			type_multiplier = 1.5  # Critical system under constant stress
+		"engine_mount":
+			type_multiplier = 0.5  # Only active during burns
+		"solar_array":
+			type_multiplier = 1.2  # Exposed to radiation
+		"cockpit":
+			type_multiplier = 0.8  # Well-protected
+
+	if not is_active:
+		type_multiplier *= 0.3  # Much slower when not in use
+
+	return base_rate * type_multiplier
+
+## Apply wear to a component (pure, deterministic)
+static func apply_daily_wear(component: Dictionary, random_value: float, is_active: bool = true) -> Dictionary:
+	var base_degradation = calc_daily_degradation(component, is_active)
+
+	# Random variation: 50%-150% of base rate
+	var variation = 0.5 + (random_value * 1.0)
+	var actual_degradation = base_degradation * variation
+
+	var new_quality = maxf(0.0, component.quality - actual_degradation)
+
+	return GameTypes.with_field(component, "quality", new_quality)
+
+## Apply wear to all components in a list (pure)
+static func apply_wear_to_components(components: Array, random_values: Array) -> Array:
+	var result = []
+	for i in range(components.size()):
+		var random_val = random_values[i] if i < random_values.size() else 0.5
+		result.append(apply_daily_wear(components[i], random_val))
+	return result
+
+## Check if component has critically degraded (for events)
+static func is_critically_degraded(component: Dictionary) -> bool:
+	return component.quality < 30.0
+
+## Get components that need repair (quality below threshold)
+static func get_components_needing_repair(components: Array, threshold: float = 50.0) -> Array:
+	var needs_repair = []
+	for comp in components:
+		if comp.quality < threshold:
+			needs_repair.append(comp)
+	return needs_repair
+
+## Apply repair to a component (pure)
+## Uses spare parts to restore quality
+static func repair_component(component: Dictionary, spare_parts_used: int, random_value: float) -> Dictionary:
+	# Each spare part restores 10-20% quality (random variation)
+	var repair_per_part = 10.0 + (random_value * 10.0)
+	var total_repair = repair_per_part * spare_parts_used
+	var new_quality = minf(component.max_quality, component.quality + total_repair)
+
+	return GameTypes.with_field(component, "quality", new_quality)

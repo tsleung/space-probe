@@ -20,6 +20,12 @@ Drawing from legendary game designers:
 
 **Bungie (Halo: Combat Evolved / Halo: Reach):** Epic scope through intimate moments. Reach especially - knowing the ending (the planet falls) doesn't diminish the journey. Every small victory matters even in a doomed scenario. The weight of sacrifice, camaraderie under pressure, and humanity's reach exceeding its grasp.
 
+**Fantasy Flight (Star Wars: Rebellion):** Asymmetric objectives and hidden information create tension. The Empire hunts, the Rebels hide. Mission-based gameplay where sending the right crew on the right mission matters more than raw stats. Strategic depth from character placement and timing.
+
+**Ironclad Games (Sins of a Solar Empire):** Real-time space opera at scale. The weight and momentum of capital ships. Combat as a consequence of strategic positioning, not the core loop - but when it happens, it feels consequential. Gravity wells and orbital mechanics as gameplay.
+
+**Gas Powered Games (Supreme Commander):** Strategic zoom - seamlessly pulling from individual units to theater-wide view. Economy as warfare: the battle is won or lost in the production queue before the first shot fires. Experimental units as high-risk investments that change the nature of conflict.
+
 ## Why Mars?
 
 Mars is currently the closest available planet and relevant to current events. The mission involves landing on the planet, setting up a base, conducting scientific research, launching back into space, and returning to Earth.
@@ -220,6 +226,15 @@ This constraint improves the game for all players - accessible pacing, clear pro
 ### Systems & Content
 - [Events Catalog](events-catalog.md) - All events with triggers, choices, consequences
 - [Balance & Numbers](balance-and-numbers.md) - Formulas, probabilities, resource rates
+- [Crew Roster](crew-roster.md) - Default crew stats, traits, relationships, arcs
+- [Data Schema](data-schema.md) - JSON structures for components, events, saves
+
+### User Experience
+- [UI Wireframes](ui-wireframes.md) - Screen layouts and interaction patterns
+- [Tutorial & Onboarding](tutorial-onboarding.md) - How players learn the game
+- [Audio & Visual Direction](audio-visual-direction.md) - Art style, sound design, aesthetics
+- [Accessibility](accessibility.md) - Colorblind modes, keyboard navigation, screen readers
+- [Localization](localization.md) - Multi-language support plan
 
 ### Design Research
 - [Inspirations](design-research/inspirations.md) - Analysis of game and media influences

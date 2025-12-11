@@ -324,6 +324,7 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 	# === POPULATION PHASE ===
 	var pop_result = ColonySimPopulation.advance_year(
 		state.colonists,
+		new_year,
 		state.resources,
 		state.buildings,
 		action.random_values.slice(rand_idx, rand_idx + state.colonists.size() * 5)

@@ -285,10 +285,10 @@ func _create_colonist_entry(colonist: Dictionary) -> Control:
 
 func _get_generation_color(generation: int) -> Color:
 	match generation:
-		ColonySimTypes.Generation.FOUNDER: return Color.GOLD
-		ColonySimTypes.Generation.FIRST: return Color.CYAN
-		ColonySimTypes.Generation.SECOND: return Color.GREEN
-		ColonySimTypes.Generation.THIRD: return Color.YELLOW
+		ColonySimTypes.Generation.EARTH_BORN: return Color.GOLD
+		ColonySimTypes.Generation.FIRST_GEN: return Color.CYAN
+		ColonySimTypes.Generation.SECOND_GEN: return Color.GREEN
+		ColonySimTypes.Generation.THIRD_GEN_PLUS: return Color.YELLOW
 		_: return Color.WHITE
 
 func _update_statistics(state: Dictionary):
@@ -330,12 +330,13 @@ func _update_politics(state: Dictionary):
 
 	var text = "[b]Political Overview[/b]\n\n"
 
-	text += "[u]Government:[/u] %s\n" % ColonySimTypes.get_political_system_name(pol.government_type)
+	text += "[u]Government:[/u] %s\n" % ColonySimTypes.get_political_system_name(pol.system)
 	text += "[u]Stability:[/u] %.0f%%\n" % pol.stability
 	text += "[u]Independence:[/u] %.0f%%\n\n" % pol.independence_sentiment
 
-	if pol.current_leader:
+	if pol.get("current_leader", ""):
 		text += "[u]Leader:[/u] %s\n" % pol.current_leader
+	if pol.get("ruling_faction", -1) >= 0:
 		text += "[u]Ruling Faction:[/u] %s\n\n" % ColonySimTypes.get_faction_name(pol.ruling_faction)
 
 	text += "[u]Faction Support:[/u]\n"
@@ -542,18 +543,20 @@ func _update_build_cost():
 
 	# Building costs (simplified)
 	var costs = {
-		ColonySimTypes.BuildingType.HABITAT: {"materials": 50, "power": 10},
+		ColonySimTypes.BuildingType.HAB_POD: {"materials": 50, "power": 10},
+		ColonySimTypes.BuildingType.APARTMENT_BLOCK: {"materials": 100, "power": 25},
 		ColonySimTypes.BuildingType.GREENHOUSE: {"materials": 40, "power": 15},
+		ColonySimTypes.BuildingType.HYDROPONICS: {"materials": 60, "power": 20},
 		ColonySimTypes.BuildingType.SOLAR_ARRAY: {"materials": 30, "power": 0},
+		ColonySimTypes.BuildingType.FISSION_REACTOR: {"materials": 150, "power": 0},
 		ColonySimTypes.BuildingType.WATER_EXTRACTOR: {"materials": 60, "power": 20},
-		ColonySimTypes.BuildingType.MINING_RIG: {"materials": 80, "power": 25},
 		ColonySimTypes.BuildingType.WORKSHOP: {"materials": 70, "power": 15},
+		ColonySimTypes.BuildingType.FACTORY: {"materials": 120, "power": 30},
 		ColonySimTypes.BuildingType.MEDICAL_BAY: {"materials": 100, "power": 20},
 		ColonySimTypes.BuildingType.SCHOOL: {"materials": 60, "power": 10},
 		ColonySimTypes.BuildingType.LAB: {"materials": 90, "power": 25},
-		ColonySimTypes.BuildingType.COMMAND_CENTER: {"materials": 120, "power": 30},
-		ColonySimTypes.BuildingType.REACTOR: {"materials": 150, "power": 0},
-		ColonySimTypes.BuildingType.SPACEPORT: {"materials": 200, "power": 50},
+		ColonySimTypes.BuildingType.GOVERNMENT_HALL: {"materials": 120, "power": 30},
+		ColonySimTypes.BuildingType.LANDING_PAD: {"materials": 200, "power": 50},
 	}
 
 	var building_types = ColonySimTypes.BuildingType.values()

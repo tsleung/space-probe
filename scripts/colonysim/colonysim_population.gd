@@ -31,12 +31,13 @@ const RIVAL_THRESHOLD = -30
 # ============================================================================
 
 ## Advance all colonists by one year
-## Returns: { colonists: Array, births: Array, deaths: Array, events: Array }
-static func advance_year(colonists: Array, year: int, random_values: Array) -> Dictionary:
+## Returns: { colonists: Array, births: Array, deaths: Array, events: Array, new_adults: Array }
+static func advance_year(colonists: Array, year: int, resources: Dictionary, buildings: Array, random_values: Array) -> Dictionary:
 	var new_colonists: Array = []
 	var births: Array = []
 	var deaths: Array = []
 	var events: Array = []
+	var new_adults: Array = []
 	var random_idx = 0
 
 	# Process each colonist
@@ -48,7 +49,18 @@ static func advance_year(colonists: Array, year: int, random_values: Array) -> D
 		var rand = _get_random(random_values, random_idx)
 		random_idx += 1
 
+		var old_stage = colonist.life_stage
 		var updated = _age_colonist(colonist, year, rand)
+
+		# Check for coming of age (adolescent -> adult)
+		if old_stage == ColonySimTypes.LifeStage.ADOLESCENT and updated.life_stage == ColonySimTypes.LifeStage.ADULT:
+			new_adults.append(updated)
+			events.append({
+				"type": "coming_of_age",
+				"colonist_id": updated.id,
+				"colonist_name": updated.get("display_name", "%s %s" % [updated.first_name, updated.last_name]),
+				"age": updated.age
+			})
 
 		# Check for death
 		var death_rand = _get_random(random_values, random_idx)
@@ -63,13 +75,14 @@ static func advance_year(colonists: Array, year: int, random_values: Array) -> D
 			})
 			deaths.append({
 				"colonist": updated,
+				"name": updated.get("display_name", "%s %s" % [updated.first_name, updated.last_name]),
 				"cause": death_result.cause,
 				"year": year
 			})
 			events.append({
 				"type": "death",
 				"colonist_id": updated.id,
-				"colonist_name": "%s %s" % [updated.first_name, updated.last_name],
+				"colonist_name": updated.get("display_name", "%s %s" % [updated.first_name, updated.last_name]),
 				"cause": death_result.cause,
 				"age": updated.age
 			})
@@ -91,9 +104,9 @@ static func advance_year(colonists: Array, year: int, random_values: Array) -> D
 				events.append({
 					"type": "birth",
 					"child_id": child.id,
-					"child_name": "%s %s" % [child.first_name, child.last_name],
+					"child_name": child.get("display_name", "%s %s" % [child.first_name, child.last_name]),
 					"mother_id": updated.id,
-					"mother_name": "%s %s" % [updated.first_name, updated.last_name],
+					"mother_name": updated.get("display_name", "%s %s" % [updated.first_name, updated.last_name]),
 					"year": year
 				})
 
@@ -111,7 +124,8 @@ static func advance_year(colonists: Array, year: int, random_values: Array) -> D
 		"colonists": new_colonists,
 		"births": births,
 		"deaths": deaths,
-		"events": events
+		"events": events,
+		"new_adults": new_adults
 	}
 
 static func _age_colonist(colonist: Dictionary, year: int, rand: float) -> Dictionary:
