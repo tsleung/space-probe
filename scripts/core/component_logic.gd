@@ -78,12 +78,13 @@ static func create_cockpit() -> Dictionary:
 		"id": "cockpit",
 		"display_name": "Cockpit",
 		"description": "Command center for piloting the spacecraft. Required for launch.",
-		"base_cost": 100_000_000,
-		"build_days": 45,
-		"mass_kg": 3000.0,
+		"base_cost": 50_000_000,  # Balance: $50M per design doc
+		"build_days": 8,
+		"mass_kg": 2000.0,
 		"hex_size": 2,
-		"test_cost_per_cycle": 5_000_000,
-		"test_days_per_cycle": 3,
+		"quality": 55.0,  # Starting quality per balance doc
+		"test_cost_per_cycle": 2_500_000,
+		"test_days_per_cycle": 2,
 		"quality_per_test": 8.0
 	})
 
@@ -91,12 +92,13 @@ static func create_engine_mount() -> Dictionary:
 	return GameTypes.create_component({
 		"id": "engine_mount",
 		"display_name": "Engine Mount",
-		"description": "Structural mounting point for the main engine.",
-		"base_cost": 50_000_000,
-		"build_days": 30,
-		"mass_kg": 2000.0,
+		"description": "Structural mounting point for the main engine. Required for launch.",
+		"base_cost": 30_000_000,
+		"build_days": 6,
+		"mass_kg": 1500.0,
 		"hex_size": 2,
-		"test_cost_per_cycle": 3_000_000,
+		"quality": 60.0,
+		"test_cost_per_cycle": 1_500_000,
 		"test_days_per_cycle": 2,
 		"quality_per_test": 10.0
 	})
@@ -105,11 +107,12 @@ static func create_gym() -> Dictionary:
 	return GameTypes.create_component({
 		"id": "gym",
 		"display_name": "Exercise Facility",
-		"description": "Prevents muscle atrophy and bone loss during long space travel.",
+		"description": "Prevents muscle atrophy. Reduces health loss during travel.",
 		"base_cost": 20_000_000,
-		"build_days": 14,
+		"build_days": 5,
 		"mass_kg": 800.0,
 		"hex_size": 1,
+		"quality": 70.0,
 		"test_cost_per_cycle": 500_000,
 		"test_days_per_cycle": 1,
 		"quality_per_test": 15.0
@@ -119,12 +122,13 @@ static func create_cafeteria() -> Dictionary:
 	return GameTypes.create_component({
 		"id": "cafeteria",
 		"display_name": "Cafeteria",
-		"description": "Food preparation and dining area. Improves crew morale.",
-		"base_cost": 15_000_000,
-		"build_days": 10,
+		"description": "Food preparation and dining. Improves crew morale.",
+		"base_cost": 30_000_000,
+		"build_days": 6,
 		"mass_kg": 600.0,
 		"hex_size": 1,
-		"test_cost_per_cycle": 300_000,
+		"quality": 65.0,
+		"test_cost_per_cycle": 500_000,
 		"test_days_per_cycle": 1,
 		"quality_per_test": 15.0
 	})
@@ -134,80 +138,86 @@ static func create_crew_room() -> Dictionary:
 		"id": "crew_room",
 		"display_name": "Crew Quarters",
 		"description": "Private sleeping quarters for one crew member.",
-		"base_cost": 10_000_000,
-		"build_days": 7,
+		"base_cost": 25_000_000,
+		"build_days": 5,
 		"mass_kg": 400.0,
 		"hex_size": 1,
-		"test_cost_per_cycle": 200_000,
+		"quality": 60.0,
+		"test_cost_per_cycle": 300_000,
 		"test_days_per_cycle": 1,
-		"quality_per_test": 20.0
+		"quality_per_test": 15.0
 	})
 
 static func create_cargo_bay() -> Dictionary:
 	return GameTypes.create_component({
 		"id": "cargo",
 		"display_name": "Cargo Bay",
-		"description": "Storage for mission supplies and equipment.",
-		"base_cost": 30_000_000,
-		"build_days": 20,
-		"mass_kg": 1500.0,
+		"description": "Storage for supplies. More cargo = more supplies for the journey.",
+		"base_cost": 20_000_000,
+		"build_days": 4,
+		"mass_kg": 1000.0,
 		"hex_size": 2,
-		"test_cost_per_cycle": 1_000_000,
-		"test_days_per_cycle": 2,
-		"quality_per_test": 10.0
+		"quality": 70.0,
+		"test_cost_per_cycle": 500_000,
+		"test_days_per_cycle": 1,
+		"quality_per_test": 12.0
 	})
 
 static func create_hangar() -> Dictionary:
 	return GameTypes.create_component({
 		"id": "hangar",
 		"display_name": "Hangar Bay",
-		"description": "Storage for rovers and smaller vehicles.",
-		"base_cost": 80_000_000,
-		"build_days": 35,
-		"mass_kg": 4000.0,
+		"description": "Storage for rovers. Enables surface exploration on Mars.",
+		"base_cost": 60_000_000,
+		"build_days": 10,
+		"mass_kg": 3000.0,
 		"hex_size": 3,
-		"test_cost_per_cycle": 3_000_000,
-		"test_days_per_cycle": 3,
-		"quality_per_test": 7.0
+		"quality": 60.0,
+		"test_cost_per_cycle": 2_000_000,
+		"test_days_per_cycle": 2,
+		"quality_per_test": 8.0
 	})
 
 static func create_mav_dock() -> Dictionary:
 	return GameTypes.create_component({
 		"id": "mav_dock",
 		"display_name": "MAV Docking Bay",
-		"description": "Mars Ascent Vehicle docking and storage. Required to return from Mars surface.",
+		"description": "Mars Ascent Vehicle dock. REQUIRED to return from Mars.",
 		"base_cost": 150_000_000,
-		"build_days": 60,
-		"mass_kg": 5000.0,
+		"build_days": 15,
+		"mass_kg": 4000.0,
 		"hex_size": 3,
-		"test_cost_per_cycle": 8_000_000,
-		"test_days_per_cycle": 5,
-		"quality_per_test": 5.0
+		"quality": 50.0,
+		"test_cost_per_cycle": 5_000_000,
+		"test_days_per_cycle": 3,
+		"quality_per_test": 6.0
 	})
 
 static func create_science_lab() -> Dictionary:
 	return GameTypes.create_component({
 		"id": "science_lab",
 		"display_name": "Science Laboratory",
-		"description": "Onboard lab for analyzing samples during transit.",
-		"base_cost": 60_000_000,
-		"build_days": 40,
-		"mass_kg": 2500.0,
+		"description": "Analyze samples during transit. Improves experiment success.",
+		"base_cost": 45_000_000,
+		"build_days": 8,
+		"mass_kg": 2000.0,
 		"hex_size": 2,
-		"test_cost_per_cycle": 2_000_000,
+		"quality": 55.0,
+		"test_cost_per_cycle": 1_500_000,
 		"test_days_per_cycle": 2,
-		"quality_per_test": 8.0
+		"quality_per_test": 10.0
 	})
 
 static func create_medical_bay() -> Dictionary:
 	return GameTypes.create_component({
 		"id": "medical_bay",
 		"display_name": "Medical Bay",
-		"description": "Emergency medical facility for treating injuries and illness.",
+		"description": "Treat injuries and illness. Essential for crew survival.",
 		"base_cost": 40_000_000,
-		"build_days": 25,
-		"mass_kg": 1200.0,
+		"build_days": 7,
+		"mass_kg": 1000.0,
 		"hex_size": 1,
+		"quality": 55.0,
 		"test_cost_per_cycle": 1_500_000,
 		"test_days_per_cycle": 2,
 		"quality_per_test": 10.0
@@ -217,14 +227,15 @@ static func create_life_support() -> Dictionary:
 	return GameTypes.create_component({
 		"id": "life_support",
 		"display_name": "Life Support System",
-		"description": "Air recycling, water reclamation, and temperature control.",
-		"base_cost": 90_000_000,
-		"build_days": 50,
-		"mass_kg": 3500.0,
+		"description": "Air/water recycling. Higher quality = less supply consumption.",
+		"base_cost": 80_000_000,
+		"build_days": 12,
+		"mass_kg": 2500.0,
 		"hex_size": 2,
-		"test_cost_per_cycle": 4_000_000,
-		"test_days_per_cycle": 3,
-		"quality_per_test": 6.0
+		"quality": 50.0,  # Starts low - needs testing!
+		"test_cost_per_cycle": 3_000_000,
+		"test_days_per_cycle": 2,
+		"quality_per_test": 8.0
 	})
 
 static func create_fuel_tank() -> Dictionary:
@@ -232,12 +243,13 @@ static func create_fuel_tank() -> Dictionary:
 		"id": "fuel_tank",
 		"display_name": "Fuel Tank",
 		"description": "Stores propellant for the main engine.",
-		"base_cost": 25_000_000,
-		"build_days": 15,
+		"base_cost": 15_000_000,
+		"build_days": 4,
 		"mass_kg": 500.0,
 		"hex_size": 1,
-		"test_cost_per_cycle": 1_000_000,
-		"test_days_per_cycle": 2,
+		"quality": 65.0,
+		"test_cost_per_cycle": 500_000,
+		"test_days_per_cycle": 1,
 		"quality_per_test": 12.0
 	})
 
@@ -245,12 +257,13 @@ static func create_solar_array() -> Dictionary:
 	return GameTypes.create_component({
 		"id": "solar_array",
 		"display_name": "Solar Array",
-		"description": "Generates electrical power from sunlight.",
-		"base_cost": 35_000_000,
-		"build_days": 20,
-		"mass_kg": 800.0,
+		"description": "Generates power from sunlight. Required for all systems.",
+		"base_cost": 25_000_000,
+		"build_days": 5,
+		"mass_kg": 600.0,
 		"hex_size": 1,
-		"test_cost_per_cycle": 800_000,
+		"quality": 65.0,
+		"test_cost_per_cycle": 500_000,
 		"test_days_per_cycle": 1,
 		"quality_per_test": 12.0
 	})
@@ -260,13 +273,14 @@ static func create_comms_array() -> Dictionary:
 		"id": "comms",
 		"display_name": "Communications Array",
 		"description": "Deep space communication with Earth.",
-		"base_cost": 45_000_000,
-		"build_days": 25,
-		"mass_kg": 600.0,
+		"base_cost": 30_000_000,
+		"build_days": 6,
+		"mass_kg": 500.0,
 		"hex_size": 1,
-		"test_cost_per_cycle": 1_200_000,
-		"test_days_per_cycle": 2,
-		"quality_per_test": 10.0
+		"quality": 60.0,
+		"test_cost_per_cycle": 800_000,
+		"test_days_per_cycle": 1,
+		"quality_per_test": 12.0
 	})
 
 static func get_all_components() -> Array:

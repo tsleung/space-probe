@@ -18,6 +18,18 @@ extends Control
 @onready var hire_button: Button = $HBoxContainer/SidePanel/TabContainer/Crew/VBox/HireButton
 @onready var mav_check: CheckBox = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/MAVCheck
 @onready var rovers_check: CheckBox = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/RoversCheck
+# Supply sliders
+@onready var food_slider: HSlider = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/FoodHBox/FoodSlider
+@onready var food_value_label: Label = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/FoodHBox/FoodValue
+@onready var water_slider: HSlider = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/WaterHBox/WaterSlider
+@onready var water_value_label: Label = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/WaterHBox/WaterValue
+@onready var oxygen_slider: HSlider = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/OxygenHBox/OxygenSlider
+@onready var oxygen_value_label: Label = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/OxygenHBox/OxygenValue
+@onready var spare_parts_spin: SpinBox = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/SparePartsHBox/SparePartsSpin
+@onready var spare_parts_cost: Label = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/SparePartsHBox/SparePartsCost
+@onready var med_kits_spin: SpinBox = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/MedKitsHBox/MedKitsSpin
+@onready var med_kits_cost: Label = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/MedKitsHBox/MedKitsCost
+@onready var supply_cost_label: Label = $HBoxContainer/SidePanel/TabContainer/Cargo/VBox/SupplyCostLabel
 @onready var info_panel: Panel = $HBoxContainer/SidePanel/InfoPanel
 @onready var info_name: Label = $HBoxContainer/SidePanel/InfoPanel/VBox/NameLabel
 @onready var info_desc: RichTextLabel = $HBoxContainer/SidePanel/InfoPanel/VBox/DescLabel
@@ -60,6 +72,7 @@ func _ready():
 	_populate_lists()
 	_connect_signals()
 	_sync_ui_to_state()
+	_update_supply_display()  # Initialize supply cost display
 
 func _process(delta: float):
 	if _auto_advance:
@@ -115,6 +128,13 @@ func _connect_signals():
 	crew_options.item_selected.connect(_on_crew_option_selected)
 	crew_list.item_selected.connect(_on_hired_crew_selected)
 
+	# Supply slider signals
+	food_slider.value_changed.connect(_on_supply_slider_changed)
+	water_slider.value_changed.connect(_on_supply_slider_changed)
+	oxygen_slider.value_changed.connect(_on_supply_slider_changed)
+	spare_parts_spin.value_changed.connect(_on_supply_slider_changed)
+	med_kits_spin.value_changed.connect(_on_supply_slider_changed)
+
 	# Hex grid signals
 	hex_grid_view.cell_clicked.connect(_on_grid_cell_clicked)
 
@@ -167,6 +187,16 @@ func _on_launch_pressed():
 			GameStore.add_log("[color=red]Cannot launch: %s[/color]" % issue, "error")
 
 func _on_launch_sequence_complete():
+	# Set supplies based on player choices before starting travel
+	if not _supply_settings.is_empty():
+		GameStore.set_supply_levels(
+			_supply_settings.food_percent / 100.0,
+			_supply_settings.water_percent / 100.0,
+			_supply_settings.oxygen_percent / 100.0,
+			_supply_settings.spare_parts,
+			_supply_settings.medical_kits
+		)
+
 	# Now actually start the travel phase
 	GameStore.start_travel()
 	get_tree().change_scene_to_file("res://scenes/phases/travel.tscn")
@@ -225,6 +255,57 @@ func _on_mav_toggled(toggled: bool):
 
 func _on_rovers_toggled(toggled: bool):
 	GameStore.update_cargo("rovers", 2 if toggled else 0)
+
+func _on_supply_slider_changed(_value: float):
+	_update_supply_display()
+
+func _update_supply_display():
+	# Update slider labels
+	food_value_label.text = "%d%%" % int(food_slider.value)
+	water_value_label.text = "%d%%" % int(water_slider.value)
+	oxygen_value_label.text = "%d%%" % int(oxygen_slider.value)
+
+	# Calculate costs
+	# Spare parts: $1M each
+	# Med kits: $1M each
+	# Extra supplies beyond 100%: $100K per percentage point per resource
+	var spare_parts_count = int(spare_parts_spin.value)
+	var med_kits_count = int(med_kits_spin.value)
+
+	var spare_cost = spare_parts_count * 1_000_000
+	var med_cost = med_kits_count * 1_000_000
+
+	# Supply costs - more than 100% costs extra, less than 100% saves money
+	var food_extra = (food_slider.value - 100) * 100_000  # $100K per % over 100%
+	var water_extra = (water_slider.value - 100) * 50_000  # $50K per % (water is cheaper)
+	var oxygen_extra = (oxygen_slider.value - 100) * 80_000  # $80K per %
+
+	var base_supply_cost = 10_000_000  # $10M base for minimum supplies
+	var supply_total = base_supply_cost + food_extra + water_extra + oxygen_extra
+
+	var total_cost = spare_cost + med_cost + supply_total
+
+	spare_parts_cost.text = "($%dM)" % (spare_cost / 1_000_000)
+	med_kits_cost.text = "($%dM)" % (med_cost / 1_000_000)
+
+	if total_cost >= 0:
+		supply_cost_label.text = "Supply Cost: $%dM" % (total_cost / 1_000_000)
+		supply_cost_label.modulate = Color.WHITE
+	else:
+		supply_cost_label.text = "Supply Savings: -$%dM (risky!)" % (absi(int(total_cost)) / 1_000_000)
+		supply_cost_label.modulate = Color.ORANGE
+
+	# Store supply settings for launch
+	_supply_settings = {
+		"food_percent": food_slider.value,
+		"water_percent": water_slider.value,
+		"oxygen_percent": oxygen_slider.value,
+		"spare_parts": spare_parts_count,
+		"medical_kits": med_kits_count,
+		"total_cost": total_cost
+	}
+
+var _supply_settings: Dictionary = {}
 
 func _on_crew_option_selected(index: int):
 	if index >= 0 and index < _available_crew.size():

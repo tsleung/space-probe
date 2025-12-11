@@ -210,8 +210,19 @@ This constraint improves the game for all players - accessible pacing, clear pro
 
 ## Document Index
 
+### Core Game Design
 - [Phase 1: Ship Building](phase-1-ship-building.md)
 - [Phase 2: Travel to Mars](phase-2-travel-to-mars.md)
 - [Phase 3: Base Management](phase-3-base-management.md)
 - [Phase 4: Return Trip](phase-4-return-trip.md)
 - [Phase Transitions](phase-transitions.md)
+
+### Systems & Content
+- [Events Catalog](events-catalog.md) - All events with triggers, choices, consequences
+- [Balance & Numbers](balance-and-numbers.md) - Formulas, probabilities, resource rates
+
+### Design Research
+- [Inspirations](design-research/inspirations.md) - Analysis of game and media influences
+- [Crew & Narrative](design-research/crew-and-narrative.md) - Deep character systems
+- [Strategy & Meta](design-research/strategy-and-meta.md) - Factions, progression, resources
+- [Expanded Systems Vision](design-research/expanded-systems.md) - Future feature roadmap

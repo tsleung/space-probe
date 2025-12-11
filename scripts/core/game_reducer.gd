@@ -677,15 +677,23 @@ static func _reduce_start_travel(state: Dictionary, action: Dictionary) -> Dicti
 	var supplies = state.get("supplies", {}).duplicate()
 	var crew_count = state.crew.size()
 
-	# If supplies not loaded, calculate based on journey length + 15% margin (creates tension)
+	# Calculate supplies based on player settings or defaults
 	if supplies.get("food_kg", 0.0) <= 0:
-		# Only 15% safety margin - players need to be careful!
-		var recommended = TravelLogic.calc_recommended_supplies(crew_count, action.travel_days, 1.15)
-		supplies.food_kg = recommended.food_kg
-		supplies.water_kg = recommended.water_kg
-		supplies.oxygen_kg = recommended.oxygen_kg
-		supplies.spare_parts = 3  # Minimal spare parts
-		supplies.medical_kits = 2  # Limited medical supplies
+		# Get player's supply multipliers or use defaults
+		var mults = state.get("supply_multipliers", {})
+		var food_mult = mults.get("food", 1.15)
+		var water_mult = mults.get("water", 1.15)
+		var oxygen_mult = mults.get("oxygen", 1.15)
+		var spare_parts = mults.get("spare_parts", 3)
+		var medical_kits = mults.get("medical_kits", 2)
+
+		# Calculate base supplies needed (100% = exactly enough for journey)
+		var base = TravelLogic.calc_recommended_supplies(crew_count, action.travel_days, 1.0)
+		supplies.food_kg = base.food_kg * food_mult
+		supplies.water_kg = base.water_kg * water_mult
+		supplies.oxygen_kg = base.oxygen_kg * oxygen_mult
+		supplies.spare_parts = spare_parts
+		supplies.medical_kits = medical_kits
 
 		# Calculate how many days of supplies we have
 		var daily = TravelLogic.calc_daily_consumption(crew_count, 70.0)
@@ -700,13 +708,24 @@ static func _reduce_start_travel(state: Dictionary, action: Dictionary) -> Dicti
 			],
 			"info"
 		))
+		new_log.append(GameTypes.create_log_entry(
+			state.current_day,
+			"Spare parts: %d, Medical kits: %d" % [spare_parts, medical_kits],
+			"info"
+		))
 
 		# Warning if supplies are tight
-		if food_days < action.travel_days + 14:
+		if food_days < action.travel_days + 7:
 			new_log.append(GameTypes.create_log_entry(
 				state.current_day,
 				"WARNING: Food supplies will be tight for this journey!",
 				"event"
+			))
+		if food_days < action.travel_days:
+			new_log.append(GameTypes.create_log_entry(
+				state.current_day,
+				"CRITICAL: Food supplies are INSUFFICIENT! Rationing will be required!",
+				"error"
 			))
 
 	return GameTypes.with_fields(state, {

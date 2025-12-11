@@ -154,9 +154,120 @@ text = "MAV (Mars Ascent Vehicle) - Required"
 layout_mode = 2
 text = "Surface Rovers (2)"
 
-[node name="SuppliesLabel" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+[node name="Sep1" type="HSeparator" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
 layout_mode = 2
-text = "Supplies loaded automatically"
+
+[node name="SuppliesHeader" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Supply Levels (for 180-day journey):"
+
+[node name="FoodHBox" type="HBoxContainer" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+
+[node name="FoodLabel" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/FoodHBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(80, 0)
+text = "Food:"
+
+[node name="FoodSlider" type="HSlider" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/FoodHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 50.0
+max_value = 150.0
+value = 115.0
+
+[node name="FoodValue" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/FoodHBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(60, 0)
+text = "115%"
+
+[node name="WaterHBox" type="HBoxContainer" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+
+[node name="WaterLabel" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/WaterHBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(80, 0)
+text = "Water:"
+
+[node name="WaterSlider" type="HSlider" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/WaterHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 50.0
+max_value = 150.0
+value = 115.0
+
+[node name="WaterValue" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/WaterHBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(60, 0)
+text = "115%"
+
+[node name="OxygenHBox" type="HBoxContainer" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+
+[node name="OxygenLabel" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/OxygenHBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(80, 0)
+text = "Oxygen:"
+
+[node name="OxygenSlider" type="HSlider" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/OxygenHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 50.0
+max_value = 150.0
+value = 115.0
+
+[node name="OxygenValue" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/OxygenHBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(60, 0)
+text = "115%"
+
+[node name="Sep2" type="HSeparator" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+
+[node name="SparePartsHBox" type="HBoxContainer" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+
+[node name="SparePartsLabel" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/SparePartsHBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(100, 0)
+text = "Spare Parts:"
+
+[node name="SparePartsSpin" type="SpinBox" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/SparePartsHBox"]
+layout_mode = 2
+min_value = 1.0
+max_value = 10.0
+value = 3.0
+
+[node name="SparePartsCost" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/SparePartsHBox"]
+layout_mode = 2
+text = "($3M)"
+
+[node name="MedKitsHBox" type="HBoxContainer" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+
+[node name="MedKitsLabel" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/MedKitsHBox"]
+layout_mode = 2
+custom_minimum_size = Vector2(100, 0)
+text = "Medical Kits:"
+
+[node name="MedKitsSpin" type="SpinBox" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/MedKitsHBox"]
+layout_mode = 2
+min_value = 1.0
+max_value = 10.0
+value = 2.0
+
+[node name="MedKitsCost" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox/MedKitsHBox"]
+layout_mode = 2
+text = "($2M)"
+
+[node name="Sep3" type="HSeparator" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+
+[node name="SupplyCostLabel" type="Label" parent="HBoxContainer/SidePanel/TabContainer/Cargo/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.8, 0.2, 1)
+text = "Total Supply Cost: $15M"
 
 [node name="InfoPanel" type="Panel" parent="HBoxContainer/SidePanel"]
 visible = false

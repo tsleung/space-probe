@@ -86,8 +86,23 @@ func _init_log():
 
 func _populate_activities():
 	activity_list.clear()
+	var supplies = GameStore.get_supplies()
 	for activity in GameStore.get_available_activities():
-		activity_list.add_item("%s (%dh)" % [activity.name, activity.hours])
+		var label = activity.name
+		if activity.hours > 0:
+			label += " (%dh)" % activity.hours
+
+		# Show resource cost
+		if activity.get("requires_resource") != null:
+			var resource = activity.requires_resource
+			var cost = activity.get("resource_cost", 1)
+			var available = int(supplies.get(resource, 0))
+			if available >= cost:
+				label += " [%d %s]" % [cost, resource.replace("_", " ")]
+			else:
+				label += " [NO %s!]" % resource.replace("_", " ").to_upper()
+
+		activity_list.add_item(label)
 
 # ============================================================================
 # UI SYNC

@@ -254,6 +254,17 @@ func set_supplies(supplies: Dictionary) -> void:
 	_state = GameTypes.with_field(_state, "supplies", supplies)
 	state_changed.emit(_state)
 
+## Set supply levels based on player choice (multipliers of base amount)
+func set_supply_levels(food_mult: float, water_mult: float, oxygen_mult: float, spare_parts: int, medical_kits: int) -> void:
+	# Store multipliers for use when travel starts
+	_state = GameTypes.with_field(_state, "supply_multipliers", {
+		"food": food_mult,
+		"water": water_mult,
+		"oxygen": oxygen_mult,
+		"spare_parts": spare_parts,
+		"medical_kits": medical_kits
+	})
+
 func get_crew_deaths() -> int:
 	return _state.get("crew_deaths", 0)
 

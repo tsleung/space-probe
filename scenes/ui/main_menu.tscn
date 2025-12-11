@@ -56,6 +56,16 @@ custom_minimum_size = Vector2(0, 50)
 layout_mode = 2
 text = "New Mission"
 
+[node name="VNPGameButton" type="Button" parent="VBoxContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+text = "VNP Roguelite"
+
+[node name="ColonySimButton" type="Button" parent="VBoxContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+text = "Colony Sim"
+
 [node name="LoadButton" type="Button" parent="VBoxContainer"]
 custom_minimum_size = Vector2(0, 50)
 layout_mode = 2

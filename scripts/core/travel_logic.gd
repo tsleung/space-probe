@@ -748,6 +748,259 @@ static func apply_medical_activity(
 	}
 
 # ============================================================================
+# CRISIS EVENTS - Hard choices that define the game
+# ============================================================================
+
+## Generate crisis events - these pause the game and require player decision (pure)
+static func generate_crisis_event(state: Dictionary, event_type_roll: float, severity_roll: float) -> Dictionary:
+	# Pick crisis type based on roll
+	if event_type_roll < 0.25:
+		return _generate_life_support_crisis(state, severity_roll)
+	elif event_type_roll < 0.5:
+		return _generate_medical_crisis(state, severity_roll)
+	elif event_type_roll < 0.75:
+		return _generate_supply_crisis(state, severity_roll)
+	else:
+		return _generate_crew_conflict(state, severity_roll)
+
+static func _generate_life_support_crisis(state: Dictionary, severity: float) -> Dictionary:
+	var supplies = state.get("supplies", {})
+	var spare_parts = int(supplies.get("spare_parts", 0))
+
+	return {
+		"type": "crisis",
+		"id": "life_support_failure",
+		"title": "LIFE SUPPORT MALFUNCTION",
+		"description": "Warning alarms blare throughout the ship. The life support system is failing!\n\nOxygen recycling has dropped to 40% efficiency. Without action, you'll burn through oxygen reserves twice as fast.",
+		"choices": [
+			{
+				"id": "a",
+				"text": "Emergency repair (uses 2 spare parts)" if spare_parts >= 2 else "Emergency repair [NOT ENOUGH PARTS]",
+				"consequence_text": "The engineer works through the night. Life support is restored to full function." if spare_parts >= 2 else "You don't have enough spare parts!",
+				"enabled": spare_parts >= 2,
+				"effects": {
+					"supplies": {"spare_parts": spare_parts - 2},
+					"component_quality_boost": {"life_support": 20.0}
+				} if spare_parts >= 2 else {}
+			},
+			{
+				"id": "b",
+				"text": "Partial repair (uses 1 spare part, 70% efficiency)" if spare_parts >= 1 else "Partial repair [NOT ENOUGH PARTS]",
+				"consequence_text": "A temporary fix. Life support runs at 70% - oxygen consumption increased." if spare_parts >= 1 else "You don't have enough spare parts!",
+				"enabled": spare_parts >= 1,
+				"effects": {
+					"supplies": {"spare_parts": spare_parts - 1},
+					"component_quality_boost": {"life_support": 10.0},
+					"temporary_oxygen_penalty": 1.3  # 30% more oxygen use
+				} if spare_parts >= 1 else {}
+			},
+			{
+				"id": "c",
+				"text": "Ration oxygen (no parts, crew health suffers)",
+				"consequence_text": "The crew huddles together, breathing slowly. Everyone feels lightheaded for days.",
+				"enabled": true,
+				"effects": {
+					"crew_health_penalty": -10.0,
+					"crew_morale_penalty": -15.0
+				}
+			}
+		]
+	}
+
+static func _generate_medical_crisis(state: Dictionary, severity: float) -> Dictionary:
+	var crew = state.get("crew", [])
+	var supplies = state.get("supplies", {})
+	var medical_kits = int(supplies.get("medical_kits", 0))
+
+	# Pick a victim
+	var victim_index = int(severity * crew.size()) % crew.size()
+	var victim = crew[victim_index] if not crew.is_empty() else {"display_name": "Unknown"}
+
+	var injury_type = "acute appendicitis" if severity < 0.5 else "internal bleeding from a fall"
+
+	return {
+		"type": "crisis",
+		"id": "medical_emergency",
+		"title": "MEDICAL EMERGENCY",
+		"description": "%s has collapsed!\n\nDiagnosis: %s. Without treatment, they could die within days." % [victim.display_name, injury_type],
+		"victim_index": victim_index,
+		"choices": [
+			{
+				"id": "a",
+				"text": "Full surgery (2 medical kits, high success)" if medical_kits >= 2 else "Full surgery [NOT ENOUGH KITS]",
+				"consequence_text": "The operation is successful. %s will need rest but will recover fully." % victim.display_name if medical_kits >= 2 else "You don't have enough medical supplies!",
+				"enabled": medical_kits >= 2,
+				"effects": {
+					"supplies": {"medical_kits": medical_kits - 2},
+					"victim_heal": 30.0,
+					"victim_cure": true
+				} if medical_kits >= 2 else {}
+			},
+			{
+				"id": "b",
+				"text": "Conservative treatment (1 kit, moderate success)" if medical_kits >= 1 else "Conservative treatment [NOT ENOUGH KITS]",
+				"consequence_text": "Pain management and monitoring. %s stabilizes but remains weakened." % victim.display_name if medical_kits >= 1 else "You don't have enough medical supplies!",
+				"enabled": medical_kits >= 1,
+				"effects": {
+					"supplies": {"medical_kits": medical_kits - 1},
+					"victim_heal": 15.0
+				} if medical_kits >= 1 else {}
+			},
+			{
+				"id": "c",
+				"text": "Let them rest (no supplies, hope for the best)",
+				"consequence_text": "%s's condition worsens. They're in constant pain and can barely function." % victim.display_name,
+				"enabled": true,
+				"effects": {
+					"victim_damage": -20.0,
+					"victim_sick": true
+				}
+			}
+		]
+	}
+
+static func _generate_supply_crisis(state: Dictionary, severity: float) -> Dictionary:
+	var supplies = state.get("supplies", {})
+	var food = supplies.get("food_kg", 0.0)
+	var water = supplies.get("water_kg", 0.0)
+
+	var lost_resource = "food" if severity < 0.5 else "water"
+	var lost_amount = 50.0 + severity * 100.0  # 50-150 kg lost
+
+	return {
+		"type": "crisis",
+		"id": "cargo_breach",
+		"title": "CARGO BAY BREACH",
+		"description": "A micrometeorite has punctured the cargo bay!\n\n%.0f kg of %s is venting into space. You have seconds to decide." % [lost_amount, lost_resource],
+		"choices": [
+			{
+				"id": "a",
+				"text": "Seal the breach immediately (lose the supplies)",
+				"consequence_text": "The breach is sealed. The %s is lost, but the ship is safe." % lost_resource,
+				"enabled": true,
+				"effects": {
+					"supply_loss": {lost_resource + "_kg": lost_amount}
+				}
+			},
+			{
+				"id": "b",
+				"text": "Try to save supplies first (risky)",
+				"consequence_text": "The crew scrambles to recover supplies. Some are saved, but the breach widens.",
+				"enabled": true,
+				"effects": {
+					"supply_loss": {lost_resource + "_kg": lost_amount * 0.5},
+					"component_damage": {"cargo": 15.0}
+				}
+			},
+			{
+				"id": "c",
+				"text": "Send someone to manually seal from outside (dangerous)",
+				"consequence_text": "A brave EVA saves most of the supplies, but the crew member is injured.",
+				"enabled": true,
+				"effects": {
+					"supply_loss": {lost_resource + "_kg": lost_amount * 0.2},
+					"random_crew_injury": true
+				}
+			}
+		]
+	}
+
+static func _generate_crew_conflict(state: Dictionary, severity: float) -> Dictionary:
+	var crew = state.get("crew", [])
+	if crew.size() < 2:
+		return {}
+
+	var crew1_idx = int(severity * crew.size()) % crew.size()
+	var crew2_idx = (crew1_idx + 1) % crew.size()
+	var crew1 = crew[crew1_idx]
+	var crew2 = crew[crew2_idx]
+
+	return {
+		"type": "crisis",
+		"id": "crew_conflict",
+		"title": "CREW CONFLICT",
+		"description": "Tensions have boiled over between %s and %s!\n\n%s accuses %s of incompetence. The argument has turned physical." % [crew1.display_name, crew2.display_name, crew1.display_name, crew2.display_name],
+		"crew1_index": crew1_idx,
+		"crew2_index": crew2_idx,
+		"choices": [
+			{
+				"id": "a",
+				"text": "Side with %s" % crew1.display_name,
+				"consequence_text": "%s feels vindicated. %s is humiliated and resentful." % [crew1.display_name, crew2.display_name],
+				"enabled": true,
+				"effects": {
+					"crew1_morale": 10.0,
+					"crew2_morale": -25.0,
+					"crew2_effectiveness_penalty": 0.8
+				}
+			},
+			{
+				"id": "b",
+				"text": "Side with %s" % crew2.display_name,
+				"consequence_text": "%s feels vindicated. %s is humiliated and resentful." % [crew2.display_name, crew1.display_name],
+				"enabled": true,
+				"effects": {
+					"crew2_morale": 10.0,
+					"crew1_morale": -25.0,
+					"crew1_effectiveness_penalty": 0.8
+				}
+			},
+			{
+				"id": "c",
+				"text": "Force them to work it out together",
+				"consequence_text": "After hours of mediation, they reach an uneasy truce. Both are exhausted.",
+				"enabled": true,
+				"effects": {
+					"crew1_morale": -10.0,
+					"crew2_morale": -10.0,
+					"crew1_fatigue": 30.0,
+					"crew2_fatigue": 30.0
+				}
+			}
+		]
+	}
+
+## Check if a crisis should trigger (pure)
+static func check_for_crisis(state: Dictionary, random_roll: float, type_roll: float, severity_roll: float) -> Dictionary:
+	# Base 3% chance per day for a crisis
+	var crisis_chance = 0.03
+
+	# Increase chance if things are going badly
+	var supplies = state.get("supplies", {})
+	var crew = state.get("crew", [])
+
+	# Low supplies increase crisis chance
+	var travel_day = state.get("travel_day", 0)
+	var travel_total = state.get("travel_total_days", 180)
+	var days_remaining = travel_total - travel_day
+
+	for key in ["food_kg", "water_kg", "oxygen_kg"]:
+		var amount = supplies.get(key, 0.0)
+		if amount < days_remaining * 2:  # Less than 2 days per person roughly
+			crisis_chance += 0.02
+
+	# Low morale increases crisis chance
+	var avg_morale = 0.0
+	for member in crew:
+		avg_morale += member.morale
+	if not crew.is_empty():
+		avg_morale /= crew.size()
+	if avg_morale < 40:
+		crisis_chance += 0.03
+
+	if random_roll >= crisis_chance:
+		return {"triggered": false}
+
+	var crisis = generate_crisis_event(state, type_roll, severity_roll)
+	if crisis.is_empty():
+		return {"triggered": false}
+
+	return {
+		"triggered": true,
+		"crisis": crisis
+	}
+
+# ============================================================================
 # ARRIVAL CHECKS (pure)
 # ============================================================================
 
