@@ -1,5 +1,6 @@
 ## Main Game Reducer
-## Routes actions to phase-specific reducers and handles global actions.
+## Handles global actions (new game, phase change, logging, flags).
+## Phase-specific reducers are called by GameStore directly.
 ##
 ## All functions are static and pure.
 class_name GameReducerV2
@@ -10,53 +11,38 @@ extends RefCounted
 ## MAIN REDUCER
 ## ============================================================================
 
-## Main reducer entry point - routes to phase-specific reducers
+## Main reducer entry point - handles global actions only
+## Phase routing is done by GameStore
 static func reduce(
 	state: Dictionary,
 	action: Dictionary,
 	balance: Dictionary,
-	rng: RNGManager
+	rng  # RandomNumberGenerator or RNGManager
 ) -> Dictionary:
 	var action_type = action.get("type", "")
 
-	# Handle global actions first
+	# Handle global actions
 	if _is_global_action(action_type):
 		return _reduce_global(state, action, balance, rng)
 
-	# Route to phase-specific reducer
-	var phase = state.get("phase", "")
-
-	match phase:
-		"ship_building":
-			return ShipBuildingReducer.reduce(state, action, balance, rng)
-
-		"travel_to_mars", "travel_to_earth":
-			return TravelReducer.reduce(state, action, balance, rng)
-
-		"mars_arrival", "mars_base":
-			return MarsReducer.reduce(state, action, balance, rng)
-
-		"earth_arrival":
-			return _reduce_earth_arrival(state, action, balance, rng)
-
-		"game_over":
-			return _reduce_game_over(state, action, balance)
-
-		_:
-			return state
+	# If not a global action, return state unchanged
+	# (GameStore handles phase-specific routing)
+	return state
 
 
 ## Check if action is global (not phase-specific)
 static func _is_global_action(action_type: String) -> bool:
 	return action_type in [
-		ActionTypes.NEW_GAME,
-		ActionTypes.LOAD_GAME,
-		ActionTypes.SAVE_GAME,
-		ActionTypes.CHANGE_PHASE,
-		ActionTypes.ADD_LOG,
-		ActionTypes.SET_FLAG,
-		ActionTypes.CLEAR_FLAG,
-		ActionTypes.UPDATE_SETTINGS
+		"NEW_GAME",
+		"INITIALIZE_GAME",
+		"LOAD_GAME",
+		"SAVE_GAME",
+		"CHANGE_PHASE",
+		"ADD_LOG",
+		"SET_FLAG",
+		"CLEAR_FLAG",
+		"UPDATE_SETTINGS",
+		"RESTART_GAME"
 	]
 
 
@@ -69,28 +55,31 @@ static func _reduce_global(
 	state: Dictionary,
 	action: Dictionary,
 	balance: Dictionary,
-	rng: RNGManager
+	rng  # RandomNumberGenerator
 ) -> Dictionary:
 	var action_type = action.get("type", "")
 
 	match action_type:
-		ActionTypes.NEW_GAME:
+		"NEW_GAME", "INITIALIZE_GAME":
 			return _reduce_new_game(action, balance, rng)
 
-		ActionTypes.LOAD_GAME:
+		"LOAD_GAME":
 			return _reduce_load_game(action)
 
-		ActionTypes.CHANGE_PHASE:
+		"CHANGE_PHASE":
 			return _reduce_change_phase(state, action)
 
-		ActionTypes.ADD_LOG:
+		"ADD_LOG":
 			return _add_log(state, action.get("message", ""), action.get("log_type", "info"))
 
-		ActionTypes.SET_FLAG:
+		"SET_FLAG":
 			return _set_flag(state, action.get("flag", ""), action.get("value", true))
 
-		ActionTypes.CLEAR_FLAG:
+		"CLEAR_FLAG":
 			return _set_flag(state, action.get("flag", ""), false)
+
+		"RESTART_GAME":
+			return {}  # Return empty state to trigger new game
 
 		_:
 			return state
@@ -100,28 +89,49 @@ static func _reduce_global(
 static func _reduce_new_game(
 	action: Dictionary,
 	balance: Dictionary,
-	rng: RNGManager
+	_rng  # RandomNumberGenerator
 ) -> Dictionary:
 	var game_id = action.get("game_id", "mars_mission")
 	var difficulty = action.get("difficulty", "normal")
 
-	# Create initial state
-	var state = GameTypes.create_game_state(game_id, difficulty)
+	# Create initial state inline (no external dependencies)
+	var state = {
+		"game_id": game_id,
+		"difficulty": difficulty,
+		"current_phase": "ship_building",
+		"phase": "ship_building",
+		"current_day": 1,
+		"current_sol": 0,
+		"total_travel_days": 0,
+		"travel_day": 0,
+		"meta": {
+			"created_at": Time.get_datetime_string_from_system(),
+			"last_saved": null,
+			"play_time_seconds": 0
+		}
+	}
 
-	# Apply difficulty modifiers
+	# Apply difficulty modifiers from balance.json
 	var difficulty_config = balance.get("difficulties", {}).get(difficulty, {})
 	state["difficulty_modifiers"] = difficulty_config
 
-	# Set initial budget
-	state["budget"] = balance.get("starting_budget", 500000000)
-	state["budget"] = int(state["budget"] * difficulty_config.get("budget_multiplier", 1.0))
+	# Set initial budget (from balance or default)
+	var base_budget = balance.get("starting_budget", 650000000)
+	state["budget"] = int(base_budget * difficulty_config.get("budget_multiplier", 1.0))
 
-	# Set launch window
-	state["launch_window_day"] = balance.get("optimal_launch_day", 365)
+	# Set launch window (from balance or default)
+	state["launch_window_day"] = balance.get("optimal_launch_day", 75)
 
-	# Initialize ship
+	# Initialize ship structure
 	state["ship"] = {
 		"components": {},
+		"selected_engine": null,
+		"total_mass": 0.0,
+		"power_capacity": 0.0,
+		"power_draw": 0.0,
+		"cargo_capacity": 0.0,
+		"cargo_used": 0.0,
+		"average_quality": 0.0,
 		"grid_bounds": {
 			"min_q": -7,
 			"max_q": 7,
@@ -130,24 +140,30 @@ static func _reduce_new_game(
 		}
 	}
 
-	# Initialize resources
+	# Initialize resources (default capacities from balance)
+	var resource_caps = balance.get("resource_capacities", {})
 	state["resources"] = {
-		"food": {"current": 0, "max": 10000},
-		"water": {"current": 0, "max": 10000},
-		"oxygen": {"current": 0, "max": 5000},
-		"fuel": {"current": 0, "max": 50000},
-		"spare_parts": {"current": 0, "max": 20},
-		"medical_supplies": {"current": 0, "max": 10}
+		"food": {"current": 0, "max": resource_caps.get("food", 10000)},
+		"water": {"current": 0, "max": resource_caps.get("water", 10000)},
+		"oxygen": {"current": 0, "max": resource_caps.get("oxygen", 5000)},
+		"fuel": {"current": 0, "max": resource_caps.get("fuel", 50000)},
+		"spare_parts": {"current": 0, "max": resource_caps.get("spare_parts", 20)},
+		"medical_supplies": {"current": 0, "max": resource_caps.get("medical_supplies", 10)}
 	}
 
-	# Initialize empty arrays
+	# Initialize empty arrays/dicts
 	state["crew"] = []
 	state["event_log"] = []
+	state["mission_log"] = []
 	state["flags"] = {}
 	state["event_cooldowns"] = {}
 	state["event_counts"] = {}
 
-	state = _add_log(state, "Mission initialized. Construction begins.", "info")
+	# Set phase to ship_building
+	state["current_phase"] = "ship_building"
+	state["phase"] = "ship_building"
+
+	state = _add_log(state, "Mission initialized. Construction begins on Luna Base.", "info")
 
 	return state
 

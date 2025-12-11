@@ -14,6 +14,7 @@ extends RefCounted
 ## ============================================================================
 
 ## Game lifecycle
+const NEW_GAME = "NEW_GAME"
 const INITIALIZE_GAME = "INITIALIZE_GAME"
 const LOAD_GAME = "LOAD_GAME"
 const SAVE_GAME = "SAVE_GAME"
@@ -26,9 +27,16 @@ const END_PHASE = "END_PHASE"
 
 ## Time progression
 const ADVANCE_TIME = "ADVANCE_TIME"
+const ADVANCE_DAY = "ADVANCE_DAY"
 const PAUSE_TIME = "PAUSE_TIME"
 const RESUME_TIME = "RESUME_TIME"
 const SET_TIME_SPEED = "SET_TIME_SPEED"
+
+## Logging and flags
+const ADD_LOG = "ADD_LOG"
+const SET_FLAG = "SET_FLAG"
+const CLEAR_FLAG = "CLEAR_FLAG"
+const UPDATE_SETTINGS = "UPDATE_SETTINGS"
 
 
 ## ============================================================================
@@ -40,11 +48,14 @@ const REMOVE_COMPONENT = "REMOVE_COMPONENT"
 const ROTATE_COMPONENT = "ROTATE_COMPONENT"
 const START_COMPONENT_TEST = "START_COMPONENT_TEST"
 const COMPLETE_COMPONENT_TEST = "COMPLETE_COMPONENT_TEST"
+const TEST_COMPONENT = "TEST_COMPONENT"
 const REPAIR_COMPONENT = "REPAIR_COMPONENT"
 const SELECT_ENGINE = "SELECT_ENGINE"
 const PURCHASE_SUPPLIES = "PURCHASE_SUPPLIES"
 const SET_SUPPLY_AMOUNT = "SET_SUPPLY_AMOUNT"
+const LOAD_CARGO = "LOAD_CARGO"
 const START_LAUNCH = "START_LAUNCH"
+const LAUNCH = "LAUNCH"
 
 
 ## ============================================================================
@@ -53,6 +64,7 @@ const START_LAUNCH = "START_LAUNCH"
 
 const HIRE_CREW = "HIRE_CREW"
 const FIRE_CREW = "FIRE_CREW"
+const DISMISS_CREW = "DISMISS_CREW"
 const ASSIGN_CREW_TASK = "ASSIGN_CREW_TASK"
 const TRAIN_CREW = "TRAIN_CREW"
 const REST_CREW = "REST_CREW"
@@ -119,6 +131,14 @@ const PREPARE_DEPARTURE = "PREPARE_DEPARTURE"
 
 const ADD_LOG_ENTRY = "ADD_LOG_ENTRY"
 const ADD_MISSION_MILESTONE = "ADD_MISSION_MILESTONE"
+
+
+## ============================================================================
+## GAME END ACTIONS
+## ============================================================================
+
+const BEGIN_REENTRY = "BEGIN_REENTRY"
+const RESTART_GAME = "RESTART_GAME"
 
 
 ## ============================================================================
