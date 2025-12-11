@@ -208,7 +208,7 @@ func advance_travel_day() -> void:
 	dispatch(GameReducer.action_advance_travel_day(random_values))
 
 func assign_crew_activity(crew_id: String, activity_id: String) -> void:
-	dispatch(GameReducer.action_assign_activity(crew_id, activity_id))
+	dispatch(GameReducer.action_assign_activity(crew_id, activity_id, _rng.randf()))
 
 func get_travel_progress() -> Dictionary:
 	var travel_day = _state.get("travel_day", 0)
@@ -246,6 +246,16 @@ func get_experiments_completed() -> Array:
 
 func get_samples_collected() -> Dictionary:
 	return _state.get("samples_collected", {}).duplicate()
+
+func get_supplies() -> Dictionary:
+	return _state.get("supplies", {}).duplicate()
+
+func set_supplies(supplies: Dictionary) -> void:
+	_state = GameTypes.with_field(_state, "supplies", supplies)
+	state_changed.emit(_state)
+
+func get_crew_deaths() -> int:
+	return _state.get("crew_deaths", 0)
 
 # ============================================================================
 # RANDOM EVENT CHECKING (side effect: uses RNG)

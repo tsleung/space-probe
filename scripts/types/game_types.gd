@@ -48,6 +48,19 @@ enum EventType {
 	DISCOVERY
 }
 
+enum PersonalityTrait {
+	OPTIMIST,      # Higher morale baseline, recovers faster
+	PESSIMIST,     # Lower morale baseline, affects others negatively in crisis
+	LEADER,        # Boosts team morale in crisis
+	LONER,         # Works better alone, doesn't gain morale from social events
+	CARETAKER,     # Boosts others' health/morale when assigned to help
+	RISK_TAKER,    # Higher success in experiments, higher failure consequences
+	CAUTIOUS,      # Lower success chance but fewer catastrophic failures
+	STOIC,         # Morale doesn't swing much, good or bad
+	HOMESICK,      # Morale decays faster, affected by Earth comms
+	CURIOUS        # Science bonus, morale boost from discoveries
+}
+
 # ============================================================================
 # DATA STRUCTURES (Dictionaries as immutable-style records)
 # ============================================================================
@@ -107,7 +120,16 @@ static func create_crew_member(overrides: Dictionary = {}) -> Dictionary:
 		"is_sick": false,
 		"is_injured": false,
 		"sickness_type": "",
-		"days_sick": 0
+		"days_sick": 0,
+		# PERSONALITY - Makes crew feel like real people
+		"personality": PersonalityTrait.OPTIMIST,  # Primary personality trait
+		"backstory": "",                           # Short backstory snippet
+		"personal_goal": "",                       # What they hope to achieve
+		"quirk": "",                               # Memorable detail
+		# RELATIONSHIPS - Connections with other crew
+		"relationships": {},                       # crew_id -> trust level (-100 to 100)
+		"had_conflict_with": [],                   # IDs of crew they've had conflicts with
+		"bonded_with": []                          # IDs of crew they've bonded with
 	}
 	return _merge(defaults, overrides)
 
@@ -116,8 +138,8 @@ static func create_game_state(overrides: Dictionary = {}) -> Dictionary:
 	var defaults = {
 		"current_phase": GamePhase.MAIN_MENU,
 		"current_day": 1,
-		"launch_window_day": 180,
-		"budget": 2_000_000_000,
+		"launch_window_day": 75,  # Normal difficulty: 75 days to launch window
+		"budget": 650_000_000,    # Normal difficulty: $650M starting budget
 		"total_spent": 0,
 		"ship_components": [],  # Array of ComponentData
 		"selected_engine": null,  # EngineData or null
@@ -136,6 +158,15 @@ static func create_game_state(overrides: Dictionary = {}) -> Dictionary:
 			"rovers": 0,
 			"mav": false
 		},
+		# SUPPLIES - The core survival resources (kg)
+		"supplies": {
+			"food_kg": 0.0,        # Crew eats ~2kg/person/day
+			"water_kg": 0.0,       # ~3kg/person/day (recycled to ~0.9kg)
+			"oxygen_kg": 0.0,      # ~0.84kg/person/day (recycled to ~0.25kg)
+			"fuel_kg": 0.0,        # For engine burns
+			"spare_parts": 0,      # For repairs
+			"medical_kits": 0      # For treating injuries/illness
+		},
 		"science_equipment": {
 			"soil_analyzer": false,
 			"ice_core_drill": false,
@@ -144,7 +175,10 @@ static func create_game_state(overrides: Dictionary = {}) -> Dictionary:
 			"microscope": false
 		},
 		"mission_log": [],
-		"random_seed": 0
+		"random_seed": 0,
+		# Track critical failures
+		"crew_deaths": 0,
+		"critical_failures": []
 	}
 	return _merge(defaults, overrides)
 

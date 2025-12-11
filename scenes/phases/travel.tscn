@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3 uid="uid://dkwm3x8t1vqe"]
+[gd_scene load_steps=3 format=3 uid="uid://dkwm3x8t1vqe"]
 
 [ext_resource type="Script" path="res://scripts/phases/travel.gd" id="1_travel"]
+[ext_resource type="PackedScene" uid="uid://bqxe4r8nwvjsd" path="res://scenes/ui/event_popup.tscn" id="2_popup"]
 
 [node name="Travel" type="Control"]
 layout_mode = 3
@@ -231,16 +232,31 @@ layout_mode = 2
 size_flags_horizontal = 3
 
 [node name="AdvanceButton" type="Button" parent="BottomBar"]
-custom_minimum_size = Vector2(150, 0)
+custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
-text = "Advance Day"
+text = "+1 Day"
 
 [node name="AdvanceWeekButton" type="Button" parent="BottomBar"]
-custom_minimum_size = Vector2(150, 0)
+custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
-text = "Advance Week"
+text = "+7 Days"
 
 [node name="AutoTravelButton" type="Button" parent="BottomBar"]
-custom_minimum_size = Vector2(150, 0)
+custom_minimum_size = Vector2(80, 0)
 layout_mode = 2
-text = "Auto Travel"
+toggle_mode = true
+text = "Auto"
+
+[node name="SpeedSlider" type="HSlider" parent="BottomBar"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+min_value = 1.0
+max_value = 20.0
+value = 5.0
+
+[node name="SpeedLabel" type="Label" parent="BottomBar"]
+layout_mode = 2
+text = "5x"
+
+[node name="EventPopup" parent="." instance=ExtResource("2_popup")]
+visible = false

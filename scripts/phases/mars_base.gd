@@ -25,6 +25,10 @@ extends Control
 @onready var event_log: RichTextLabel = $MainContent/RightPanel/EventLog
 
 @onready var advance_button: Button = $BottomBar/AdvanceButton
+@onready var advance_week_button: Button = $BottomBar/AdvanceWeekButton
+@onready var auto_button: Button = $BottomBar/AutoButton
+@onready var speed_slider: HSlider = $BottomBar/SpeedSlider
+@onready var speed_label: Label = $BottomBar/SpeedLabel
 @onready var return_button: Button = $BottomBar/ReturnButton
 
 # ============================================================================
@@ -33,6 +37,9 @@ extends Control
 
 var _selected_crew_id: String = ""
 var _selected_experiment: Dictionary = {}
+var _auto_advance: bool = false
+var _auto_advance_timer: float = 0.0
+var _auto_advance_speed: float = 0.2
 
 # ============================================================================
 # LIFECYCLE
@@ -49,12 +56,22 @@ func _ready():
 	if GameStore.get_mars_sol() == 0:
 		GameStore.start_mars_operations()
 
+func _process(delta: float):
+	if _auto_advance:
+		_auto_advance_timer += delta
+		if _auto_advance_timer >= _auto_advance_speed:
+			_auto_advance_timer = 0.0
+			_on_advance_sol()
+
 func _connect_signals():
 	GameStore.state_changed.connect(_on_state_changed)
 	GameStore.log_entry_added.connect(_on_log_entry)
 	GameStore.phase_changed.connect(_on_phase_changed)
 
 	advance_button.pressed.connect(_on_advance_sol)
+	advance_week_button.pressed.connect(_on_advance_week)
+	auto_button.toggled.connect(_on_auto_toggled)
+	speed_slider.value_changed.connect(_on_speed_changed)
 	return_button.pressed.connect(_on_return_to_earth)
 	experiment_list.item_selected.connect(_on_experiment_selected)
 	run_experiment_button.pressed.connect(_on_run_experiment)
@@ -227,6 +244,24 @@ func _on_advance_sol():
 	GameStore.advance_mars_sol()
 	# Check for Mars events
 	_check_mars_events()
+
+func _on_advance_week():
+	for i in range(7):
+		_on_advance_sol()
+
+func _on_auto_toggled(toggled: bool):
+	_auto_advance = toggled
+	_auto_advance_timer = 0.0
+	_sync_auto_ui()
+
+func _on_speed_changed(value: float):
+	_auto_advance_speed = 1.0 / value
+	speed_label.text = "%dx" % int(value)
+
+func _sync_auto_ui():
+	advance_button.disabled = _auto_advance
+	advance_week_button.disabled = _auto_advance
+	auto_button.text = "Stop" if _auto_advance else "Auto"
 
 func _check_mars_events():
 	var rng = RandomNumberGenerator.new()

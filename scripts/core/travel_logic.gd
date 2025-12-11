@@ -61,17 +61,107 @@ static func _calc_thrust_factor(engine: Dictionary, ship_mass_kg: float) -> floa
 		return 1.1  # Low thrust ion/plasma
 
 ## Calculate daily resource consumption (pure)
-static func calc_daily_consumption(crew_count: int, has_recycling: bool) -> Dictionary:
+static func calc_daily_consumption(crew_count: int, life_support_quality: float) -> Dictionary:
 	var base_food_kg = 2.0  # kg per person per day
 	var base_water_kg = 3.0
 	var base_oxygen_kg = 0.84
 
-	var recycling_factor = 0.3 if has_recycling else 1.0  # Life support recycles 70%
+	# Life support quality affects recycling efficiency (0% quality = no recycling, 100% = 85% recycling)
+	var recycling_efficiency = (life_support_quality / 100.0) * 0.85
+	var water_factor = 1.0 - recycling_efficiency  # 15-100% consumption
+	var oxygen_factor = 1.0 - recycling_efficiency
 
 	return {
-		"food_kg": crew_count * base_food_kg,
-		"water_kg": crew_count * base_water_kg * recycling_factor,
-		"oxygen_kg": crew_count * base_oxygen_kg * recycling_factor
+		"food_kg": crew_count * base_food_kg,  # Food can't be recycled
+		"water_kg": crew_count * base_water_kg * water_factor,
+		"oxygen_kg": crew_count * base_oxygen_kg * oxygen_factor
+	}
+
+## Calculate recommended supplies for a journey (pure)
+static func calc_recommended_supplies(crew_count: int, travel_days: int, safety_margin: float = 1.3) -> Dictionary:
+	# Assume decent (70%) life support for baseline calculations
+	var daily = calc_daily_consumption(crew_count, 70.0)
+	return {
+		"food_kg": daily.food_kg * travel_days * safety_margin,
+		"water_kg": daily.water_kg * travel_days * safety_margin,
+		"oxygen_kg": daily.oxygen_kg * travel_days * safety_margin
+	}
+
+## Apply daily supply consumption to state, returns updated supplies and any critical events (pure)
+static func consume_daily_supplies(supplies: Dictionary, crew: Array, components: Array) -> Dictionary:
+	var alive_crew = 0
+	for member in crew:
+		if member.health > 0:
+			alive_crew += 1
+
+	if alive_crew == 0:
+		return {"supplies": supplies, "events": [], "crew_updates": {}}
+
+	# Find life support quality
+	var life_support_quality = 70.0  # Default
+	for comp in components:
+		if comp.id == "life_support":
+			life_support_quality = comp.quality
+			break
+
+	var consumption = calc_daily_consumption(alive_crew, life_support_quality)
+	var new_supplies = supplies.duplicate()
+	var events: Array = []
+	var crew_updates: Dictionary = {}  # crew_id -> updates
+
+	# Consume food
+	new_supplies.food_kg = maxf(0.0, supplies.food_kg - consumption.food_kg)
+	if new_supplies.food_kg <= 0 and supplies.food_kg > 0:
+		events.append({"type": "critical", "resource": "food", "message": "FOOD DEPLETED! Crew is starving!"})
+	elif new_supplies.food_kg < consumption.food_kg * 7:
+		events.append({"type": "warning", "resource": "food", "message": "Food supplies critically low! Less than 7 days remaining."})
+
+	# Consume water
+	new_supplies.water_kg = maxf(0.0, supplies.water_kg - consumption.water_kg)
+	if new_supplies.water_kg <= 0 and supplies.water_kg > 0:
+		events.append({"type": "critical", "resource": "water", "message": "WATER DEPLETED! Crew is dehydrating!"})
+	elif new_supplies.water_kg < consumption.water_kg * 7:
+		events.append({"type": "warning", "resource": "water", "message": "Water supplies critically low! Less than 7 days remaining."})
+
+	# Consume oxygen
+	new_supplies.oxygen_kg = maxf(0.0, supplies.oxygen_kg - consumption.oxygen_kg)
+	if new_supplies.oxygen_kg <= 0 and supplies.oxygen_kg > 0:
+		events.append({"type": "critical", "resource": "oxygen", "message": "OXYGEN DEPLETED! Crew is suffocating!"})
+	elif new_supplies.oxygen_kg < consumption.oxygen_kg * 3:
+		events.append({"type": "warning", "resource": "oxygen", "message": "OXYGEN CRITICAL! Less than 3 days remaining!"})
+
+	# Apply starvation/dehydration/suffocation effects to crew
+	for i in range(crew.size()):
+		var member = crew[i]
+		if member.health <= 0:
+			continue
+
+		var updates = {}
+
+		# Starvation: -5 health per day without food
+		if new_supplies.food_kg <= 0:
+			updates["health"] = maxf(0.0, member.health - 5.0)
+			updates["morale"] = maxf(0.0, member.morale - 10.0)
+
+		# Dehydration: -10 health per day without water
+		if new_supplies.water_kg <= 0:
+			var current_health = updates.get("health", member.health)
+			updates["health"] = maxf(0.0, current_health - 10.0)
+			updates["morale"] = maxf(0.0, updates.get("morale", member.morale) - 15.0)
+
+		# Suffocation: -25 health per day without oxygen (rapid death)
+		if new_supplies.oxygen_kg <= 0:
+			var current_health = updates.get("health", member.health)
+			updates["health"] = maxf(0.0, current_health - 25.0)
+
+		if not updates.is_empty():
+			crew_updates[member.id] = updates
+
+	return {
+		"supplies": new_supplies,
+		"events": events,
+		"crew_updates": crew_updates,
+		"consumption": consumption
 	}
 
 ## Calculate fuel consumption for a day of travel (pure)
@@ -167,24 +257,37 @@ static func _generate_equipment_event(state: Dictionary, severity: float) -> Dic
 			"effects": {}
 		}
 
-	var damage = 5.0 + severity * 15.0
+	# Severity determines damage amount
+	var damage = 5.0 + severity * 20.0
+
+	# Critical failure - component destroyed if quality drops to 0
+	var new_quality = maxf(0.0, target.quality - damage)
+	var is_critical = new_quality <= 0 and target.quality > 0
+
 	var new_components = []
 	for comp in components:
 		if comp.hex_position == target.hex_position:
-			new_components.append(GameTypes.with_field(comp, "quality", maxf(0.0, comp.quality - damage)))
+			new_components.append(GameTypes.with_field(comp, "quality", new_quality))
 		else:
 			new_components.append(comp)
 
-	var descriptions = [
-		"%s showing abnormal readings. Quality reduced." % target.display_name,
-		"Minor malfunction in %s. Repairs attempted." % target.display_name,
-		"%s requires recalibration after power surge." % target.display_name,
-	]
+	var description: String
+	if is_critical:
+		description = "CRITICAL FAILURE: %s has been destroyed! System offline." % target.display_name
+	elif severity > 0.7:
+		description = "SERIOUS DAMAGE: %s critically damaged! Quality now %.0f%%" % [target.display_name, new_quality]
+	else:
+		var minor_descriptions = [
+			"%s showing abnormal readings. Quality now %.0f%%." % [target.display_name, new_quality],
+			"Minor malfunction in %s. Quality now %.0f%%." % [target.display_name, new_quality],
+			"%s requires recalibration. Quality now %.0f%%." % [target.display_name, new_quality],
+		]
+		description = minor_descriptions[int(severity * minor_descriptions.size()) % minor_descriptions.size()]
 
 	return {
 		"type": "equipment",
-		"subtype": "malfunction",
-		"description": descriptions[int(severity * descriptions.size()) % descriptions.size()],
+		"subtype": "critical" if is_critical else "malfunction",
+		"description": description,
 		"effects": {"ship_components": new_components}
 	}
 
@@ -314,26 +417,60 @@ static func _generate_discovery_event(state: Dictionary, severity: float) -> Dic
 	}
 
 static func _generate_supply_event(state: Dictionary, severity: float) -> Dictionary:
-	if severity < 0.5:
-		# Found efficiency - good event
+	var supplies = state.get("supplies", {})
+
+	if severity < 0.4:
+		# Found efficiency - good event, gain supplies
+		var bonus = 10.0 + severity * 20.0
+		var new_supplies = supplies.duplicate()
+		new_supplies["water_kg"] = supplies.get("water_kg", 0.0) + bonus
 		return {
 			"type": "supply",
 			"subtype": "efficiency",
-			"description": "Crew found ways to reduce water consumption. Supplies will last longer.",
-			"effects": {}
+			"description": "Crew optimized water recycling! Gained %.0f kg water." % bonus,
+			"effects": {"supplies": new_supplies}
 		}
-	else:
-		# Supply issue
-		var issues = [
-			"Food storage contamination detected. Some rations lost.",
-			"Water recycler efficiency dropped temporarily.",
-			"Oxygen scrubber needed filter replacement.",
-		]
+	elif severity < 0.7:
+		# Minor supply loss
+		var loss_pct = 0.05 + (severity - 0.4) * 0.1  # 5-8% loss
+		var new_supplies = supplies.duplicate()
+
+		# Pick which supply is affected
+		var supply_types = ["food_kg", "water_kg", "oxygen_kg"]
+		var affected = supply_types[int(severity * 10) % 3]
+		var loss = supplies.get(affected, 0.0) * loss_pct
+		new_supplies[affected] = maxf(0.0, supplies.get(affected, 0.0) - loss)
+
+		var descriptions = {
+			"food_kg": "Food storage contamination detected. Lost %.0f kg of rations." % loss,
+			"water_kg": "Water recycler malfunction. Lost %.0f kg of water." % loss,
+			"oxygen_kg": "Oxygen tank micro-leak detected. Lost %.0f kg of O2." % loss
+		}
+
 		return {
 			"type": "supply",
 			"subtype": "loss",
-			"description": issues[int(severity * issues.size()) % issues.size()],
-			"effects": {}
+			"description": descriptions[affected],
+			"effects": {"supplies": new_supplies}
+		}
+	else:
+		# Major supply crisis
+		var loss_pct = 0.1 + (severity - 0.7) * 0.2  # 10-16% loss
+		var new_supplies = supplies.duplicate()
+		var affected = "food_kg" if severity < 0.85 else "oxygen_kg"
+		var loss = supplies.get(affected, 0.0) * loss_pct
+		new_supplies[affected] = maxf(0.0, supplies.get(affected, 0.0) - loss)
+
+		var descriptions = {
+			"food_kg": "CRITICAL: Cargo bay depressurization! Lost %.0f kg of food supplies!" % loss,
+			"oxygen_kg": "EMERGENCY: Main O2 tank breach! Lost %.0f kg of oxygen!" % loss
+		}
+
+		return {
+			"type": "supply",
+			"subtype": "critical",
+			"description": descriptions[affected],
+			"effects": {"supplies": new_supplies}
 		}
 
 static func _generate_radiation_event(state: Dictionary, severity: float) -> Dictionary:
@@ -412,15 +549,93 @@ static func _generate_communication_event(state: Dictionary, severity: float) ->
 ## Get available activities for a crew member (pure)
 static func get_available_activities() -> Array:
 	return [
-		{"id": "rest", "name": "Rest", "fatigue_change": -20.0, "morale_change": 5.0, "hours": 8},
-		{"id": "exercise", "name": "Exercise", "fatigue_change": 10.0, "morale_change": 5.0, "health_change": 2.0, "hours": 2},
-		{"id": "work", "name": "Ship Maintenance", "fatigue_change": 15.0, "morale_change": -2.0, "hours": 6},
-		{"id": "science", "name": "Scientific Research", "fatigue_change": 10.0, "morale_change": 3.0, "hours": 4},
-		{"id": "social", "name": "Social Time", "fatigue_change": -5.0, "morale_change": 10.0, "hours": 2},
-		{"id": "medical", "name": "Medical Checkup", "fatigue_change": 5.0, "health_change": 5.0, "hours": 1},
+		{
+			"id": "rest",
+			"name": "Rest",
+			"description": "Sleep and recover. Reduces fatigue significantly.",
+			"fatigue_change": -25.0,
+			"morale_change": 3.0,
+			"hours": 8,
+			"requires_resource": null
+		},
+		{
+			"id": "exercise",
+			"name": "Exercise",
+			"description": "Use the gym to maintain health. Causes some fatigue.",
+			"fatigue_change": 15.0,
+			"morale_change": 5.0,
+			"health_change": 3.0,
+			"hours": 2,
+			"requires_resource": null
+		},
+		{
+			"id": "repair",
+			"name": "Repair Systems",
+			"description": "Fix damaged components. Uses 1 spare part. Engineer bonus.",
+			"fatigue_change": 20.0,
+			"morale_change": -3.0,
+			"hours": 6,
+			"requires_resource": "spare_parts",
+			"resource_cost": 1,
+			"repair_amount": 15.0,  # Base quality restored
+			"skill_used": "skill_engineering"
+		},
+		{
+			"id": "medical",
+			"name": "Medical Treatment",
+			"description": "Treat injuries/illness. Uses 1 medical kit. Medic bonus.",
+			"fatigue_change": 5.0,
+			"hours": 4,
+			"requires_resource": "medical_kits",
+			"resource_cost": 1,
+			"heal_amount": 25.0,  # Base health restored
+			"cure_chance": 0.6,   # Base chance to cure sickness
+			"skill_used": "skill_medical"
+		},
+		{
+			"id": "science",
+			"name": "Scientific Research",
+			"description": "Conduct experiments. Boosts morale for scientists.",
+			"fatigue_change": 10.0,
+			"morale_change": 5.0,
+			"hours": 4,
+			"requires_resource": null,
+			"skill_used": "skill_science"
+		},
+		{
+			"id": "social",
+			"name": "Social Time",
+			"description": "Bond with crew. Great for morale recovery.",
+			"fatigue_change": -5.0,
+			"morale_change": 12.0,
+			"hours": 2,
+			"requires_resource": null
+		},
+		{
+			"id": "monitor",
+			"name": "Monitor Systems",
+			"description": "Watch for problems. May prevent equipment failures.",
+			"fatigue_change": 10.0,
+			"morale_change": -2.0,
+			"hours": 4,
+			"requires_resource": null,
+			"prevents_failures": true,
+			"skill_used": "skill_engineering"
+		},
+		{
+			"id": "ration_food",
+			"name": "Ration Food",
+			"description": "Reduce food consumption by 30% today. Health/morale penalty.",
+			"fatigue_change": 0.0,
+			"morale_change": -8.0,
+			"health_change": -2.0,
+			"hours": 0,
+			"requires_resource": null,
+			"reduces_consumption": {"food_kg": 0.3}
+		}
 	]
 
-## Apply activity to crew member (pure)
+## Apply activity to crew member (pure) - returns crew updates and any side effects
 static func apply_activity(crew: Dictionary, activity: Dictionary) -> Dictionary:
 	var updates = {}
 
@@ -428,12 +643,109 @@ static func apply_activity(crew: Dictionary, activity: Dictionary) -> Dictionary
 		updates["fatigue"] = clampf(crew.fatigue + activity.fatigue_change, 0.0, 100.0)
 
 	if activity.has("morale_change"):
-		updates["morale"] = clampf(crew.morale + activity.morale_change, 0.0, 100.0)
+		# Skill bonus for matching activities
+		var morale_bonus = activity.morale_change
+		if activity.has("skill_used"):
+			var skill_value = crew.get(activity.skill_used, 50.0)
+			if skill_value > 70:
+				morale_bonus += 3.0  # Experts enjoy their work more
+		updates["morale"] = clampf(crew.morale + morale_bonus, 0.0, 100.0)
 
 	if activity.has("health_change"):
 		updates["health"] = clampf(crew.health + activity.health_change, 0.0, 100.0)
 
 	return GameTypes.with_fields(crew, updates)
+
+## Apply repair activity - returns result with component updates and resource cost (pure)
+static func apply_repair_activity(
+	crew: Dictionary,
+	components: Array,
+	spare_parts: int,
+	random_value: float
+) -> Dictionary:
+	if spare_parts <= 0:
+		return {"success": false, "reason": "No spare parts available"}
+
+	# Find most damaged component
+	var worst_component = null
+	var worst_quality = 100.0
+	var worst_index = -1
+	for i in range(components.size()):
+		if components[i].quality < worst_quality and components[i].quality < 90:
+			worst_quality = components[i].quality
+			worst_component = components[i]
+			worst_index = i
+
+	if worst_component == null:
+		return {"success": false, "reason": "No components need repair"}
+
+	# Calculate repair amount based on engineer skill
+	var skill = crew.get("skill_engineering", 50.0)
+	var base_repair = 15.0
+	var skill_bonus = (skill - 50.0) / 50.0 * 10.0  # -10 to +10 based on skill
+	var random_factor = 0.8 + random_value * 0.4  # 0.8 to 1.2
+	var repair_amount = (base_repair + skill_bonus) * random_factor
+
+	# Apply repair
+	var new_components = components.duplicate()
+	var new_quality = minf(100.0, worst_component.quality + repair_amount)
+	new_components[worst_index] = GameTypes.with_field(worst_component, "quality", new_quality)
+
+	return {
+		"success": true,
+		"components": new_components,
+		"spare_parts_used": 1,
+		"component_repaired": worst_component.display_name,
+		"quality_restored": repair_amount,
+		"new_quality": new_quality
+	}
+
+## Apply medical treatment activity (pure)
+static func apply_medical_activity(
+	patient: Dictionary,
+	medic: Dictionary,
+	medical_kits: int,
+	random_value: float
+) -> Dictionary:
+	if medical_kits <= 0:
+		return {"success": false, "reason": "No medical kits available"}
+
+	if patient.health >= 100 and not patient.is_sick and not patient.is_injured:
+		return {"success": false, "reason": "Patient doesn't need treatment"}
+
+	var medic_skill = medic.get("skill_medical", 50.0)
+	var updates = {}
+	var results = []
+
+	# Heal health
+	var base_heal = 25.0
+	var skill_bonus = (medic_skill - 50.0) / 50.0 * 15.0  # -15 to +15
+	var heal_amount = (base_heal + skill_bonus) * (0.8 + random_value * 0.4)
+	updates["health"] = minf(100.0, patient.health + heal_amount)
+	results.append("Restored %.0f health" % heal_amount)
+
+	# Try to cure sickness
+	if patient.is_sick:
+		var cure_chance = 0.5 + (medic_skill / 200.0)  # 50-100% based on skill
+		if random_value < cure_chance:
+			updates["is_sick"] = false
+			updates["sickness_type"] = ""
+			updates["days_sick"] = 0
+			results.append("Cured %s" % patient.sickness_type)
+		else:
+			results.append("Sickness persists (%.0f%% cure chance)" % (cure_chance * 100))
+
+	# Heal injuries
+	if patient.is_injured and updates.get("health", patient.health) >= 50:
+		updates["is_injured"] = false
+		results.append("Injury treated")
+
+	return {
+		"success": true,
+		"patient_updates": updates,
+		"medical_kits_used": 1,
+		"results": results
+	}
 
 # ============================================================================
 # ARRIVAL CHECKS (pure)

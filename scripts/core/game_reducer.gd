@@ -48,7 +48,10 @@ enum ActionType {
 	APPLY_EVENT,
 
 	# Logging
-	ADD_LOG_ENTRY
+	ADD_LOG_ENTRY,
+
+	# Component updates
+	UPDATE_COMPONENT
 }
 
 # ============================================================================
@@ -102,6 +105,8 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_conduct_experiment(state, action)
 		ActionType.ADVANCE_MARS_SOL:
 			return _reduce_advance_mars_sol(state, action)
+		ActionType.UPDATE_COMPONENT:
+			return _reduce_update_component(state, action)
 		_:
 			return state
 
@@ -211,11 +216,12 @@ static func action_add_log(message: String, event_type: String = "info") -> Dict
 		"event_type": event_type
 	}
 
-static func action_assign_activity(crew_id: String, activity_id: String) -> Dictionary:
+static func action_assign_activity(crew_id: String, activity_id: String, random_value: float = 0.5) -> Dictionary:
 	return {
 		"type": ActionType.ASSIGN_CREW_ACTIVITY,
 		"crew_id": crew_id,
-		"activity_id": activity_id
+		"activity_id": activity_id,
+		"random_value": random_value
 	}
 
 static func action_start_travel(travel_days: int) -> Dictionary:
@@ -246,6 +252,13 @@ static func action_conduct_experiment(experiment_id: String, crew_id: String, ra
 static func action_advance_mars_sol() -> Dictionary:
 	return {
 		"type": ActionType.ADVANCE_MARS_SOL
+	}
+
+static func action_update_component(position: Vector2i, component: Dictionary) -> Dictionary:
+	return {
+		"type": ActionType.UPDATE_COMPONENT,
+		"position": position,
+		"component": component
 	}
 
 # ============================================================================
@@ -577,14 +590,80 @@ static func _reduce_assign_activity(state: Dictionary, action: Dictionary) -> Di
 	if activity == null:
 		return state
 
-	var new_crew: Array = []
-	for crew in state.crew:
-		if crew.id == action.crew_id:
-			new_crew.append(TravelLogic.apply_activity(crew, activity))
-		else:
-			new_crew.append(crew)
+	# Find the crew member performing the action
+	var actor = null
+	var actor_index = -1
+	for i in range(state.crew.size()):
+		if state.crew[i].id == action.crew_id:
+			actor = state.crew[i]
+			actor_index = i
+			break
 
-	return GameTypes.with_field(state, "crew", new_crew)
+	if actor == null:
+		return state
+
+	var updates = {}
+	var new_log = state.mission_log.duplicate()
+	var supplies = state.get("supplies", {}).duplicate()
+
+	# Handle special activities that use resources
+	if activity.id == "repair":
+		var spare_parts = int(supplies.get("spare_parts", 0))
+		var repair_result = TravelLogic.apply_repair_activity(
+			actor, state.ship_components, spare_parts, action.get("random_value", 0.5)
+		)
+		if repair_result.success:
+			updates["ship_components"] = repair_result.components
+			supplies["spare_parts"] = spare_parts - repair_result.spare_parts_used
+			updates["supplies"] = supplies
+			var new_crew = state.crew.duplicate()
+			new_crew[actor_index] = TravelLogic.apply_activity(actor, activity)
+			updates["crew"] = new_crew
+			new_log.append(GameTypes.create_log_entry(state.current_day,
+				"%s repaired %s (+%.0f%%, now %.0f%%)" % [actor.display_name,
+					repair_result.component_repaired, repair_result.quality_restored, repair_result.new_quality],
+				"success"))
+		else:
+			new_log.append(GameTypes.create_log_entry(state.current_day,
+				"Repair failed: %s" % repair_result.reason, "event"))
+
+	elif activity.id == "medical":
+		var medical_kits = int(supplies.get("medical_kits", 0))
+		var patient = null
+		var patient_index = -1
+		var worst_health = 100.0
+		for i in range(state.crew.size()):
+			var c = state.crew[i]
+			if c.health > 0 and (c.is_sick or c.is_injured or c.health < 80):
+				if c.health < worst_health:
+					worst_health = c.health
+					patient = c
+					patient_index = i
+		if patient != null:
+			var medical_result = TravelLogic.apply_medical_activity(
+				patient, actor, medical_kits, action.get("random_value", 0.5))
+			if medical_result.success:
+				var new_crew = state.crew.duplicate()
+				new_crew[patient_index] = GameTypes.with_fields(patient, medical_result.patient_updates)
+				new_crew[actor_index] = TravelLogic.apply_activity(actor, activity)
+				updates["crew"] = new_crew
+				supplies["medical_kits"] = medical_kits - medical_result.medical_kits_used
+				updates["supplies"] = supplies
+				new_log.append(GameTypes.create_log_entry(state.current_day,
+					"%s treated %s: %s" % [actor.display_name, patient.display_name, ", ".join(medical_result.results)],
+					"success"))
+			else:
+				new_log.append(GameTypes.create_log_entry(state.current_day,
+					"Treatment failed: %s" % medical_result.reason, "event"))
+		else:
+			new_log.append(GameTypes.create_log_entry(state.current_day, "No crew need treatment.", "info"))
+	else:
+		var new_crew = state.crew.duplicate()
+		new_crew[actor_index] = TravelLogic.apply_activity(actor, activity)
+		updates["crew"] = new_crew
+
+	updates["mission_log"] = new_log
+	return GameTypes.with_fields(state, updates)
 
 static func _reduce_start_travel(state: Dictionary, action: Dictionary) -> Dictionary:
 	var new_log = state.mission_log.duplicate()
@@ -594,10 +673,47 @@ static func _reduce_start_travel(state: Dictionary, action: Dictionary) -> Dicti
 		"success"
 	))
 
+	# Calculate recommended supplies if not already set
+	var supplies = state.get("supplies", {}).duplicate()
+	var crew_count = state.crew.size()
+
+	# If supplies not loaded, calculate based on journey length + 15% margin (creates tension)
+	if supplies.get("food_kg", 0.0) <= 0:
+		# Only 15% safety margin - players need to be careful!
+		var recommended = TravelLogic.calc_recommended_supplies(crew_count, action.travel_days, 1.15)
+		supplies.food_kg = recommended.food_kg
+		supplies.water_kg = recommended.water_kg
+		supplies.oxygen_kg = recommended.oxygen_kg
+		supplies.spare_parts = 3  # Minimal spare parts
+		supplies.medical_kits = 2  # Limited medical supplies
+
+		# Calculate how many days of supplies we have
+		var daily = TravelLogic.calc_daily_consumption(crew_count, 70.0)
+		var food_days = supplies.food_kg / daily.food_kg
+		var water_days = supplies.water_kg / daily.water_kg
+		var oxygen_days = supplies.oxygen_kg / daily.oxygen_kg
+
+		new_log.append(GameTypes.create_log_entry(
+			state.current_day,
+			"Supplies loaded: %.0f kg food (%.0f days), %.0f kg water (%.0f days), %.0f kg oxygen (%.0f days)" % [
+				supplies.food_kg, food_days, supplies.water_kg, water_days, supplies.oxygen_kg, oxygen_days
+			],
+			"info"
+		))
+
+		# Warning if supplies are tight
+		if food_days < action.travel_days + 14:
+			new_log.append(GameTypes.create_log_entry(
+				state.current_day,
+				"WARNING: Food supplies will be tight for this journey!",
+				"event"
+			))
+
 	return GameTypes.with_fields(state, {
 		"current_phase": GameTypes.GamePhase.TRAVEL_TO_MARS,
 		"travel_day": 0,
 		"travel_total_days": action.travel_days,
+		"supplies": supplies,
 		"mission_log": new_log
 	})
 
@@ -620,6 +736,65 @@ static func _reduce_advance_travel_day(state: Dictionary, action: Dictionary) ->
 		rand_idx += 1
 	updates["crew"] = new_crew
 
+	var new_log = updates.get("mission_log", state.mission_log).duplicate()
+
+	# CONSUME SUPPLIES - The core survival mechanic
+	var supplies = state.get("supplies", {})
+	if not supplies.is_empty():
+		var supply_result = TravelLogic.consume_daily_supplies(
+			supplies,
+			updates["crew"],
+			state.ship_components
+		)
+		updates["supplies"] = supply_result.supplies
+
+		# Apply crew damage from starvation/dehydration/suffocation
+		if not supply_result.crew_updates.is_empty():
+			var updated_crew: Array = []
+			for member in updates["crew"]:
+				if supply_result.crew_updates.has(member.id):
+					updated_crew.append(GameTypes.with_fields(member, supply_result.crew_updates[member.id]))
+				else:
+					updated_crew.append(member)
+			updates["crew"] = updated_crew
+
+		# Log supply events
+		for event in supply_result.events:
+			new_log.append(GameTypes.create_log_entry(
+				new_day,
+				event.message,
+				"error" if event.type == "critical" else "event"
+			))
+
+	# Check for crew deaths
+	var deaths_this_day: Array = []
+	var alive_crew: Array = []
+	for member in updates["crew"]:
+		if member.health <= 0:
+			deaths_this_day.append(member)
+		else:
+			alive_crew.append(member)
+
+	for dead_member in deaths_this_day:
+		new_log.append(GameTypes.create_log_entry(
+			new_day,
+			"%s has died. The crew mourns their loss." % dead_member.display_name,
+			"error"
+		))
+		updates["crew_deaths"] = state.get("crew_deaths", 0) + 1
+
+	# Check for total crew loss
+	if alive_crew.is_empty() and not updates["crew"].is_empty():
+		new_log.append(GameTypes.create_log_entry(
+			new_day,
+			"ALL CREW LOST. The ship drifts silently toward Mars...",
+			"error"
+		))
+		updates["current_phase"] = GameTypes.GamePhase.GAME_OVER
+		updates["game_over_reason"] = "total_crew_loss"
+		updates["mission_log"] = new_log
+		return GameTypes.with_fields(state, updates)
+
 	# Check for travel event
 	if action.random_values.size() >= rand_idx + 3:
 		var event_result = TravelLogic.check_daily_event(
@@ -634,18 +809,17 @@ static func _reduce_advance_travel_day(state: Dictionary, action: Dictionary) ->
 			for key in event_result.event.effects.keys():
 				updates[key] = event_result.event.effects[key]
 
-			var new_log = state.mission_log.duplicate()
 			new_log.append(GameTypes.create_log_entry(
 				new_day,
 				event_result.event.description,
 				"event"
 			))
-			updates["mission_log"] = new_log
+
+	updates["mission_log"] = new_log
 
 	# Check for arrival
 	if travel_day >= travel_total:
 		var arrival_status = TravelLogic.check_arrival_status(GameTypes.with_fields(state, updates))
-		var new_log = updates.get("mission_log", state.mission_log).duplicate()
 
 		if arrival_status.can_land:
 			new_log.append(GameTypes.create_log_entry(
@@ -748,3 +922,27 @@ static func _reduce_conduct_experiment(state: Dictionary, action: Dictionary) ->
 static func _reduce_advance_mars_sol(state: Dictionary, _action: Dictionary) -> Dictionary:
 	var current_sol = state.get("mars_sol", 0)
 	return GameTypes.with_field(state, "mars_sol", current_sol + 1)
+
+static func _reduce_update_component(state: Dictionary, action: Dictionary) -> Dictionary:
+	var new_components: Array = []
+	for comp in state.ship_components:
+		if comp.hex_position == action.position:
+			new_components.append(action.component)
+		else:
+			new_components.append(comp)
+
+	# Also update in hex grid
+	var new_grid = state.ship_hex_grid.duplicate(true)
+	var valid_positions = new_grid.keys()
+	var hexes = ShipLogic.get_component_hexes(
+		action.position,
+		action.component.hex_size,
+		valid_positions
+	)
+	for hex in hexes:
+		new_grid[hex] = action.component
+
+	return GameTypes.with_fields(state, {
+		"ship_components": new_components,
+		"ship_hex_grid": new_grid
+	})

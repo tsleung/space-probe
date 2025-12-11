@@ -254,12 +254,34 @@ layout_mode = 2
 size_flags_horizontal = 3
 
 [node name="AdvanceButton" type="Button" parent="BottomBar"]
-custom_minimum_size = Vector2(150, 0)
+custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
-text = "Advance Sol"
+text = "+1 Sol"
+
+[node name="AdvanceWeekButton" type="Button" parent="BottomBar"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+text = "+7 Sols"
+
+[node name="AutoButton" type="Button" parent="BottomBar"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+toggle_mode = true
+text = "Auto"
+
+[node name="SpeedSlider" type="HSlider" parent="BottomBar"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+min_value = 1.0
+max_value = 20.0
+value = 5.0
+
+[node name="SpeedLabel" type="Label" parent="BottomBar"]
+layout_mode = 2
+text = "5x"
 
 [node name="ReturnButton" type="Button" parent="BottomBar"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
 disabled = true
 text = "Return to Earth"

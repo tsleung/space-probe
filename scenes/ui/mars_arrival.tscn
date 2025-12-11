@@ -1,0 +1,62 @@
+[gd_scene load_steps=2 format=3 uid="uid://bqwmz7v8pnl3d"]
+
+[ext_resource type="Script" path="res://scripts/ui/mars_arrival.gd" id="1_mars"]
+
+[node name="MarsArrival" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_mars")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0.05, 1)
+
+[node name="Stars" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.02, 0.06, 0.5)
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="TextContainer" type="VBoxContainer" parent="CenterContainer"]
+custom_minimum_size = Vector2(600, 400)
+layout_mode = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="MainText" type="RichTextLabel" parent="CenterContainer/TextContainer"]
+custom_minimum_size = Vector2(0, 200)
+layout_mode = 2
+bbcode_enabled = true
+text = "MARS ARRIVAL"
+fit_content = true
+
+[node name="SubText" type="Label" parent="CenterContainer/TextContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Altitude: 400 km"
+horizontal_alignment = 1
+
+[node name="ContinueButton" type="Button" parent="CenterContainer/TextContainer"]
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Continue"

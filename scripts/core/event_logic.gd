@@ -207,7 +207,7 @@ static func generate_equipment_malfunction(state: Dictionary, severity: float) -
 ## Generate morale event (can be positive or negative) (pure)
 static func generate_morale_event(state: Dictionary, severity: float) -> Dictionary:
 	var is_positive = severity > 0.5
-	var change = 10.0 + ((severity - 0.5).abs() * 20.0)
+	var change = 10.0 + (absf(severity - 0.5) * 20.0)
 
 	if is_positive:
 		change = change

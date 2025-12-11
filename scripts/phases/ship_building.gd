@@ -26,8 +26,13 @@ extends Control
 @onready var test_button: Button = $HBoxContainer/SidePanel/InfoPanel/VBox/TestButton
 @onready var launch_button: Button = $BottomBar/LaunchButton
 @onready var advance_day_button: Button = $BottomBar/AdvanceDayButton
+@onready var advance_week_button: Button = $BottomBar/AdvanceWeekButton
+@onready var auto_advance_button: Button = $BottomBar/AutoAdvanceButton
+@onready var speed_slider: HSlider = $BottomBar/SpeedSlider
+@onready var speed_label: Label = $BottomBar/SpeedLabel
 @onready var readiness_bar: ProgressBar = $BottomBar/ReadinessBar
 @onready var log_text: RichTextLabel = $HBoxContainer/SidePanel/LogPanel/LogText
+@onready var launch_sequence = $LaunchSequence
 
 # ============================================================================
 # LOCAL UI STATE (not game state)
@@ -40,6 +45,11 @@ var _selected_catalog_item: Dictionary = {}
 var _selected_placed_component: Dictionary = {}
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
+# Auto-advance state
+var _auto_advance: bool = false
+var _auto_advance_timer: float = 0.0
+var _auto_advance_speed: float = 0.2  # seconds per day
+
 # ============================================================================
 # LIFECYCLE
 # ============================================================================
@@ -50,6 +60,13 @@ func _ready():
 	_populate_lists()
 	_connect_signals()
 	_sync_ui_to_state()
+
+func _process(delta: float):
+	if _auto_advance:
+		_auto_advance_timer += delta
+		if _auto_advance_timer >= _auto_advance_speed:
+			_auto_advance_timer = 0.0
+			GameStore.advance_day(1)
 
 func _load_catalog():
 	_available_components = ComponentLogic.get_all_components()
@@ -69,28 +86,15 @@ func _populate_lists():
 	_populate_crew_options()
 
 func _generate_available_crew():
-	_available_crew = []
-	var names_by_specialty = {
-		GameTypes.CrewSpecialty.COMMANDER: ["Cmdr. Torres", "Cmdr. Patel", "Cmdr. Volkov"],
-		GameTypes.CrewSpecialty.PILOT: ["Lt. Chen", "Lt. Williams", "Lt. Nakamura"],
-		GameTypes.CrewSpecialty.ENGINEER: ["Dr. Kowalski", "Dr. Singh", "Dr. Okonkwo"],
-		GameTypes.CrewSpecialty.SCIENTIST_GEOLOGY: ["Dr. Martinez", "Dr. Kim", "Dr. Johansson"],
-		GameTypes.CrewSpecialty.MEDIC: ["Dr. Hassan", "Dr. Garcia", "Dr. Ivanova"]
-	}
-
-	for specialty in names_by_specialty.keys():
-		var names = names_by_specialty[specialty]
-		var name = names[_rng.randi() % names.size()]
-		var rand_vals: Array = []
-		for i in range(6):
-			rand_vals.append(_rng.randf())
-		_available_crew.append(CrewLogic.create_crew_member(name, specialty, rand_vals))
+	# Use the pre-made crew roster with personalities and backstories
+	_available_crew = CrewRoster.get_available_crew()
 
 func _populate_crew_options():
 	crew_options.clear()
 	for crew in _available_crew:
 		var specialty_name = CrewLogic.get_specialty_name(crew.specialty)
-		crew_options.add_item("%s (%s)" % [crew.display_name, specialty_name])
+		var personality_name = GameTypes.PersonalityTrait.keys()[crew.personality]
+		crew_options.add_item("%s - %s (%s)" % [crew.display_name, specialty_name, personality_name])
 
 func _connect_signals():
 	# UI signals
@@ -100,11 +104,16 @@ func _connect_signals():
 	test_button.pressed.connect(_on_test_pressed)
 	launch_button.pressed.connect(_on_launch_pressed)
 	advance_day_button.pressed.connect(_on_advance_day_pressed)
+	advance_week_button.pressed.connect(_on_advance_week_pressed)
+	auto_advance_button.toggled.connect(_on_auto_advance_toggled)
+	speed_slider.value_changed.connect(_on_speed_changed)
 
 	# Crew and cargo signals
 	hire_button.pressed.connect(_on_hire_crew_pressed)
 	mav_check.toggled.connect(_on_mav_toggled)
 	rovers_check.toggled.connect(_on_rovers_toggled)
+	crew_options.item_selected.connect(_on_crew_option_selected)
+	crew_list.item_selected.connect(_on_hired_crew_selected)
 
 	# Hex grid signals
 	hex_grid_view.cell_clicked.connect(_on_grid_cell_clicked)
@@ -112,6 +121,9 @@ func _connect_signals():
 	# Store signals (reactive updates)
 	GameStore.state_changed.connect(_on_state_changed)
 	GameStore.log_entry_added.connect(_on_log_entry_added)
+
+	# Launch sequence
+	launch_sequence.sequence_complete.connect(_on_launch_sequence_complete)
 
 # ============================================================================
 # UI EVENT HANDLERS
@@ -141,14 +153,44 @@ func _on_test_pressed():
 func _on_launch_pressed():
 	var check = GameStore.get_launch_check()
 	if check.can_launch:
-		GameStore.start_travel()
-		get_tree().change_scene_to_file("res://scenes/phases/travel.tscn")
+		# Calculate travel days for the launch sequence
+		var engine = GameStore.get_engine()
+		var ship_mass = ShipLogic.calc_total_mass(GameStore.get_components())
+		var days_past = maxi(0, GameStore.get_current_day() - GameStore.get_launch_window_day())
+		var travel_days = TravelLogic.calc_travel_days(engine, ship_mass, days_past)
+
+		# Show dramatic launch sequence
+		_auto_advance = false
+		launch_sequence.start_sequence(GameStore.get_crew(), travel_days)
 	else:
 		for issue in check.issues:
 			GameStore.add_log("[color=red]Cannot launch: %s[/color]" % issue, "error")
 
+func _on_launch_sequence_complete():
+	# Now actually start the travel phase
+	GameStore.start_travel()
+	get_tree().change_scene_to_file("res://scenes/phases/travel.tscn")
+
 func _on_advance_day_pressed():
 	GameStore.advance_day(1)
+
+func _on_advance_week_pressed():
+	GameStore.advance_day(7)
+
+func _on_auto_advance_toggled(toggled: bool):
+	_auto_advance = toggled
+	_auto_advance_timer = 0.0
+	_sync_auto_ui()
+
+func _on_speed_changed(value: float):
+	# Speed 1 = 1 day per second, Speed 10 = 10 days per second
+	_auto_advance_speed = 1.0 / value
+	speed_label.text = "%dx" % int(value)
+
+func _sync_auto_ui():
+	advance_day_button.disabled = _auto_advance
+	advance_week_button.disabled = _auto_advance
+	auto_advance_button.text = "Stop" if _auto_advance else "Auto"
 
 func _on_grid_cell_clicked(hex_pos: Vector2i):
 	if not _selected_catalog_item.is_empty():
@@ -183,6 +225,45 @@ func _on_mav_toggled(toggled: bool):
 
 func _on_rovers_toggled(toggled: bool):
 	GameStore.update_cargo("rovers", 2 if toggled else 0)
+
+func _on_crew_option_selected(index: int):
+	if index >= 0 and index < _available_crew.size():
+		_update_info_panel_crew(_available_crew[index])
+
+func _on_hired_crew_selected(index: int):
+	var hired_crew = GameStore.get_crew()
+	if index >= 0 and index < hired_crew.size():
+		_update_info_panel_crew(hired_crew[index])
+
+func _update_info_panel_crew(crew: Dictionary):
+	info_panel.visible = true
+	info_name.text = crew.display_name
+
+	var personality_desc = CrewRoster.get_personality_description(crew.personality)
+
+	info_desc.text = "[b]%s[/b]\n%s\n\n[b]Background:[/b] %s" % [
+		CrewLogic.get_specialty_name(crew.specialty),
+		personality_desc,
+		crew.backstory
+	]
+
+	var stats = ""
+	stats += "[b]Skills:[/b]\n"
+	stats += "  Piloting: %.0f\n" % crew.skill_piloting
+	stats += "  Engineering: %.0f\n" % crew.skill_engineering
+	stats += "  Science: %.0f\n" % crew.skill_science
+	stats += "  Medical: %.0f\n" % crew.skill_medical
+	stats += "  Leadership: %.0f\n" % crew.skill_leadership
+
+	if not crew.personal_goal.is_empty():
+		stats += "\n[b]Personal Goal:[/b]\n%s\n" % crew.personal_goal
+
+	if not crew.quirk.is_empty():
+		stats += "\n[b]Quirk:[/b] %s" % crew.quirk
+
+	info_stats.text = stats
+	build_button.visible = false
+	test_button.visible = false
 
 func _sync_crew_list():
 	crew_list.clear()
