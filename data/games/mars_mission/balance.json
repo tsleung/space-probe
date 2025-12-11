@@ -1,0 +1,295 @@
+{
+  "version": "1.0.0",
+
+  "difficulty": {
+    "easy": {
+      "starting_budget": 800000000,
+      "days_to_window": 90,
+      "grace_period_days": 14,
+      "event_frequency_multiplier": 0.7,
+      "failure_rate_multiplier": 0.7,
+      "resource_consumption_multiplier": 0.9,
+      "skill_check_bonus": 15,
+      "starting_skill_range": [60, 80]
+    },
+    "normal": {
+      "starting_budget": 650000000,
+      "days_to_window": 75,
+      "grace_period_days": 7,
+      "event_frequency_multiplier": 1.0,
+      "failure_rate_multiplier": 1.0,
+      "resource_consumption_multiplier": 1.0,
+      "skill_check_bonus": 0,
+      "starting_skill_range": [50, 70]
+    },
+    "hard": {
+      "starting_budget": 500000000,
+      "days_to_window": 60,
+      "grace_period_days": 3,
+      "event_frequency_multiplier": 1.3,
+      "failure_rate_multiplier": 1.5,
+      "resource_consumption_multiplier": 1.1,
+      "skill_check_bonus": -10,
+      "starting_skill_range": [40, 60]
+    }
+  },
+
+  "phase1": {
+    "base_component_quality": 55,
+    "quality_test_gain_base": 8,
+    "quality_test_gain_divisor": 20,
+    "test_cost_multiplier": 0.05,
+    "defect_chance_per_quality_point": 0.003,
+    "defect_repair_days": 3,
+    "defect_repair_cost": 5000000,
+    "holding_risk_degradation_chance": 0.015,
+    "holding_risk_degradation_amount": 3,
+    "holding_spoilage_chance": 0.01,
+    "holding_spoilage_amount": 0.05,
+    "holding_illness_chance": 0.005,
+    "holding_illness_health_loss": 10,
+    "holding_micrometeorite_chance": 0.001,
+    "holding_daily_budget_cost": 2000000,
+    "event_chance_per_day": 0.08
+  },
+
+  "phase2": {
+    "base_travel_days": 180,
+    "min_travel_days": 120,
+    "launch_window_penalty_per_day": 0.5,
+    "earth_mars_distance_km": 225000000,
+
+    "daily_food_per_crew": 2.0,
+    "daily_water_per_crew": 3.0,
+    "daily_oxygen_per_crew": 0.84,
+    "water_recycling_base_efficiency": 0.85,
+    "oxygen_recycling_base_efficiency": 0.85,
+    "supply_safety_margin": 1.3,
+
+    "base_failure_rate": 0.005,
+    "stress_failure_multiplier": 2.0,
+    "backup_failure_multiplier": 0.5,
+
+    "base_event_chance": 0.12,
+    "crisis_base_chance": 0.03,
+    "crisis_low_morale_bonus": 0.03,
+    "crisis_low_supplies_bonus": 0.02,
+    "low_morale_threshold": 40,
+    "low_supplies_days_threshold": 2,
+
+    "morale_decay_per_day": 0.5,
+    "health_decay_per_day": 0.5,
+    "fatigue_recovery_per_hour": 5,
+    "time_budget_hours": 16,
+
+    "starvation_health_loss": 5,
+    "starvation_morale_loss": 10,
+    "dehydration_health_loss": 10,
+    "dehydration_morale_loss": 15,
+    "suffocation_health_loss": 25,
+    "critical_oxygen_days": 3,
+
+    "fuel_station_keeping_multiplier": 0.1,
+    "fuel_active_acceleration_hours": 1
+  },
+
+  "phase3": {
+    "min_stay_sols": 90,
+    "optimal_stay_sols": 120,
+    "max_stay_sols": 180,
+    "stay_penalty_per_extra_sol": 0.5,
+
+    "solar_dust_degradation_per_sol": 0.005,
+    "solar_cleaning_hours": 0.5,
+    "greenhouse_base_yield_kg": 1.0,
+    "greenhouse_growth_cycle_sols": 30,
+
+    "eva_base_success_rate": 0.95,
+    "eva_skill_bonus": 0.03,
+    "eva_low_health_penalty": 0.05,
+    "eva_dust_storm_penalty": 0.15,
+    "eva_night_penalty": 0.05,
+    "eva_long_duration_penalty": 0.03,
+    "eva_second_same_sol_penalty": 0.05,
+    "eva_duration_threshold_hours": 4,
+
+    "eva_failure_minor_chance": 0.70,
+    "eva_failure_major_chance": 0.25,
+    "eva_failure_critical_chance": 0.05,
+    "eva_failure_minor_health": 10,
+    "eva_failure_major_health": 30,
+    "eva_failure_critical_health": 50,
+
+    "event_chance_per_sol": 0.10,
+    "dust_storm_solar_efficiency": {
+      "minor": 0.70,
+      "moderate": 0.40,
+      "major": 0.10,
+      "global": 0.05
+    },
+
+    "required_experiments": ["soil_analysis", "ice_core", "atmosphere_study"],
+    "min_samples_for_return": 10,
+    "success_samples_threshold": 15
+  },
+
+  "phase4": {
+    "degradation_rate_base": 0.001,
+    "degradation_journey_factor": 300,
+
+    "warning_food_days": 45,
+    "warning_water_days": 30,
+    "warning_oxygen_days": 14,
+    "warning_power_percent": 0.80,
+
+    "critical_food_days": 30,
+    "critical_water_days": 20,
+    "critical_oxygen_days": 7,
+    "critical_power_percent": 0.60,
+
+    "emergency_food_days": 15,
+    "emergency_water_days": 10,
+    "emergency_oxygen_days": 3,
+    "emergency_power_percent": 0.40,
+
+    "rationing_levels": {
+      "none": {"consumption": 1.0, "health_per_day": -0.5, "morale_per_day": -0.3},
+      "light": {"consumption": 0.8, "health_per_day": -1.0, "morale_per_day": -0.5},
+      "moderate": {"consumption": 0.6, "health_per_day": -2.0, "morale_per_day": -1.0},
+      "severe": {"consumption": 0.4, "health_per_day": -4.0, "morale_per_day": -2.0},
+      "starvation": {"consumption": 0.2, "health_per_day": -8.0, "morale_per_day": -3.0}
+    },
+
+    "event_chance_per_day": 0.15,
+
+    "heat_shield_min_quality": 50,
+    "heat_shield_rough_threshold": 70,
+    "navigation_success_base": 0.5,
+    "navigation_skill_factor": 200,
+    "navigation_quality_factor": 200,
+    "parachute_failure_threshold": 40,
+    "parachute_partial_threshold": 70
+  },
+
+  "crew": {
+    "max_health": 100,
+    "max_morale": 100,
+    "max_fatigue": 100,
+    "death_health_threshold": 0,
+    "critical_health_threshold": 20,
+    "impaired_health_threshold": 50,
+    "healthy_health_threshold": 80,
+
+    "sickness_recovery_days": 7,
+    "sickness_recovery_chance": 0.30,
+    "sickness_health_loss_per_day": 2,
+
+    "effectiveness_formula": "health * morale * (100 - fatigue) / 1000000",
+
+    "relationship_max": 100,
+    "relationship_min": 0,
+    "relationship_start": 50,
+    "relationship_shared_positive": 5,
+    "relationship_supported_conflict": 10,
+    "relationship_opposed_conflict": -10,
+    "relationship_saved_danger": 20,
+    "relationship_blamed_failure": -15,
+    "relationship_shared_quiet": 8,
+    "relationship_death_morale_penalty": 20
+  },
+
+  "components": {
+    "max_quality": 100,
+    "min_operational_quality": 20,
+    "degradation_base_rate": 0.0002,
+    "degradation_active_multiplier": 1.0,
+    "degradation_inactive_multiplier": 0.3,
+    "degradation_variation_min": 0.5,
+    "degradation_variation_max": 1.5,
+
+    "type_degradation_multipliers": {
+      "life_support": 1.5,
+      "engine_mount": 0.5,
+      "solar_array": 1.2,
+      "cockpit": 0.8
+    },
+
+    "repair_quality_base": 10,
+    "repair_quality_max": 20,
+    "repair_threshold": 50,
+    "critical_threshold": 30,
+
+    "state_thresholds": {
+      "destroyed": 100,
+      "critical": 75,
+      "damaged": 50,
+      "degraded": 25,
+      "operational": 0
+    }
+  },
+
+  "activities": {
+    "rest": {"fatigue": -25, "morale": 3, "hours": 8},
+    "exercise": {"fatigue": 15, "morale": 5, "health": 3, "hours": 2, "skill_bonus_threshold": 70, "skill_bonus_morale": 3},
+    "repair": {"fatigue": 20, "morale": -3, "hours": 6, "spare_parts": 1, "repair_base": 10, "repair_skill_range": 25, "repair_random_range": [0.8, 1.2], "engineer_bonus": 0.2},
+    "medical": {"fatigue": 5, "hours": 4, "med_kits": 1, "heal_base": 15, "heal_skill_range": 25, "heal_random_range": [0.8, 1.2], "cure_base": 0.3, "cure_skill_max": 0.6, "medic_cure_bonus": 0.15, "medic_heal_bonus": 0.25},
+    "research": {"fatigue": 10, "morale": 5, "hours": 4, "skill_bonus_threshold": 70, "skill_bonus_morale": 3},
+    "social": {"fatigue": -5, "morale": 12, "hours": 2},
+    "monitor": {"fatigue": 10, "morale": -2, "hours": 4},
+    "ration": {"morale": -8, "health": -2, "food_reduction": 0.3}
+  },
+
+  "events": {
+    "equipment_damage_minor": [5, 25],
+    "equipment_damage_serious": [5, 45],
+    "fatigue_gain": 20,
+    "illness_duration_days": 7,
+    "injury_health_loss": 20,
+    "morale_positive_range": [10, 40],
+    "morale_negative_range": [10, 40],
+    "supply_efficiency_gain": [10, 30],
+    "supply_loss_minor_percent": [5, 8],
+    "supply_loss_critical_percent": [10, 16],
+    "radiation_minor_msv": [30, 60],
+    "radiation_major_msv": [60, 100],
+    "radiation_health_factor": 0.3,
+    "radiation_health_threshold": 30
+  },
+
+  "scoring": {
+    "base_score": 1000,
+    "crew_survival_bonus": 1500,
+    "crew_healthy_bonus": 500,
+    "experiment_bonus": 500,
+    "sample_bonus": 100,
+    "max_efficiency_bonus": 2000,
+    "time_bonus_per_day": 10,
+    "critical_failure_penalty": 200,
+
+    "tiers": {
+      "gold": {"min_score": 8000, "min_crew": 4, "min_science_percent": 0.8, "max_budget_percent": 0.9},
+      "silver": {"min_score": 5000, "min_crew": 3, "min_science_percent": 0.6},
+      "bronze": {"min_score": 2500, "min_crew": 2, "min_science_percent": 0.4},
+      "pyrrhic": {"min_score": 1000, "min_crew": 0}
+    },
+
+    "grade_thresholds": {
+      "A": 8000,
+      "B": 6000,
+      "C": 4000,
+      "D": 2000,
+      "F": 0
+    }
+  },
+
+  "formulas": {
+    "quality_test_gain": "quality_test_gain_base - (current_quality / quality_test_gain_divisor)",
+    "test_cost": "base_cost * test_cost_multiplier * (1 + current_quality / 100)",
+    "daily_failure_chance": "base_rate * (100 - quality) / 50 * stress_modifier",
+    "travel_time": "base_days * engine_modifier * (1 + days_late * launch_window_penalty)",
+    "crew_effectiveness": "(health / 100) * (morale / 100) * ((100 - fatigue) / 100)",
+    "skill_check": "base_difficulty + (skill / 100) * 0.5 + modifiers",
+    "resource_recycling": "base_efficiency * (life_support_quality / 100)",
+    "experiment_success": "clamp((1 - difficulty) + (skill / 100) * effectiveness, 0.1, 0.95)"
+  }
+}

@@ -8,7 +8,6 @@ extends Control
 # ============================================================================
 
 # Top bar
-@onready var turn_label: Label = $TopBar/HBoxContainer/TurnLabel
 @onready var year_label: Label = $TopBar/HBoxContainer/YearLabel
 @onready var iron_label: Label = $TopBar/HBoxContainer/IronLabel
 @onready var energy_label: Label = $TopBar/HBoxContainer/EnergyLabel
@@ -29,10 +28,10 @@ extends Control
 @onready var replicate_button: Button = $MainContent/RightSidebar/SidebarContent/ActionSection/ActionButtons/ReplicateButton
 @onready var idle_button: Button = $MainContent/RightSidebar/SidebarContent/ActionSection/ActionButtons/IdleButton
 
-# Bottom bar
-@onready var next_turn_button: Button = $BottomBar/HBoxContainer/NextTurnButton
-@onready var auto_button: Button = $BottomBar/HBoxContainer/AutoButton
+# Bottom bar (real-time controls)
+@onready var pause_button: Button = $BottomBar/HBoxContainer/PauseButton
 @onready var speed_slider: HSlider = $BottomBar/HBoxContainer/SpeedSlider
+@onready var speed_label: Label = $BottomBar/HBoxContainer/SpeedValueLabel
 
 # Event log
 @onready var event_log: RichTextLabel = $MainContent/RightSidebar/SidebarContent/LogSection/EventLog
@@ -57,12 +56,16 @@ extends Control
 var _selected_probe_id: String = ""
 var _selected_system_id: String = ""
 var _hovered_system_id: String = ""
-var _auto_advance: bool = false
-var _auto_timer: float = 0.0
-var _auto_speed: float = 0.5
 
 var _camera_drag: bool = false
 var _camera_drag_start: Vector2 = Vector2.ZERO
+
+# Resource rate tracking for display
+var _last_iron: float = 0.0
+var _last_rare: float = 0.0
+var _iron_rate: float = 0.0
+var _rare_rate: float = 0.0
+var _rate_update_timer: float = 0.0
 
 # ============================================================================
 # INITIALIZATION
@@ -87,14 +90,13 @@ func _ready():
 func _connect_signals():
 	# Store signals
 	VNPStore.state_changed.connect(_on_state_changed)
-	VNPStore.turn_advanced.connect(_on_turn_advanced)
+	VNPStore.tick_processed.connect(_on_tick_processed)
 	VNPStore.event_triggered.connect(_on_event_triggered)
 	VNPStore.game_over.connect(_on_game_over)
 	VNPStore.probe_created.connect(_on_probe_created)
 
 	# UI signals
-	next_turn_button.pressed.connect(_on_next_turn_pressed)
-	auto_button.pressed.connect(_on_auto_pressed)
+	pause_button.pressed.connect(_on_pause_pressed)
 	speed_slider.value_changed.connect(_on_speed_changed)
 	mine_button.pressed.connect(_on_mine_pressed)
 	replicate_button.pressed.connect(_on_replicate_pressed)
@@ -108,22 +110,34 @@ func _connect_signals():
 	main_menu_btn.pressed.connect(_on_main_menu_pressed)
 
 func _process(delta: float):
-	if _auto_advance and not VNPStore.is_game_over():
-		_auto_timer += delta
-		if _auto_timer >= _auto_speed:
-			_auto_timer = 0.0
-			VNPStore.advance_turn()
-
 	# Camera drag
 	if _camera_drag:
 		var mouse_pos = get_global_mouse_position()
 		galaxy_camera.position -= (mouse_pos - _camera_drag_start) / galaxy_camera.zoom.x
 		_camera_drag_start = mouse_pos
 
+	# Update resource rates display periodically
+	_rate_update_timer += delta
+	if _rate_update_timer >= 0.5:
+		_update_resource_rates()
+		_rate_update_timer = 0.0
+
 	galaxy_view.queue_redraw()
 
+func _update_resource_rates():
+	var resources = VNPStore.get_resources()
+	var current_iron = resources.get("iron", 0)
+	var current_rare = resources.get("rare", 0)
+
+	# Calculate rate per second (smoothed)
+	_iron_rate = (current_iron - _last_iron) * 2.0  # x2 because we update every 0.5s
+	_rare_rate = (current_rare - _last_rare) * 2.0
+
+	_last_iron = current_iron
+	_last_rare = current_rare
+
 func _input(event: InputEvent):
-	# Handle keyboard camera controls anywhere
+	# Handle keyboard controls anywhere
 	if event is InputEventKey and event.pressed:
 		var move_speed = 20.0 / galaxy_camera.zoom.x
 		match event.keycode:
@@ -136,9 +150,20 @@ func _input(event: InputEvent):
 			KEY_D, KEY_RIGHT:
 				galaxy_camera.position.x += move_speed
 			KEY_SPACE:
-				# Advance turn with space
-				if not VNPStore.is_game_over():
-					VNPStore.advance_turn()
+				# Toggle pause with space
+				_toggle_pause()
+			KEY_1:
+				VNPStore.set_game_speed(1.0)
+				_update_speed_ui()
+			KEY_2:
+				VNPStore.set_game_speed(2.0)
+				_update_speed_ui()
+			KEY_3:
+				VNPStore.set_game_speed(5.0)
+				_update_speed_ui()
+			KEY_4:
+				VNPStore.set_game_speed(10.0)
+				_update_speed_ui()
 
 	if not galaxy_view.get_global_rect().has_point(get_global_mouse_position()):
 		return
@@ -176,11 +201,27 @@ func _sync_resources():
 	var resources = VNPStore.get_resources()
 	var state = VNPStore.get_state()
 
-	turn_label.text = "Turn: %d" % state.current_turn
-	year_label.text = "Year: %d" % state.year
-	iron_label.text = "Iron: %d" % resources.get("iron", 0)
-	energy_label.text = "Energy: %d" % resources.get("energy", 0)
-	rare_label.text = "Rare: %d" % resources.get("rare", 0)
+	# Year with fractional part for smooth feeling
+	year_label.text = "Year: %d" % int(state.year)
+
+	# Resources with rate display
+	var iron = resources.get("iron", 0)
+	var rare = resources.get("rare", 0)
+	var energy = resources.get("energy", 0)
+
+	# Show rates inline if positive
+	if _iron_rate > 0.1:
+		iron_label.text = "Iron: %.0f (+%.0f/s)" % [iron, _iron_rate]
+	else:
+		iron_label.text = "Iron: %.0f" % iron
+
+	energy_label.text = "Energy: %.0f" % energy
+
+	if _rare_rate > 0.1:
+		rare_label.text = "Rare: %.0f (+%.0f/s)" % [rare, _rare_rate]
+	else:
+		rare_label.text = "Rare: %.0f" % rare
+
 	probes_label.text = "Probes: %d" % VNPStore.get_active_probe_count()
 
 func _sync_probes():
@@ -296,10 +337,11 @@ func draw_galaxy_on(canvas: CanvasItem):
 	var state = VNPStore.get_state()
 	var zoom = galaxy_camera.zoom.x
 
-	# Get reachable systems if we have an idle probe selected
+	# Get reachable systems if we have an idle or mining probe selected (can redirect)
 	var reachable_systems: Array = []
 	var selected_probe = VNPStore.get_probe(_selected_probe_id)
-	if not selected_probe.is_empty() and selected_probe.status == VNPTypes.ProbeStatus.IDLE:
+	var probe_can_travel = not selected_probe.is_empty() and (selected_probe.status == VNPTypes.ProbeStatus.IDLE or selected_probe.status == VNPTypes.ProbeStatus.MINING)
+	if probe_can_travel:
 		var probe_sys = systems.get(selected_probe.current_system, {})
 		if not probe_sys.is_empty():
 			reachable_systems = probe_sys.get("connections", [])
@@ -373,12 +415,12 @@ func draw_galaxy_on(canvas: CanvasItem):
 		var world_pos: Vector2
 
 		if probe.status == VNPTypes.ProbeStatus.TRAVELING:
-			# Interpolate position
+			# Interpolate position based on distance traveled
 			var from_sys = systems.get(probe.current_system, {})
 			var to_sys = systems.get(probe.target_system, {})
 			if not from_sys.is_empty() and not to_sys.is_empty():
-				var travel_total = VNPGalaxyLogic.calc_travel_time(from_sys, to_sys)
-				var progress = 1.0 - (float(probe.travel_progress) / float(travel_total))
+				var total_distance = from_sys.position.distance_to(to_sys.position)
+				var progress = clampf(probe.travel_progress / total_distance, 0.0, 1.0)
 				world_pos = from_sys.position.lerp(to_sys.position, progress)
 			else:
 				continue
@@ -411,9 +453,15 @@ func draw_galaxy_on(canvas: CanvasItem):
 
 		canvas.draw_colored_polygon(points, probe_color)
 
-		# Selection indicator for probe
+		# Draw replication progress ring
+		if probe.status == VNPTypes.ProbeStatus.REPLICATING:
+			var progress = probe.task_progress / VNPStore.REPLICATION_YEARS
+			var arc_end = progress * TAU
+			canvas.draw_arc(pos, probe_size + 4 * zoom, -PI/2, -PI/2 + arc_end, 16, Color.CYAN, 2.0)
+
+		# Highlight selected probe
 		if probe.id == _selected_probe_id:
-			canvas.draw_arc(pos, probe_size + 3 * zoom, 0, TAU, 12, Color.WHITE, 1.5)
+			canvas.draw_arc(pos, probe_size + 6 * zoom, 0, TAU, 16, Color.WHITE, 1.5)
 
 # ============================================================================
 # INPUT HANDLERS
@@ -441,9 +489,10 @@ func _handle_galaxy_click(screen_pos: Vector2):
 			closest_id = sys_id
 
 	if not closest_id.is_empty():
-		# Check if we have a selected probe that can travel
+		# Check if we have a selected probe that can travel (idle or mining)
 		var probe = VNPStore.get_probe(_selected_probe_id)
-		if not probe.is_empty() and probe.status == VNPTypes.ProbeStatus.IDLE:
+		var can_travel = not probe.is_empty() and (probe.status == VNPTypes.ProbeStatus.IDLE or probe.status == VNPTypes.ProbeStatus.MINING)
+		if can_travel:
 			var from_sys = VNPStore.get_system(probe.current_system)
 			if closest_id != probe.current_system and VNPGalaxyLogic.are_connected(from_sys, closest_id):
 				# Travel to this system
@@ -475,16 +524,30 @@ func _update_hover_system(screen_pos: Vector2):
 # BUTTON HANDLERS
 # ============================================================================
 
-func _on_next_turn_pressed():
-	VNPStore.advance_turn()
+func _toggle_pause():
+	VNPStore.set_paused(not VNPStore.is_paused())
+	_update_pause_ui()
 
-func _on_auto_pressed():
-	_auto_advance = not _auto_advance
-	auto_button.text = "Stop" if _auto_advance else "Auto"
+func _update_pause_ui():
+	if VNPStore.is_paused():
+		pause_button.text = "▶ Play"
+	else:
+		pause_button.text = "⏸ Pause"
+
+func _update_speed_ui():
+	var speed = VNPStore.get_game_speed()
+	speed_label.text = "%.1fx" % speed
+	# Map speed 0.1-10 to slider 0-100
+	speed_slider.value = (log(speed) / log(10) + 1) * 50  # Logarithmic mapping
+
+func _on_pause_pressed():
+	_toggle_pause()
 
 func _on_speed_changed(value: float):
-	# Slider is 0-100, convert to delay between turns (1.0 to 0.1 seconds)
-	_auto_speed = 1.0 - (value / 100.0 * 0.9)  # 0.1 to 1.0 seconds
+	# Slider is 0-100, convert to speed multiplier (0.1x to 10x) logarithmically
+	var speed = pow(10, (value / 50.0) - 1)  # 0->0.1, 50->1, 100->10
+	VNPStore.set_game_speed(speed)
+	speed_label.text = "%.1fx" % speed
 
 func _on_mine_pressed():
 	if not _selected_probe_id.is_empty():
@@ -517,15 +580,15 @@ func _on_probe_selected(index: int):
 func _on_state_changed(_new_state: Dictionary):
 	_sync_ui()
 
-func _on_turn_advanced(_turn: int, _year: int):
+func _on_tick_processed(_year: float):
 	pass  # UI already synced via state_changed
 
 func _on_event_triggered(event: Dictionary):
 	_show_event_dialog(event)
 
 func _on_game_over(victory: bool, reason: String, score: int):
-	_auto_advance = false
-	auto_button.text = "Auto"
+	VNPStore.set_paused(true)
+	_update_pause_ui()
 	_show_game_over(victory, reason, score)
 
 func _on_probe_created(_probe: Dictionary):

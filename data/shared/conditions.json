@@ -1,0 +1,140 @@
+[
+  {
+    "id": "healthy",
+    "name": "Healthy",
+    "description": "Normal operating condition.",
+    "effects": {},
+    "severity": 0
+  },
+  {
+    "id": "minor_injury",
+    "name": "Minor Injury",
+    "description": "Small cuts, bruises, or strains that affect performance slightly.",
+    "effects": {
+      "effectiveness_multiplier": 0.9,
+      "healing_rate": 5
+    },
+    "severity": 1,
+    "duration_days": 3
+  },
+  {
+    "id": "moderate_injury",
+    "name": "Moderate Injury",
+    "description": "Significant injury requiring medical attention.",
+    "effects": {
+      "effectiveness_multiplier": 0.7,
+      "healing_rate": 3,
+      "requires_medical": true
+    },
+    "severity": 2,
+    "duration_days": 7
+  },
+  {
+    "id": "severe_injury",
+    "name": "Severe Injury",
+    "description": "Major injury requiring extensive treatment.",
+    "effects": {
+      "effectiveness_multiplier": 0.3,
+      "healing_rate": 1,
+      "requires_medical": true,
+      "requires_bed_rest": true
+    },
+    "severity": 3,
+    "duration_days": 14
+  },
+  {
+    "id": "space_adaptation",
+    "name": "Space Adaptation Syndrome",
+    "description": "Common adjustment period in microgravity.",
+    "effects": {
+      "effectiveness_multiplier": 0.8,
+      "morale_modifier": -5
+    },
+    "severity": 1,
+    "duration_days": 5
+  },
+  {
+    "id": "minor_illness",
+    "name": "Minor Illness",
+    "description": "Cold, headache, or other minor ailment.",
+    "effects": {
+      "effectiveness_multiplier": 0.85,
+      "morale_modifier": -3
+    },
+    "severity": 1,
+    "duration_days": 3
+  },
+  {
+    "id": "moderate_illness",
+    "name": "Moderate Illness",
+    "description": "Significant illness requiring treatment.",
+    "effects": {
+      "effectiveness_multiplier": 0.6,
+      "morale_modifier": -10,
+      "health_decay_per_day": 2
+    },
+    "severity": 2,
+    "duration_days": 7
+  },
+  {
+    "id": "severe_illness",
+    "name": "Severe Illness",
+    "description": "Life-threatening condition requiring immediate care.",
+    "effects": {
+      "effectiveness_multiplier": 0.2,
+      "morale_modifier": -20,
+      "health_decay_per_day": 5,
+      "requires_medical": true
+    },
+    "severity": 3,
+    "duration_days": 14
+  },
+  {
+    "id": "radiation_exposure",
+    "name": "Radiation Exposure",
+    "description": "Exposure to harmful radiation levels.",
+    "effects": {
+      "effectiveness_multiplier": 0.9,
+      "health_decay_per_day": 1,
+      "cancer_risk_increase": 0.01
+    },
+    "severity": 2,
+    "duration_days": 7
+  },
+  {
+    "id": "exhaustion",
+    "name": "Exhaustion",
+    "description": "Extreme fatigue from overwork.",
+    "effects": {
+      "effectiveness_multiplier": 0.7,
+      "morale_modifier": -10,
+      "fatigue_recovery_multiplier": 0.5
+    },
+    "severity": 2,
+    "duration_days": 3
+  },
+  {
+    "id": "depression",
+    "name": "Depression",
+    "description": "Mental health condition affecting motivation.",
+    "effects": {
+      "effectiveness_multiplier": 0.6,
+      "morale_cap": 50,
+      "social_effectiveness": 0.5
+    },
+    "severity": 2,
+    "duration_days": 14
+  },
+  {
+    "id": "recovering",
+    "name": "Recovering",
+    "description": "Healing from injury or illness.",
+    "effects": {
+      "effectiveness_multiplier": 0.8,
+      "no_eva": true,
+      "healing_rate": 3
+    },
+    "severity": 1,
+    "duration_days": 5
+  }
+]

@@ -1,0 +1,245 @@
+[
+  {
+    "id": "traditional",
+    "name": "Traditional Chemical",
+    "description": "Proven and reliable. The workhorse of early space exploration.",
+    "engine_class": "chemical",
+    "stats": {
+      "base_cost": 40000000,
+      "build_days": 10,
+      "mass_kg": 3500,
+      "hex_size": 2,
+      "thrust_n": 1000000,
+      "specific_impulse_s": 450,
+      "base_quality": 60,
+      "travel_time_modifier": 1.0
+    },
+    "fuel": {
+      "type": "liquid_hydrogen",
+      "consumption_kg_s": 250
+    },
+    "testing": {
+      "cost_per_cycle": 2000000,
+      "days_per_cycle": 3,
+      "quality_per_test": 5
+    },
+    "requires_space_assembly": false
+  },
+  {
+    "id": "hermes_ion",
+    "name": "HERMES Ion Engine",
+    "description": "High efficiency, low thrust. Ideal for long journeys with patient crews.",
+    "engine_class": "ion",
+    "stats": {
+      "base_cost": 120000000,
+      "build_days": 18,
+      "mass_kg": 800,
+      "hex_size": 1,
+      "thrust_n": 5,
+      "specific_impulse_s": 3000,
+      "base_quality": 50,
+      "travel_time_modifier": 0.85
+    },
+    "fuel": {
+      "type": "xenon",
+      "consumption_kg_s": 0.001
+    },
+    "testing": {
+      "cost_per_cycle": 6000000,
+      "days_per_cycle": 4,
+      "quality_per_test": 4
+    },
+    "requires_space_assembly": true
+  },
+  {
+    "id": "hall_thruster",
+    "name": "Hall Effect Thruster",
+    "description": "Balanced efficiency and thrust. A modern workhorse.",
+    "engine_class": "ion",
+    "stats": {
+      "base_cost": 100000000,
+      "build_days": 15,
+      "mass_kg": 600,
+      "hex_size": 1,
+      "thrust_n": 2,
+      "specific_impulse_s": 2500,
+      "base_quality": 55,
+      "travel_time_modifier": 0.9
+    },
+    "fuel": {
+      "type": "xenon",
+      "consumption_kg_s": 0.0008
+    },
+    "testing": {
+      "cost_per_cycle": 5000000,
+      "days_per_cycle": 3,
+      "quality_per_test": 4
+    },
+    "requires_space_assembly": true
+  },
+  {
+    "id": "nuclear_thermal",
+    "name": "Nuclear Thermal",
+    "description": "Powerful and efficient, but requires careful handling. Risk of radiation.",
+    "engine_class": "nuclear",
+    "stats": {
+      "base_cost": 200000000,
+      "build_days": 25,
+      "mass_kg": 8000,
+      "hex_size": 3,
+      "thrust_n": 250000,
+      "specific_impulse_s": 900,
+      "base_quality": 40,
+      "travel_time_modifier": 0.7
+    },
+    "fuel": {
+      "type": "liquid_hydrogen",
+      "consumption_kg_s": 30
+    },
+    "testing": {
+      "cost_per_cycle": 10000000,
+      "days_per_cycle": 5,
+      "quality_per_test": 3
+    },
+    "requires_space_assembly": true,
+    "hazards": {
+      "has_radiation_risk": true,
+      "containment_leak_chance": 0.001
+    }
+  },
+  {
+    "id": "solar_sail",
+    "name": "Solar Sail",
+    "description": "No fuel required, but slow and weather-dependent. Free energy from the sun.",
+    "engine_class": "sail",
+    "stats": {
+      "base_cost": 80000000,
+      "build_days": 12,
+      "mass_kg": 200,
+      "hex_size": 4,
+      "thrust_n": 0.01,
+      "specific_impulse_s": 0,
+      "base_quality": 55,
+      "travel_time_modifier": 1.3
+    },
+    "fuel": {
+      "type": "none",
+      "consumption_kg_s": 0
+    },
+    "testing": {
+      "cost_per_cycle": 4000000,
+      "days_per_cycle": 2,
+      "quality_per_test": 6
+    },
+    "requires_space_assembly": true,
+    "notes": "Travel time varies with solar intensity"
+  },
+  {
+    "id": "laser_sail",
+    "name": "Laser Sail",
+    "description": "Pushed by orbital lasers. Fast but dependent on infrastructure.",
+    "engine_class": "sail",
+    "stats": {
+      "base_cost": 150000000,
+      "build_days": 15,
+      "mass_kg": 300,
+      "hex_size": 4,
+      "thrust_n": 0.1,
+      "specific_impulse_s": 0,
+      "base_quality": 45,
+      "travel_time_modifier": 0.6
+    },
+    "fuel": {
+      "type": "none",
+      "consumption_kg_s": 0
+    },
+    "testing": {
+      "cost_per_cycle": 8000000,
+      "days_per_cycle": 3,
+      "quality_per_test": 4
+    },
+    "requires_space_assembly": true,
+    "notes": "Requires orbital laser array at both ends"
+  },
+  {
+    "id": "pulsed_plasma",
+    "name": "Pulsed Plasma Thruster",
+    "description": "Experimental but promising. High efficiency with decent thrust.",
+    "engine_class": "plasma",
+    "stats": {
+      "base_cost": 130000000,
+      "build_days": 20,
+      "mass_kg": 1200,
+      "hex_size": 2,
+      "thrust_n": 100,
+      "specific_impulse_s": 1500,
+      "base_quality": 45,
+      "travel_time_modifier": 0.8
+    },
+    "fuel": {
+      "type": "teflon",
+      "consumption_kg_s": 0.01
+    },
+    "testing": {
+      "cost_per_cycle": 6500000,
+      "days_per_cycle": 4,
+      "quality_per_test": 4
+    },
+    "requires_space_assembly": true
+  },
+  {
+    "id": "mpd_thruster",
+    "name": "Magnetoplasmadynamic Thruster",
+    "description": "Cutting edge plasma technology. High power requirements.",
+    "engine_class": "plasma",
+    "stats": {
+      "base_cost": 180000000,
+      "build_days": 22,
+      "mass_kg": 1500,
+      "hex_size": 2,
+      "thrust_n": 200,
+      "specific_impulse_s": 2000,
+      "base_quality": 42,
+      "travel_time_modifier": 0.75
+    },
+    "fuel": {
+      "type": "argon",
+      "consumption_kg_s": 0.05
+    },
+    "testing": {
+      "cost_per_cycle": 9000000,
+      "days_per_cycle": 4,
+      "quality_per_test": 3
+    },
+    "requires_space_assembly": true,
+    "notes": "Requires significant power generation capacity"
+  },
+  {
+    "id": "vasimr",
+    "name": "VASIMR",
+    "description": "Variable thrust plasma engine. Can trade efficiency for speed.",
+    "engine_class": "plasma",
+    "stats": {
+      "base_cost": 160000000,
+      "build_days": 20,
+      "mass_kg": 1000,
+      "hex_size": 2,
+      "thrust_n": 50,
+      "specific_impulse_s": 5000,
+      "base_quality": 45,
+      "travel_time_modifier": 0.65
+    },
+    "fuel": {
+      "type": "argon",
+      "consumption_kg_s": 0.003
+    },
+    "testing": {
+      "cost_per_cycle": 8000000,
+      "days_per_cycle": 4,
+      "quality_per_test": 4
+    },
+    "requires_space_assembly": true,
+    "variable_thrust": true,
+    "notes": "Can adjust thrust/efficiency ratio during flight"
+  }
+]

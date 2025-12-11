@@ -29,17 +29,28 @@ layout_mode = 2
 [node name="TurnLabel" type="Label" parent="MainContainer/Header"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "TURN 1 | ~8 turns until Earth assault"
+text = "WEEK 1 | ~8 weeks until Earth assault"
 
 [node name="LivesLabel" type="Label" parent="MainContainer/Header"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "EVACUATED: 0"
+text = "EVACUATED: 0 [ANNIHILATION]"
+horizontal_alignment = 1
 
 [node name="ThreatLabel" type="Label" parent="MainContainer/Header"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "HERALD: 50 -> Kuiper Belt"
+text = "HERALD: 50 -> Kuiper Belt (WILL HOLD)"
+horizontal_alignment = 2
+
+[node name="GuidancePanel" type="PanelContainer" parent="MainContainer"]
+layout_mode = 2
+
+[node name="GuidanceLabel" type="RichTextLabel" parent="MainContainer/GuidancePanel"]
+custom_minimum_size = Vector2(0, 80)
+layout_mode = 2
+bbcode_enabled = true
+text = "Welcome to First Contact War..."
 
 [node name="GameArea" type="HBoxContainer" parent="MainContainer"]
 layout_mode = 2
@@ -50,14 +61,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 2.0
 
-[node name="MapContainer" type="VBoxContainer" parent="MainContainer/GameArea/MapPanel"]
-layout_mode = 2
-
-[node name="MapTitle" type="Label" parent="MainContainer/GameArea/MapPanel/MapContainer"]
-layout_mode = 2
-text = "=== SOL SYSTEM ==="
-horizontal_alignment = 1
-
 [node name="SidePanel" type="VBoxContainer" parent="MainContainer/GameArea"]
 layout_mode = 2
 size_flags_horizontal = 3
@@ -65,36 +68,12 @@ size_flags_horizontal = 3
 [node name="ResourcesPanel" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
 layout_mode = 2
 
-[node name="VBox" type="VBoxContainer" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
+[node name="ResourcesContainer" type="VBoxContainer" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
 layout_mode = 2
 
-[node name="ResourcesTitle" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel/VBox"]
+[node name="Title" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel/ResourcesContainer"]
 layout_mode = 2
 text = "=== RESOURCES ==="
-
-[node name="OreLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
-layout_mode = 2
-text = "Ore: 100"
-
-[node name="SteelLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
-layout_mode = 2
-text = "Steel: 50"
-
-[node name="EnergyLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
-layout_mode = 2
-text = "Energy: 100"
-
-[node name="ElectronicsLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
-layout_mode = 2
-text = "Electronics: 20"
-
-[node name="RareLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
-layout_mode = 2
-text = "Rare: 30"
-
-[node name="WeaponsLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
-layout_mode = 2
-text = "Weapons: 10"
 
 [node name="FleetPanel" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
 layout_mode = 2
@@ -107,35 +86,15 @@ layout_mode = 2
 text = "=== FLEET ==="
 
 [node name="FleetList" type="ItemList" parent="MainContainer/GameArea/SidePanel/FleetPanel"]
-custom_minimum_size = Vector2(0, 100)
+custom_minimum_size = Vector2(0, 80)
 layout_mode = 2
 
 [node name="BuildButtons" type="HBoxContainer" parent="MainContainer/GameArea/SidePanel/FleetPanel"]
 layout_mode = 2
 
-[node name="FrigateBtn" type="Button" parent="MainContainer/GameArea/SidePanel/FleetPanel/BuildButtons"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Frigate"
-
-[node name="CruiserBtn" type="Button" parent="MainContainer/GameArea/SidePanel/FleetPanel/BuildButtons"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Cruiser"
-
-[node name="CarrierBtn" type="Button" parent="MainContainer/GameArea/SidePanel/FleetPanel/BuildButtons"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Carrier"
-
-[node name="DreadBtn" type="Button" parent="MainContainer/GameArea/SidePanel/FleetPanel/BuildButtons"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Dread"
-
 [node name="ProductionLabel" type="Label" parent="MainContainer/GameArea/SidePanel/FleetPanel"]
 layout_mode = 2
-text = "Production: Idle (8 slots)"
+text = "Shipyards: 8 idle"
 
 [node name="ZoneDetailPanel" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
 visible = false
@@ -144,13 +103,17 @@ layout_mode = 2
 [node name="VBox" type="VBoxContainer" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel"]
 layout_mode = 2
 
-[node name="ZoneNameLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
+[node name="ZoneNameLabel" type="RichTextLabel" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
 layout_mode = 2
-text = "Zone Name"
+bbcode_enabled = true
+fit_content = true
+text = "[b]Zone Name[/b]"
 
-[node name="ZoneStatusLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
+[node name="ZoneStatusLabel" type="RichTextLabel" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
 layout_mode = 2
-text = "Status: CONTROLLED"
+bbcode_enabled = true
+fit_content = true
+text = "Status: [color=green]CONTROLLED[/color]"
 
 [node name="ZonePopLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
 layout_mode = 2
@@ -160,7 +123,11 @@ text = "Population: 1M"
 layout_mode = 2
 text = "Defense: 100"
 
-[node name="AssignFleet" type="HBoxContainer" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
+[node name="ZoneBuildingsLabel" type="Label" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
+layout_mode = 2
+text = "Buildings: Mine x3"
+
+[node name="AssignButtons" type="HBoxContainer" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
 layout_mode = 2
 
 [node name="EventLog" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
@@ -178,15 +145,29 @@ text = "=== EVENT LOG ==="
 layout_mode = 2
 size_flags_vertical = 3
 bbcode_enabled = true
-text = "T1: War begins..."
+text = "War begins..."
 
 [node name="Footer" type="HBoxContainer" parent="MainContainer"]
 layout_mode = 2
 
-[node name="EndTurnBtn" type="Button" parent="MainContainer/Footer"]
+[node name="SpeedLabel" type="Label" parent="MainContainer/Footer"]
+layout_mode = 2
+text = "Speed: NORMAL"
+
+[node name="SpeedSlider" type="HSlider" parent="MainContainer/Footer"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+max_value = 4.0
+step = 1.0
+value = 2.0
+
+[node name="PauseBtn" type="Button" parent="MainContainer/Footer"]
+layout_mode = 2
+text = "PAUSE"
+
+[node name="Spacer" type="Control" parent="MainContainer/Footer"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "END TURN"
 
 [node name="MainMenuBtn" type="Button" parent="MainContainer/Footer"]
 layout_mode = 2
@@ -217,19 +198,20 @@ horizontal_alignment = 1
 
 [node name="VictoryTierLabel" type="Label" parent="GameOverPanel/VBox"]
 layout_mode = 2
+theme_override_font_sizes/font_size = 24
 text = "HEROIC"
 horizontal_alignment = 1
 
 [node name="VictoryDescLabel" type="Label" parent="GameOverPanel/VBox"]
 layout_mode = 2
-text = "Enough to rebuild"
+text = "\"Enough to rebuild\""
 horizontal_alignment = 1
 
 [node name="FinalStatsLabel" type="Label" parent="GameOverPanel/VBox"]
 layout_mode = 2
 text = "Lives Evacuated: 250M
 Lives Lost: 7.75B
-Turns Survived: 22"
+Weeks Survived: 22"
 
 [node name="Buttons" type="HBoxContainer" parent="GameOverPanel/VBox"]
 layout_mode = 2

@@ -1,0 +1,92 @@
+[
+  {
+    "id": "leader",
+    "name": "Natural Leader",
+    "description": "Provides stability to the crew during stressful situations.",
+    "effects": {
+      "morale_swing_multiplier": 0.5,
+      "crew_morale_bonus": 5
+    }
+  },
+  {
+    "id": "stoic",
+    "name": "Stoic",
+    "description": "Remains emotionally stable regardless of circumstances.",
+    "effects": {
+      "morale_swing_multiplier": 0.5
+    }
+  },
+  {
+    "id": "risk_taker",
+    "name": "Risk Taker",
+    "description": "Willing to take chances for better outcomes.",
+    "effects": {
+      "experiment_bonus": 0.2,
+      "accident_chance_multiplier": 1.2
+    }
+  },
+  {
+    "id": "cautious",
+    "name": "Cautious",
+    "description": "Prefers safe approaches, reducing accidents but slowing progress.",
+    "effects": {
+      "experiment_bonus": -0.1,
+      "accident_chance_multiplier": 0.8,
+      "task_bonus": 0.1
+    }
+  },
+  {
+    "id": "optimist",
+    "name": "Optimist",
+    "description": "Sees the bright side, gaining extra morale from positive events.",
+    "effects": {
+      "positive_morale_multiplier": 1.2,
+      "negative_morale_multiplier": 0.8
+    }
+  },
+  {
+    "id": "pessimist",
+    "name": "Pessimist",
+    "description": "Always expects the worst. Less affected by negative events.",
+    "effects": {
+      "positive_morale_multiplier": 0.8,
+      "negative_morale_multiplier": 0.7
+    }
+  },
+  {
+    "id": "loner",
+    "name": "Loner",
+    "description": "Prefers solitude. Less affected by social events.",
+    "effects": {
+      "social_morale_multiplier": 0.5,
+      "solo_work_bonus": 0.15
+    }
+  },
+  {
+    "id": "caretaker",
+    "name": "Caretaker",
+    "description": "Dedicated to crew wellbeing. Enhanced medical effectiveness.",
+    "effects": {
+      "medical_effectiveness_multiplier": 1.3,
+      "crew_health_monitoring_bonus": 0.1
+    }
+  },
+  {
+    "id": "homesick",
+    "name": "Homesick",
+    "description": "Misses Earth deeply. Boosted by Earth contact, hurt by isolation.",
+    "effects": {
+      "earth_contact_morale_multiplier": 1.5,
+      "isolation_morale_penalty": -5
+    }
+  },
+  {
+    "id": "curious",
+    "name": "Endlessly Curious",
+    "description": "Thrives on discovery. Major morale boost from findings.",
+    "effects": {
+      "discovery_morale_multiplier": 1.5,
+      "research_speed_bonus": 0.1
+    }
+  }
+]

@@ -1,0 +1,176 @@
+{
+  "zones": [
+    {
+      "id": 0,
+      "name": "Earth Orbit",
+      "description": "Home. The final line of defense.",
+      "type": "home",
+      "position": {"x": 0, "y": 0},
+      "population": 10000000000,
+      "production_capacity": 5,
+      "is_earth": true,
+      "connections": [1, 2, 3]
+    },
+    {
+      "id": 1,
+      "name": "Luna Shipyards",
+      "description": "Primary military production facility.",
+      "type": "military",
+      "position": {"x": -1, "y": 0},
+      "population": 5000000,
+      "production_capacity": 3,
+      "connections": [0, 4]
+    },
+    {
+      "id": 2,
+      "name": "Mars Colonies",
+      "description": "Terraforming efforts and research outposts.",
+      "type": "colony",
+      "position": {"x": 1, "y": -1},
+      "population": 2000000,
+      "production_capacity": 2,
+      "connections": [0, 5, 6]
+    },
+    {
+      "id": 3,
+      "name": "Venus Station",
+      "description": "Cloud city research and manufacturing.",
+      "type": "research",
+      "position": {"x": 0, "y": 1},
+      "population": 500000,
+      "production_capacity": 1,
+      "connections": [0, 7]
+    },
+    {
+      "id": 4,
+      "name": "Asteroid Belt",
+      "description": "Mining operations and raw materials.",
+      "type": "mining",
+      "position": {"x": -2, "y": -1},
+      "population": 100000,
+      "production_capacity": 4,
+      "resource_bonus": {"materials": 500},
+      "connections": [1, 5, 8]
+    },
+    {
+      "id": 5,
+      "name": "Ceres Station",
+      "description": "Deep space waystation and fuel depot.",
+      "type": "station",
+      "position": {"x": 0, "y": -2},
+      "population": 50000,
+      "production_capacity": 1,
+      "resource_bonus": {"fuel": 300},
+      "connections": [2, 4, 9]
+    },
+    {
+      "id": 6,
+      "name": "Jupiter Moons",
+      "description": "Gas mining and outer system colonies.",
+      "type": "colony",
+      "position": {"x": 2, "y": -2},
+      "population": 1000000,
+      "production_capacity": 2,
+      "resource_bonus": {"fuel": 500},
+      "connections": [2, 9, 10]
+    },
+    {
+      "id": 7,
+      "name": "Mercury Labs",
+      "description": "Solar research and power collection.",
+      "type": "research",
+      "position": {"x": -1, "y": 2},
+      "population": 10000,
+      "production_capacity": 1,
+      "connections": [3, 11]
+    },
+    {
+      "id": 8,
+      "name": "Frontier Alpha",
+      "description": "First line of defense. Sensor networks and patrol bases.",
+      "type": "frontier",
+      "position": {"x": -3, "y": -2},
+      "population": 5000,
+      "production_capacity": 0,
+      "is_frontier": true,
+      "connections": [4, 12]
+    },
+    {
+      "id": 9,
+      "name": "Saturn Rings",
+      "description": "Resource extraction from the rings.",
+      "type": "mining",
+      "position": {"x": 1, "y": -3},
+      "population": 25000,
+      "production_capacity": 2,
+      "connections": [5, 6, 13]
+    },
+    {
+      "id": 10,
+      "name": "Europa",
+      "description": "Ocean research and potential life discovery.",
+      "type": "research",
+      "position": {"x": 3, "y": -3},
+      "population": 100000,
+      "production_capacity": 1,
+      "connections": [6, 14]
+    },
+    {
+      "id": 11,
+      "name": "Inner Frontier",
+      "description": "Solar observation and early warning.",
+      "type": "frontier",
+      "position": {"x": -2, "y": 3},
+      "population": 1000,
+      "production_capacity": 0,
+      "is_frontier": true,
+      "connections": [7, 15]
+    },
+    {
+      "id": 12,
+      "name": "Outer Sentinel",
+      "description": "Long-range sensor array. First contact point.",
+      "type": "frontier",
+      "position": {"x": -4, "y": -3},
+      "population": 500,
+      "production_capacity": 0,
+      "is_frontier": true,
+      "herald_entry": true,
+      "connections": [8]
+    },
+    {
+      "id": 13,
+      "name": "Titan Colony",
+      "description": "Hydrocarbon harvesting and research.",
+      "type": "colony",
+      "position": {"x": 0, "y": -4},
+      "population": 200000,
+      "production_capacity": 1,
+      "connections": [9, 14]
+    },
+    {
+      "id": 14,
+      "name": "Deep Space Array",
+      "description": "Communications relay and observation.",
+      "type": "frontier",
+      "position": {"x": 2, "y": -4},
+      "population": 2000,
+      "production_capacity": 0,
+      "is_frontier": true,
+      "herald_entry": true,
+      "connections": [10, 13]
+    },
+    {
+      "id": 15,
+      "name": "Kuiper Station",
+      "description": "Edge of the solar system. Last outpost.",
+      "type": "frontier",
+      "position": {"x": -3, "y": 4},
+      "population": 100,
+      "production_capacity": 0,
+      "is_frontier": true,
+      "herald_entry": true,
+      "connections": [11]
+    }
+  ]
+}

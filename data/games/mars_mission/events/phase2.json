@@ -1,0 +1,612 @@
+{
+  "events": [
+    {
+      "id": "solar_particle_event",
+      "title": "Solar Particle Event",
+      "category": "space",
+      "description": "Sensors detect an incoming solar flare. The radiation will reach the ship in approximately 8 hours.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.03,
+        "day_range": [20, 160],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "shelter",
+          "text": "Order all crew to radiation shelter",
+          "requirements": [
+            {"type": "has_component", "component_id": "crew_quarters"}
+          ],
+          "outcomes": [
+            {
+              "weight": 0.85,
+              "description": "The crew shelters effectively. Minimal exposure.",
+              "effects": [
+                {"type": "crew_health", "target": "all", "amount": -5},
+                {"type": "time", "days": 1},
+                {"type": "log", "message": "Crew sheltered successfully from solar event"}
+              ]
+            },
+            {
+              "weight": 0.15,
+              "description": "Some exposure despite shelter. Minor radiation effects.",
+              "effects": [
+                {"type": "crew_health", "target": "all", "amount": -15},
+                {"type": "time", "days": 1},
+                {"type": "log", "message": "Solar event caused minor radiation exposure despite shelter"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "rotate_ship",
+          "text": "Rotate ship to use hull as shield",
+          "outcomes": [
+            {
+              "weight": 0.6,
+              "description": "The maneuver works. Most radiation is blocked by the hull.",
+              "effects": [
+                {"type": "crew_health", "target": "all", "amount": -10},
+                {"type": "resource", "resource_id": "fuel", "amount": -50},
+                {"type": "log", "message": "Hull shielding maneuver successful"}
+              ]
+            },
+            {
+              "weight": 0.4,
+              "description": "Partial success. Significant exposure to some crew.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -30},
+                {"type": "crew_health", "target": "all", "amount": -10},
+                {"type": "resource", "resource_id": "fuel", "amount": -50},
+                {"type": "log", "message": "Hull shielding partially effective against solar event"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "continue_normal",
+          "text": "Continue normal operations (risky)",
+          "outcomes": [
+            {
+              "weight": 0.25,
+              "description": "The flare was weaker than sensors indicated.",
+              "effects": [
+                {"type": "crew_health", "target": "all", "amount": -8},
+                {"type": "log", "message": "Solar event was weaker than predicted"}
+              ]
+            },
+            {
+              "weight": 0.75,
+              "description": "Severe radiation exposure across the crew.",
+              "effects": [
+                {"type": "crew_health", "target": "all", "amount": -35},
+                {"type": "crew_morale", "target": "all", "amount": -20},
+                {"type": "log", "message": "Crew suffered severe radiation exposure from solar event"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "micrometeorite_impact",
+      "title": "Micrometeorite Impact",
+      "category": "ship",
+      "description": "A micrometeorite has struck the ship. Sensors show a pressure drop in one section.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.025,
+        "day_range": [10, 170],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "immediate_seal",
+          "text": "Seal the section immediately",
+          "outcomes": [
+            {
+              "weight": 0.7,
+              "description": "Section sealed. Minimal atmosphere loss.",
+              "effects": [
+                {"type": "resource", "resource_id": "oxygen", "percent": -3},
+                {"type": "component_damage", "target": "random", "amount": 10},
+                {"type": "log", "message": "Micrometeorite breach sealed quickly"}
+              ]
+            },
+            {
+              "weight": 0.3,
+              "description": "Some supplies in the section were damaged before sealing.",
+              "effects": [
+                {"type": "resource", "resource_id": "oxygen", "percent": -5},
+                {"type": "resource", "resource_id": "food", "percent": -8},
+                {"type": "component_damage", "target": "random", "amount": 15},
+                {"type": "log", "message": "Supplies lost before breach could be sealed"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "eva_repair",
+          "text": "Send crew for EVA repair",
+          "requirements": [
+            {"type": "resource", "resource_id": "spare_parts", "min": 1}
+          ],
+          "outcomes": [
+            {
+              "weight": 0.8,
+              "description": "EVA repair successful. Hull integrity restored.",
+              "effects": [
+                {"type": "resource", "resource_id": "oxygen", "percent": -2},
+                {"type": "resource", "resource_id": "spare_parts", "amount": -1},
+                {"type": "crew_fatigue", "target": "random", "amount": 25},
+                {"type": "log", "message": "EVA repair successfully patched hull breach"}
+              ]
+            },
+            {
+              "weight": 0.2,
+              "description": "EVA delayed. More atmosphere lost, but repair complete.",
+              "effects": [
+                {"type": "resource", "resource_id": "oxygen", "percent": -8},
+                {"type": "resource", "resource_id": "spare_parts", "amount": -1},
+                {"type": "crew_fatigue", "target": "random", "amount": 35},
+                {"type": "log", "message": "EVA repair completed but with significant atmosphere loss"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "internal_patch",
+          "text": "Attempt internal patch from inside",
+          "outcomes": [
+            {
+              "weight": 0.5,
+              "description": "Internal patch holds. Crisis averted.",
+              "effects": [
+                {"type": "resource", "resource_id": "oxygen", "percent": -4},
+                {"type": "log", "message": "Internal patch successfully sealed breach"}
+              ]
+            },
+            {
+              "weight": 0.5,
+              "description": "Patch is temporary. Will need proper repair soon.",
+              "effects": [
+                {"type": "resource", "resource_id": "oxygen", "percent": -6},
+                {"type": "component_damage", "target": "random", "amount": 20},
+                {"type": "set_flag", "flag": "hull_patch_needed"},
+                {"type": "log", "message": "Temporary patch holding but needs proper repair"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "crew_disagreement",
+      "title": "Crew Disagreement",
+      "category": "crew",
+      "description": "Tensions are running high. Two crew members are having a serious disagreement about procedures.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.035,
+        "day_range": [30, 150],
+        "conditions": [
+          {"type": "crew_count", "min": 2}
+        ]
+      },
+      "choices": [
+        {
+          "id": "mediate",
+          "text": "Mediate the dispute personally",
+          "outcomes": [
+            {
+              "weight": 0.6,
+              "description": "You help them find common ground. Tension eases.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": -5},
+                {"type": "relationship", "crew1": "random", "crew2": "random", "amount": 5},
+                {"type": "log", "message": "Successfully mediated crew disagreement"}
+              ]
+            },
+            {
+              "weight": 0.4,
+              "description": "Mediation helps, but underlying tension remains.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": -10},
+                {"type": "crew_fatigue", "target": "all", "amount": 15},
+                {"type": "log", "message": "Mediation partially resolved crew disagreement"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "side_procedure",
+          "text": "Support the crew member with better procedure",
+          "outcomes": [
+            {
+              "weight": 0.5,
+              "description": "The correct procedure is established. One crew member is unhappy.",
+              "effects": [
+                {"type": "crew_morale", "target": "random", "amount": 15},
+                {"type": "crew_morale", "target": "random", "amount": -25},
+                {"type": "log", "message": "Resolved disagreement by supporting correct procedure"}
+              ]
+            },
+            {
+              "weight": 0.5,
+              "description": "The decision creates a rift between crew members.",
+              "effects": [
+                {"type": "crew_morale", "target": "random", "amount": 10},
+                {"type": "crew_morale", "target": "random", "amount": -30},
+                {"type": "relationship", "crew1": "random", "crew2": "random", "amount": -15},
+                {"type": "log", "message": "Procedure decision created crew rift"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "let_resolve",
+          "text": "Let them work it out themselves",
+          "outcomes": [
+            {
+              "weight": 0.4,
+              "description": "They eventually reach an understanding.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": -8},
+                {"type": "relationship", "crew1": "random", "crew2": "random", "amount": 3},
+                {"type": "log", "message": "Crew resolved disagreement independently"}
+              ]
+            },
+            {
+              "weight": 0.6,
+              "description": "The conflict festers and affects the whole crew.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": -18},
+                {"type": "relationship", "crew1": "random", "crew2": "random", "amount": -10},
+                {"type": "log", "message": "Unresolved disagreement affected crew morale"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "medical_emergency",
+      "title": "Medical Emergency",
+      "category": "crew",
+      "description": "A crew member is experiencing severe abdominal pain. Could be appendicitis.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.02,
+        "day_range": [20, 160],
+        "conditions": [
+          {"type": "crew_count", "min": 1}
+        ]
+      },
+      "choices": [
+        {
+          "id": "full_surgery",
+          "text": "Perform emergency surgery",
+          "requirements": [
+            {"type": "has_component", "component_id": "medical_bay"},
+            {"type": "resource", "resource_id": "medical_supplies", "min": 2}
+          ],
+          "outcomes": [
+            {
+              "weight": 0.8,
+              "description": "Surgery successful. Crew member recovering.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -20},
+                {"type": "resource", "resource_id": "medical_supplies", "amount": -2},
+                {"type": "crew_status", "target": "random", "status": "recovering"},
+                {"type": "log", "message": "Emergency surgery successful"}
+              ]
+            },
+            {
+              "weight": 0.2,
+              "description": "Complications during surgery. Extended recovery needed.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -40},
+                {"type": "resource", "resource_id": "medical_supplies", "amount": -3},
+                {"type": "crew_status", "target": "random", "status": "critical"},
+                {"type": "log", "message": "Surgery complications require extended recovery"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "conservative",
+          "text": "Conservative treatment with medication",
+          "requirements": [
+            {"type": "resource", "resource_id": "medical_supplies", "min": 1}
+          ],
+          "outcomes": [
+            {
+              "weight": 0.5,
+              "description": "Medication controls the condition. Crew member stable.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -15},
+                {"type": "resource", "resource_id": "medical_supplies", "amount": -1},
+                {"type": "log", "message": "Conservative treatment stabilized patient"}
+              ]
+            },
+            {
+              "weight": 0.5,
+              "description": "Condition worsens. More aggressive treatment needed.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -35},
+                {"type": "resource", "resource_id": "medical_supplies", "amount": -2},
+                {"type": "crew_status", "target": "random", "status": "sick"},
+                {"type": "log", "message": "Condition worsened despite conservative treatment"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "monitor_only",
+          "text": "Monitor and hope it passes",
+          "outcomes": [
+            {
+              "weight": 0.3,
+              "description": "Turns out it was just severe gas. False alarm.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -5},
+                {"type": "crew_morale", "target": "all", "amount": 5},
+                {"type": "log", "message": "Medical scare was a false alarm"}
+              ]
+            },
+            {
+              "weight": 0.7,
+              "description": "Condition is serious and worsens without treatment.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -45},
+                {"type": "crew_status", "target": "random", "status": "critical"},
+                {"type": "log", "message": "Delayed treatment allowed condition to worsen significantly"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "oxygen_alert",
+      "title": "Oxygen System Alert",
+      "category": "ship",
+      "description": "Life support is showing declining oxygen recycling efficiency. The system needs attention.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.03,
+        "day_range": [40, 170],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "full_repair",
+          "text": "Full system repair",
+          "requirements": [
+            {"type": "resource", "resource_id": "spare_parts", "min": 2}
+          ],
+          "outcomes": [
+            {
+              "weight": 0.9,
+              "description": "System fully restored to operational capacity.",
+              "effects": [
+                {"type": "resource", "resource_id": "spare_parts", "amount": -2},
+                {"type": "component_repair", "target": "life_support", "amount": 20},
+                {"type": "log", "message": "Life support system fully repaired"}
+              ]
+            },
+            {
+              "weight": 0.1,
+              "description": "Repair complete but found additional wear.",
+              "effects": [
+                {"type": "resource", "resource_id": "spare_parts", "amount": -2},
+                {"type": "component_repair", "target": "life_support", "amount": 15},
+                {"type": "set_flag", "flag": "life_support_wear"},
+                {"type": "log", "message": "Life support repaired but showing wear"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "partial_repair",
+          "text": "Partial repair to conserve parts",
+          "requirements": [
+            {"type": "resource", "resource_id": "spare_parts", "min": 1}
+          ],
+          "outcomes": [
+            {
+              "weight": 0.7,
+              "description": "System restored to acceptable levels.",
+              "effects": [
+                {"type": "resource", "resource_id": "spare_parts", "amount": -1},
+                {"type": "component_repair", "target": "life_support", "amount": 10},
+                {"type": "log", "message": "Life support partially repaired"}
+              ]
+            },
+            {
+              "weight": 0.3,
+              "description": "Repair insufficient. Efficiency continues to decline.",
+              "effects": [
+                {"type": "resource", "resource_id": "spare_parts", "amount": -1},
+                {"type": "component_damage", "target": "life_support", "amount": 5},
+                {"type": "log", "message": "Partial repair insufficient for life support"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "reduce_load",
+          "text": "Reduce system load instead of repair",
+          "outcomes": [
+            {
+              "weight": 0.6,
+              "description": "Reduced operations stabilize the system.",
+              "effects": [
+                {"type": "resource", "resource_id": "oxygen", "consumption_multiplier": 1.2},
+                {"type": "log", "message": "Reduced operations to stabilize life support"}
+              ]
+            },
+            {
+              "weight": 0.4,
+              "description": "System continues to degrade despite reduced load.",
+              "effects": [
+                {"type": "resource", "resource_id": "oxygen", "consumption_multiplier": 1.3},
+                {"type": "component_damage", "target": "life_support", "amount": 10},
+                {"type": "log", "message": "Life support degradation continues despite reduced load"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "birthday_space",
+      "title": "Birthday in Space",
+      "category": "quiet_moment",
+      "description": "Today is one of the crew member's birthday. The first birthday celebrated en route to Mars.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.015,
+        "day_range": [30, 160],
+        "conditions": [
+          {"type": "morale_above", "threshold": 40}
+        ]
+      },
+      "choices": [
+        {
+          "id": "celebrate",
+          "text": "Organize a proper celebration",
+          "outcomes": [
+            {
+              "weight": 0.9,
+              "description": "The crew enjoys a wonderful celebration. Morale soars.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 20},
+                {"type": "resource", "resource_id": "food", "amount": -5},
+                {"type": "log", "message": "Birthday celebration boosted crew morale"}
+              ]
+            },
+            {
+              "weight": 0.1,
+              "description": "The celebration reminds some crew of home. Mixed feelings.",
+              "effects": [
+                {"type": "crew_morale", "target": "random", "amount": 25},
+                {"type": "crew_morale", "target": "random", "amount": -5},
+                {"type": "resource", "resource_id": "food", "amount": -5},
+                {"type": "log", "message": "Birthday celebration had mixed reception"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "simple_acknowledgment",
+          "text": "Simple acknowledgment and extra rest time",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "A quiet but meaningful birthday recognition.",
+              "effects": [
+                {"type": "crew_morale", "target": "random", "amount": 15},
+                {"type": "crew_morale", "target": "all", "amount": 5},
+                {"type": "log", "message": "Quiet birthday acknowledgment appreciated"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "earth_visible",
+      "title": "Earth Visible",
+      "category": "quiet_moment",
+      "description": "Earth is clearly visible through the observation window - a small, pale blue dot.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.02,
+        "day_range": [60, 140],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "observation_time",
+          "text": "Give crew time to observe and reflect",
+          "outcomes": [
+            {
+              "weight": 0.8,
+              "description": "The perspective is profound. Crew feels connected to their mission.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 15},
+                {"type": "log", "message": "Crew took time to observe Earth"}
+              ]
+            },
+            {
+              "weight": 0.2,
+              "description": "Some crew feel homesick seeing Earth so far away.",
+              "effects": [
+                {"type": "crew_morale", "target": "random", "amount": 20},
+                {"type": "crew_morale", "target": "random", "amount": -10},
+                {"type": "log", "message": "Earth observation brought mixed emotions"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "photo_session",
+          "text": "Document with photos and video message home",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "Beautiful images captured. Message sent to families.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 12},
+                {"type": "log", "message": "Captured Earth observation and sent messages home"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "halfway_mars",
+      "title": "Halfway to Mars",
+      "category": "milestone",
+      "description": "The ship has reached the halfway point to Mars. A significant milestone.",
+      "trigger": {
+        "type": "day_reached",
+        "day_percent": 0.5
+      },
+      "choices": [
+        {
+          "id": "celebrate_milestone",
+          "text": "Mark the occasion with a small celebration",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "Halfway there! The crew celebrates this achievement.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 20},
+                {"type": "resource", "resource_id": "food", "amount": -3},
+                {"type": "log", "message": "Celebrated reaching halfway point to Mars"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "acknowledge_continue",
+          "text": "Acknowledge and continue operations",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "The milestone is noted. Focus remains on the mission.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 10},
+                {"type": "log", "message": "Acknowledged halfway point milestone"}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

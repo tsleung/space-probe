@@ -1,0 +1,70 @@
+{
+  "resources": {
+    "credits_per_turn_base": 500,
+    "credits_per_population_million": 10,
+    "materials_per_mining_zone": 200,
+    "fuel_per_gas_zone": 150
+  },
+
+  "herald": {
+    "initial_strength": 50,
+    "strength_growth_per_turn": 5,
+    "attack_damage_multiplier": 1.5,
+    "expansion_rate": 1,
+    "target_priority": ["frontier", "mining", "colony", "research", "military", "home"]
+  },
+
+  "combat": {
+    "defender_bonus": 1.3,
+    "zone_fortification_bonus": 0.1,
+    "fleet_cohesion_bonus": 0.05,
+    "retreat_threshold": 0.3
+  },
+
+  "evacuation": {
+    "transport_capacity": 100000,
+    "evacuation_time_turns": 2,
+    "panic_morale_loss": 10,
+    "successful_evac_morale_gain": 5
+  },
+
+  "morale": {
+    "starting_morale": 100,
+    "zone_fall_morale_loss": 15,
+    "earth_threat_morale_loss": 25,
+    "victory_morale_gain": 10,
+    "defeat_morale_loss": 20,
+    "morale_collapse_threshold": 20
+  },
+
+  "victory_tiers": {
+    "pyrrhic": {
+      "min_evacuated": 100000,
+      "earth_survives": false,
+      "description": "Humanity survives, but barely. Earth is lost."
+    },
+    "bronze": {
+      "min_evacuated": 1000000,
+      "earth_survives": false,
+      "description": "Millions escaped. Earth fell, but hope lives on."
+    },
+    "silver": {
+      "min_evacuated": 10000000,
+      "earth_survives": true,
+      "description": "Earth defended. The Heralds are pushed back."
+    },
+    "gold": {
+      "min_evacuated": 100000000,
+      "earth_survives": true,
+      "herald_destroyed": true,
+      "description": "Total victory. The Herald threat is ended."
+    }
+  },
+
+  "production": {
+    "base_production_slots": 2,
+    "military_zone_bonus_slots": 1,
+    "rush_cost_multiplier": 2.0,
+    "repair_cost_per_turn": 0.1
+  }
+}

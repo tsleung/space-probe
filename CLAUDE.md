@@ -4,14 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SpaceProbe is a Mars mission simulator game built in Godot 4.5 (GDScript), inspired by Oregon Trail. Players build spacecraft, manage crew, and travel to Mars while dealing with random events and resource management.
+SpaceProbe is a collection of space simulation games built in Godot 4.5 (GDScript). The core game is a Mars mission simulator inspired by Oregon Trail. Additional expansion games include First Contact War (strategy) and Von Neumann Probe (real-time idle).
 
 ## Design Documentation
 
-See `docs/` for detailed game design specs:
-- `game-design.md` - Core design philosophy, win/lose conditions, overarching systems
-- `phase-1-ship-building.md` through `phase-4-return-trip.md` - Phase-specific mechanics
-- `phase-transitions.md` - Transition sequences and data flow between phases
+See `docs/` for detailed specs:
+- `docs/game-design.md` - Core design philosophy
+- `docs/phase-1-ship-building.md` through `docs/phase-4-return-trip.md` - Phase mechanics
+- `docs/architecture/overview.md` - System architecture
+- `docs/architecture/refactor-plan.md` - Architecture migration plan
+- `docs/principles/engineering-principles.md` - Coding principles
+- `docs/principles/llm-development.md` - LLM collaboration guidelines
+- `docs/projects/` - Phase completion documentation
 
 ## Running the Project
 
@@ -23,71 +27,205 @@ godot project.godot
 godot --path . scenes/ui/main_menu.tscn
 ```
 
-## Architecture
+## Architecture Overview
 
-### Redux-style State Management
+### Engine Layer (`scripts/engine/`)
 
-The codebase follows a Redux-like pattern with strict separation between pure logic and side effects:
+The new modular engine provides reusable infrastructure:
 
-1. **GameStore** (`scripts/autoload/game_store.gd`) - The only singleton/autoload. Holds mutable state, emits signals for UI reactivity, handles RNG and persistence. All state changes go through `dispatch()`.
+```
+scripts/engine/
+├── core/           # Core infrastructure
+│   ├── store.gd         # State container with signals
+│   ├── dispatcher.gd    # Action routing
+│   ├── rng_manager.gd   # Seedable randomness
+│   ├── persistence.gd   # Save/load
+│   ├── game_loader.gd   # Load game definitions
+│   └── game_registry.gd # Game discovery
+├── types/          # Type definitions
+│   ├── result.gd        # Result<T,E> for error handling
+│   ├── action_types.gd  # Action constants
+│   └── game_types.gd    # Enums and factories
+├── validation/     # Validation layers
+│   ├── action_validator.gd
+│   └── schema_validator.gd
+├── systems/        # Pure domain logic
+│   ├── hex_grid_system.gd
+│   ├── resource_system.gd
+│   ├── crew_system.gd
+│   ├── component_system.gd
+│   ├── event_system.gd
+│   └── time_system.gd
+├── reducers/       # State reducers
+│   ├── game_reducer.gd        # Main router
+│   ├── ship_building_reducer.gd
+│   ├── travel_reducer.gd
+│   └── mars_reducer.gd
+├── utils/          # Utilities
+│   └── hex_math.gd
+└── ui/             # UI helpers
+    └── store_binding.gd
+```
 
-2. **GameReducer** (`scripts/core/game_reducer.gd`) - Pure reducer: `(state, action) -> new_state`. Contains action creators and reducer implementations. All functions are static and deterministic.
+### Data Layer (`data/`)
 
-3. **GameTypes** (`scripts/types/game_types.gd`) - Data type definitions using Dictionary factories (e.g., `create_component()`, `create_crew_member()`). Provides immutable-style updates via `with_field()` and `with_fields()`.
+All game content is data-driven:
 
-### Pure Logic Modules (scripts/core/)
+```
+data/
+├── games/
+│   ├── mars_mission/     # Core game
+│   │   ├── manifest.json
+│   │   ├── balance.json
+│   │   ├── engines.json
+│   │   ├── components.json
+│   │   ├── crew_roster.json
+│   │   └── events/
+│   ├── first_contact_war/  # FCW expansion
+│   │   ├── manifest.json
+│   │   ├── balance.json
+│   │   ├── ships.json
+│   │   └── zones.json
+│   └── von_neumann_probe/  # VNP expansion
+│       ├── manifest.json
+│       └── balance.json
+├── shared/
+│   ├── traits.json
+│   └── conditions.json
+└── difficulty.json
+```
 
-All core logic is in static, pure functions with no side effects:
+### Key Design Patterns
 
-- **ComponentLogic** - Component construction, testing, quality calculations
-- **ShipLogic** - Hex grid operations, ship mass/readiness calculations, launch checks
-- **CrewLogic** - Crew stats, daily updates, team calculations
-- **EngineLogic** - Engine definitions, delta-v calculations, travel time estimates
-- **EventLogic** - Random event generation (deterministic with provided random values)
-- **TravelLogic** - Travel time calculations, daily events during journey, crew activities
+#### 1. Pure Functions
 
-### UI Layer (scripts/ui/, scripts/phases/, scripts/components/)
-
-UI scripts are thin layers that:
-- Read state from GameStore via getters
-- Dispatch actions through GameStore
-- React to GameStore signals for updates
-- Maintain only local UI state (selections, hover states)
-
-### Key Pattern: Deterministic Randomness
-
-Random values are generated in GameStore and passed into pure functions:
+All game logic is in static, pure functions:
 ```gdscript
-# GameStore (side effects)
-dispatch_with_random(action)  # Injects random_values into action
-
-# EventLogic (pure)
-static func generate_travel_event(state, event_roll, type_roll, severity_roll) -> Dictionary
+# Systems return new state, never mutate
+static func consume_daily(state: Dictionary, balance: Dictionary, rng: RNGManager) -> Dictionary:
+    var new_state = state.duplicate(true)
+    # ... modifications ...
+    return new_state
 ```
 
-## Game Flow
+#### 2. Result Type
 
-1. **MAIN_MENU** → New Game starts at SHIP_BUILDING
-2. **SHIP_BUILDING** → Place components on hex grid, select engine, recruit crew, load supplies
-3. **TRAVEL_TO_MARS** → Daily events, crew management, supply consumption, interactive events
-4. **MARS_BASE** → Surface operations, experiments, sample collection, departure checklist
-5. **TRAVEL_TO_EARTH** → Return journey with scarce supplies, reentry sequence with quality checks
-6. **GAME_OVER** → Mission results with ending tiers (Gold/Silver/Bronze/Pyrrhic/Failure)
-
-## Hex Grid System
-
-- Uses axial coordinates (q, r) for hexes
-- `ShipLogic.hex_to_pixel()` / `pixel_to_hex()` for conversions
-- Multi-hex components spread from origin using `get_component_hexes()`
-- Grid stored as `Dictionary<Vector2i, ComponentData>`
-
-## Data Flow Example
-
+Explicit error handling:
+```gdscript
+var result = HexGridSystem.can_place_component(ship, component, position)
+if not result.is_ok():
+    var error = result.get_error()
+    push_warning("Placement failed: %s" % error.message)
+    return
 ```
-User clicks "Place Component"
-  → UI calls GameStore.place_component(component, position)
-    → GameStore.dispatch(GameReducer.action_place_component(...))
-      → GameReducer.reduce() returns new state
-    → GameStore emits state_changed signal
-  → UI receives signal, calls _sync_ui_to_state()
+
+#### 3. Data-Driven Configuration
+
+All magic numbers in balance.json:
+```gdscript
+# DON'T: Magic numbers in code
+var daily_food = 2.0 * crew_count
+
+# DO: Read from balance
+var daily_food = balance.get("daily_food_per_crew", 2.0) * crew_count
 ```
+
+#### 4. Deterministic Randomness
+
+RNG injected, never created inline:
+```gdscript
+# In Store (side effects allowed)
+var rng = RNGManager.new(seed)
+var new_state = reducer.reduce(state, action, balance, rng)
+
+# In Reducer/System (pure)
+static func apply_daily_update(state, balance, rng: RNGManager) -> Dictionary:
+    var roll = rng.randf()  # Deterministic with seed
+```
+
+### Game-Specific Code
+
+Each expansion has its own Store/Reducer:
+
+- **Mars Mission**: Uses shared engine systems
+- **First Contact War**: `scripts/fcw/fcw_store.gd`, `fcw_reducer.gd`
+- **Von Neumann Probe**: `scripts/vnp/vnp_store.gd`, `vnp_reducer.gd`
+
+### UI Binding
+
+UI components use StoreBinding for reactive updates:
+```gdscript
+func _ready():
+    var binding = StoreBinding.new(self, GameStore)
+    binding.bind_property("resources.food.current", _on_food_changed)
+    binding.bind_property("crew", _on_crew_changed)
+```
+
+## Working with the Codebase
+
+### Adding New Features
+
+1. **Add data to JSON** (balance, events, etc.)
+2. **Create/update system** if new domain logic needed
+3. **Add action type** in `action_types.gd`
+4. **Implement in reducer** (phase-specific or shared)
+5. **Connect UI** via StoreBinding
+
+### Modifying Balance
+
+Edit JSON files directly:
+```bash
+# Adjust resource consumption
+vim data/games/mars_mission/balance.json
+
+# Add new event
+vim data/games/mars_mission/events/phase2.json
+```
+
+### Testing
+
+Systems are testable in isolation:
+```gdscript
+func test_resource_consumption():
+    var state = create_test_state()
+    var balance = load_test_balance()
+    var rng = RNGManager.new(12345)  # Fixed seed
+
+    var result = ResourceSystem.consume_daily(state, balance, rng)
+
+    assert(result.resources.food.current < state.resources.food.current)
+```
+
+## File Naming Conventions
+
+- `*.gd` - GDScript files
+- `*.gd.uid` - Godot 4.x UID files (auto-generated, keep in git)
+- `*.json` - Data files
+- `*.tscn` - Scene files
+- `*.tres` - Resource files
+
+## Quick Reference
+
+### Game Phases (Mars Mission)
+1. `ship_building` - Construct ship, hire crew
+2. `travel_to_mars` - 180+ day journey
+3. `mars_arrival` - Landing sequence
+4. `mars_base` - Surface operations
+5. `travel_to_earth` - Return journey
+6. `earth_arrival` - Reentry
+7. `game_over` - Results
+
+### Common Systems
+- `HexGridSystem` - Ship component placement
+- `ResourceSystem` - Consumption, rationing
+- `CrewSystem` - Stats, relationships
+- `ComponentSystem` - Quality, repair
+- `EventSystem` - Triggers, choices
+- `TimeSystem` - Day/sol progression
+
+### Common Actions
+- `ActionTypes.ADVANCE_DAY`
+- `ActionTypes.PLACE_COMPONENT`
+- `ActionTypes.HIRE_CREW`
+- `ActionTypes.RESOLVE_EVENT`
+- `ActionTypes.SET_RATIONING`

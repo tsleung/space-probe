@@ -1,0 +1,154 @@
+[gd_scene load_steps=2 format=3 uid="uid://cvoyagemap123"]
+
+[ext_resource type="Script" path="res://scripts/voyage/voyage_map.gd" id="1_voyage"]
+
+[node name="VoyageMap" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_voyage")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.04, 0.04, 0.08, 1)
+
+[node name="GraphCanvas" type="Node2D" parent="."]
+
+[node name="UI" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="TopBar" type="HBoxContainer" parent="UI"]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 20.0
+offset_top = 10.0
+offset_right = -20.0
+offset_bottom = 50.0
+grow_horizontal = 2
+theme_override_constants/separation = 20
+
+[node name="FuelLabel" type="Label" parent="UI/TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "FUEL"
+
+[node name="FuelBar" type="ProgressBar" parent="UI/TopBar"]
+custom_minimum_size = Vector2(300, 30)
+layout_mode = 2
+max_value = 100.0
+value = 100.0
+show_percentage = false
+
+[node name="FuelPercent" type="Label" parent="UI/TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "100%"
+
+[node name="Spacer" type="Control" parent="UI/TopBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="DayLabel" type="Label" parent="UI/TopBar"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Day 0"
+
+[node name="BottomBar" type="HBoxContainer" parent="UI"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = -50.0
+offset_right = -20.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_constants/separation = 20
+
+[node name="StatusLabel" type="Label" parent="UI/BottomBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 18
+text = "Select your next waypoint"
+
+[node name="MenuButton" type="Button" parent="UI/BottomBar"]
+layout_mode = 2
+text = "Menu (ESC)"
+
+[node name="GameOverPanel" type="Panel" parent="UI"]
+visible = false
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -120.0
+offset_right = 200.0
+offset_bottom = 120.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBox" type="VBoxContainer" parent="UI/GameOverPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = -20.0
+offset_bottom = -20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 15
+
+[node name="TitleLabel" type="Label" parent="UI/GameOverPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "MARS REACHED!"
+horizontal_alignment = 1
+
+[node name="MessageLabel" type="Label" parent="UI/GameOverPanel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_font_sizes/font_size = 16
+text = "You arrived with 15% fuel remaining."
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="HBox" type="HBoxContainer" parent="UI/GameOverPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="RestartButton" type="Button" parent="UI/GameOverPanel/VBox/HBox"]
+custom_minimum_size = Vector2(120, 40)
+layout_mode = 2
+text = "Play Again"
+
+[node name="MenuButton" type="Button" parent="UI/GameOverPanel/VBox/HBox"]
+custom_minimum_size = Vector2(120, 40)
+layout_mode = 2
+text = "Main Menu"
+
+[connection signal="pressed" from="UI/BottomBar/MenuButton" to="." method="_on_menu_pressed"]
+[connection signal="pressed" from="UI/GameOverPanel/VBox/HBox/RestartButton" to="." method="_on_restart_pressed"]
+[connection signal="pressed" from="UI/GameOverPanel/VBox/HBox/MenuButton" to="." method="_on_menu_pressed"]

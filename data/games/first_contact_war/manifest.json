@@ -1,0 +1,37 @@
+{
+  "id": "first_contact_war",
+  "name": "First Contact War",
+  "description": "Humanity's first interstellar war. Defend the solar system against the Herald invasion while evacuating civilians. A real-time strategy game about sacrifice and survival.",
+  "version": "1.0.0",
+  "genre": "real_time_strategy",
+  "time_mode": "turn_based",
+  "author": "SpaceProbe Team",
+
+  "settings": {
+    "turn_duration_days": 30,
+    "starting_resources": {
+      "credits": 10000,
+      "materials": 5000,
+      "fuel": 3000,
+      "population": 12000000000
+    },
+    "max_turns": 50,
+    "victory_conditions": {
+      "evacuate_minimum": 10000000,
+      "defend_earth": true
+    }
+  },
+
+  "files": {
+    "ships": "ships.json",
+    "zones": "zones.json",
+    "balance": "balance.json",
+    "events": "events/main.json"
+  },
+
+  "reducers": {
+    "main": "FCWReducer"
+  },
+
+  "store": "FCWStore"
+}

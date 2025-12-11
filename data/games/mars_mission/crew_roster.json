@@ -1,0 +1,402 @@
+[
+  {
+    "id": "sarah_chen",
+    "name": "Dr. Sarah Chen",
+    "role": "commander",
+    "specialty": "leadership",
+    "age": 48,
+    "nationality": "American",
+    "portrait": "res://assets/crew/chen.png",
+    "stats": {
+      "piloting": 70,
+      "engineering": 60,
+      "science": 80,
+      "medical": 50,
+      "leadership": 95
+    },
+    "base_stats": {
+      "health": 95,
+      "morale": 85
+    },
+    "traits": [
+      {
+        "id": "leader",
+        "name": "Natural Leader",
+        "description": "Provides stability to the crew during stressful situations.",
+        "effect": {
+          "morale_swing_multiplier": 0.5,
+          "crew_morale_bonus": 5
+        }
+      }
+    ],
+    "personality": "LEADER",
+    "background": {
+      "short": "Former NASA administrator with extensive spaceflight experience.",
+      "motivation": "To lead humanity's first crewed Mars mission successfully."
+    },
+    "relationships": {
+      "adaeze_okonkwo": {"trust": 70, "type": "respect"},
+      "carlos_reyes": {"trust": 55, "type": "mentorship"}
+    }
+  },
+  {
+    "id": "adaeze_okonkwo",
+    "name": "Cmdr. Adaeze Okonkwo",
+    "role": "commander",
+    "specialty": "piloting",
+    "age": 52,
+    "nationality": "Nigerian",
+    "portrait": "res://assets/crew/okonkwo.png",
+    "stats": {
+      "piloting": 85,
+      "engineering": 55,
+      "science": 65,
+      "medical": 45,
+      "leadership": 90
+    },
+    "base_stats": {
+      "health": 88,
+      "morale": 90
+    },
+    "traits": [
+      {
+        "id": "stoic",
+        "name": "Stoic",
+        "description": "Remains emotionally stable regardless of circumstances.",
+        "effect": {
+          "morale_swing_multiplier": 0.5
+        }
+      }
+    ],
+    "personality": "STOIC",
+    "background": {
+      "short": "Veteran astronaut with multiple ISS missions and lunar experience.",
+      "motivation": "To push the boundaries of human exploration one final time."
+    },
+    "relationships": {
+      "sarah_chen": {"trust": 70, "type": "respect"},
+      "katya_volkov": {"trust": 80, "type": "camaraderie"}
+    }
+  },
+  {
+    "id": "carlos_reyes",
+    "name": "Lt. Carlos Reyes",
+    "role": "pilot",
+    "specialty": "piloting",
+    "age": 34,
+    "nationality": "Mexican-American",
+    "portrait": "res://assets/crew/reyes.png",
+    "stats": {
+      "piloting": 95,
+      "engineering": 70,
+      "science": 40,
+      "medical": 35,
+      "leadership": 60
+    },
+    "base_stats": {
+      "health": 100,
+      "morale": 95
+    },
+    "traits": [
+      {
+        "id": "risk_taker",
+        "name": "Risk Taker",
+        "description": "Willing to take chances for better outcomes.",
+        "effect": {
+          "experiment_bonus": 0.2,
+          "accident_chance_multiplier": 1.2
+        }
+      }
+    ],
+    "personality": "RISK_TAKER",
+    "background": {
+      "short": "Former test pilot with a reputation for pushing limits.",
+      "motivation": "To prove himself on the biggest stage in history."
+    },
+    "relationships": {
+      "sarah_chen": {"trust": 55, "type": "mentorship"},
+      "miguel_santos": {"trust": 75, "type": "friendship"}
+    }
+  },
+  {
+    "id": "katya_volkov",
+    "name": "Maj. Katya Volkov",
+    "role": "pilot",
+    "specialty": "piloting",
+    "age": 41,
+    "nationality": "Russian",
+    "portrait": "res://assets/crew/volkov.png",
+    "stats": {
+      "piloting": 90,
+      "engineering": 75,
+      "science": 45,
+      "medical": 40,
+      "leadership": 65
+    },
+    "base_stats": {
+      "health": 92,
+      "morale": 78
+    },
+    "traits": [
+      {
+        "id": "cautious",
+        "name": "Cautious",
+        "description": "Prefers safe approaches, reducing accidents but slowing progress.",
+        "effect": {
+          "experiment_bonus": -0.1,
+          "accident_chance_multiplier": 0.8,
+          "task_bonus": 0.1
+        }
+      }
+    ],
+    "personality": "CAUTIOUS",
+    "background": {
+      "short": "Experienced cosmonaut with multiple long-duration missions.",
+      "motivation": "To represent Russia's legacy in space exploration."
+    },
+    "relationships": {
+      "adaeze_okonkwo": {"trust": 80, "type": "camaraderie"},
+      "jiyeon_kim": {"trust": 60, "type": "professional"}
+    }
+  },
+  {
+    "id": "miguel_santos",
+    "name": "Eng. Miguel Santos",
+    "role": "engineer",
+    "specialty": "engineering",
+    "age": 38,
+    "nationality": "Brazilian",
+    "portrait": "res://assets/crew/santos.png",
+    "stats": {
+      "piloting": 45,
+      "engineering": 95,
+      "science": 60,
+      "medical": 35,
+      "leadership": 55
+    },
+    "base_stats": {
+      "health": 100,
+      "morale": 88
+    },
+    "traits": [
+      {
+        "id": "optimist",
+        "name": "Optimist",
+        "description": "Sees the bright side, gaining extra morale from positive events.",
+        "effect": {
+          "positive_morale_multiplier": 1.2,
+          "negative_morale_multiplier": 0.8
+        }
+      }
+    ],
+    "personality": "OPTIMIST",
+    "background": {
+      "short": "Brilliant systems engineer who designed key spacecraft components.",
+      "motivation": "To see his designs work in the ultimate proving ground."
+    },
+    "relationships": {
+      "carlos_reyes": {"trust": 75, "type": "friendship"},
+      "vikram_patel": {"trust": 65, "type": "curiosity"}
+    }
+  },
+  {
+    "id": "jiyeon_kim",
+    "name": "Dr. Ji-yeon Kim",
+    "role": "engineer",
+    "specialty": "engineering",
+    "age": 44,
+    "nationality": "South Korean",
+    "portrait": "res://assets/crew/kim.png",
+    "stats": {
+      "piloting": 40,
+      "engineering": 90,
+      "science": 75,
+      "medical": 45,
+      "leadership": 60
+    },
+    "base_stats": {
+      "health": 85,
+      "morale": 82
+    },
+    "traits": [
+      {
+        "id": "loner",
+        "name": "Loner",
+        "description": "Prefers solitude. Less affected by social events.",
+        "effect": {
+          "social_morale_multiplier": 0.5,
+          "solo_work_bonus": 0.15
+        }
+      }
+    ],
+    "personality": "LONER",
+    "background": {
+      "short": "Robotics expert who prefers machines to people.",
+      "motivation": "To work on the most complex engineering challenges possible."
+    },
+    "relationships": {
+      "katya_volkov": {"trust": 60, "type": "professional"},
+      "astrid_johansson": {"trust": 45, "type": "friction"}
+    }
+  },
+  {
+    "id": "vikram_patel",
+    "name": "Dr. Vikram Patel",
+    "role": "scientist",
+    "specialty": "science",
+    "age": 36,
+    "nationality": "Indian",
+    "portrait": "res://assets/crew/patel.png",
+    "stats": {
+      "piloting": 30,
+      "engineering": 50,
+      "science": 95,
+      "medical": 40,
+      "leadership": 45
+    },
+    "base_stats": {
+      "health": 90,
+      "morale": 100
+    },
+    "traits": [
+      {
+        "id": "curious",
+        "name": "Endlessly Curious",
+        "description": "Thrives on discovery. Major morale boost from findings.",
+        "effect": {
+          "discovery_morale_multiplier": 1.5,
+          "research_speed_bonus": 0.1
+        }
+      }
+    ],
+    "personality": "CURIOUS",
+    "background": {
+      "short": "Geologist obsessed with Martian mineralogy since childhood.",
+      "motivation": "To be the first to study Mars rocks in person."
+    },
+    "relationships": {
+      "miguel_santos": {"trust": 65, "type": "curiosity"},
+      "astrid_johansson": {"trust": 80, "type": "collaboration"}
+    }
+  },
+  {
+    "id": "astrid_johansson",
+    "name": "Dr. Astrid Johansson",
+    "role": "scientist",
+    "specialty": "science",
+    "age": 42,
+    "nationality": "Swedish",
+    "portrait": "res://assets/crew/johansson.png",
+    "stats": {
+      "piloting": 35,
+      "engineering": 45,
+      "science": 92,
+      "medical": 70,
+      "leadership": 50
+    },
+    "base_stats": {
+      "health": 88,
+      "morale": 75
+    },
+    "traits": [
+      {
+        "id": "homesick",
+        "name": "Homesick",
+        "description": "Misses Earth deeply. Boosted by Earth contact, hurt by isolation.",
+        "effect": {
+          "earth_contact_morale_multiplier": 1.5,
+          "isolation_morale_penalty": -5
+        }
+      }
+    ],
+    "personality": "HOMESICK",
+    "background": {
+      "short": "Astrobiologist searching for signs of life beyond Earth.",
+      "motivation": "To answer humanity's oldest question: Are we alone?"
+    },
+    "relationships": {
+      "vikram_patel": {"trust": 80, "type": "collaboration"},
+      "james_thompson": {"trust": 70, "type": "support"}
+    }
+  },
+  {
+    "id": "james_thompson",
+    "name": "Dr. James Thompson",
+    "role": "medic",
+    "specialty": "medical",
+    "age": 50,
+    "nationality": "British",
+    "portrait": "res://assets/crew/thompson.png",
+    "stats": {
+      "piloting": 30,
+      "engineering": 40,
+      "science": 65,
+      "medical": 95,
+      "leadership": 70
+    },
+    "base_stats": {
+      "health": 82,
+      "morale": 85
+    },
+    "traits": [
+      {
+        "id": "caretaker",
+        "name": "Caretaker",
+        "description": "Dedicated to crew wellbeing. Enhanced medical effectiveness.",
+        "effect": {
+          "medical_effectiveness_multiplier": 1.3,
+          "crew_health_monitoring_bonus": 0.1
+        }
+      }
+    ],
+    "personality": "CARETAKER",
+    "background": {
+      "short": "Flight surgeon with decades of experience in extreme medicine.",
+      "motivation": "To keep everyone alive and healthy, no matter what."
+    },
+    "relationships": {
+      "astrid_johansson": {"trust": 70, "type": "support"},
+      "yuki_nakamura": {"trust": 65, "type": "professional"}
+    }
+  },
+  {
+    "id": "yuki_nakamura",
+    "name": "Dr. Yuki Nakamura",
+    "role": "medic",
+    "specialty": "medical",
+    "age": 39,
+    "nationality": "Japanese",
+    "portrait": "res://assets/crew/nakamura.png",
+    "stats": {
+      "piloting": 40,
+      "engineering": 35,
+      "science": 70,
+      "medical": 92,
+      "leadership": 55
+    },
+    "base_stats": {
+      "health": 95,
+      "morale": 80
+    },
+    "traits": [
+      {
+        "id": "pessimist",
+        "name": "Pessimist",
+        "description": "Always expects the worst. Less affected by negative events.",
+        "effect": {
+          "positive_morale_multiplier": 0.8,
+          "negative_morale_multiplier": 0.7
+        }
+      }
+    ],
+    "personality": "PESSIMIST",
+    "background": {
+      "short": "Emergency medicine specialist who prepares for every contingency.",
+      "motivation": "To prove that careful preparation can overcome any disaster."
+    },
+    "relationships": {
+      "james_thompson": {"trust": 65, "type": "professional"},
+      "sarah_chen": {"trust": 50, "type": "respect"}
+    }
+  }
+]

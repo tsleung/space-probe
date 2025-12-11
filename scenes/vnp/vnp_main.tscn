@@ -33,10 +33,6 @@ layout_mode = 2
 theme_override_constants/separation = 30
 alignment = 1
 
-[node name="TurnLabel" type="Label" parent="TopBar/HBoxContainer"]
-layout_mode = 2
-text = "Turn: 1"
-
 [node name="YearLabel" type="Label" parent="TopBar/HBoxContainer"]
 layout_mode = 2
 text = "Year: 2200"
@@ -186,22 +182,27 @@ layout_mode = 2
 theme_override_constants/separation = 20
 alignment = 1
 
-[node name="NextTurnButton" type="Button" parent="BottomBar/HBoxContainer"]
+[node name="PauseButton" type="Button" parent="BottomBar/HBoxContainer"]
 layout_mode = 2
-text = "Next Turn"
-
-[node name="AutoButton" type="Button" parent="BottomBar/HBoxContainer"]
-layout_mode = 2
-text = "Auto"
+text = "⏸ Pause"
 
 [node name="SpeedLabel" type="Label" parent="BottomBar/HBoxContainer"]
 layout_mode = 2
 text = "Speed:"
 
 [node name="SpeedSlider" type="HSlider" parent="BottomBar/HBoxContainer"]
-custom_minimum_size = Vector2(100, 0)
+custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
 value = 50.0
+
+[node name="SpeedValueLabel" type="Label" parent="BottomBar/HBoxContainer"]
+layout_mode = 2
+text = "1.0x"
+
+[node name="HelpLabel" type="Label" parent="BottomBar/HBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
+text = "[Space=Pause] [1-4=Speed] [WASD=Pan] [Scroll=Zoom]"
 
 [node name="EventDialog" type="Panel" parent="."]
 visible = false

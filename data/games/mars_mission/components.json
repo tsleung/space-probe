@@ -1,0 +1,345 @@
+[
+  {
+    "id": "cockpit",
+    "name": "Cockpit",
+    "description": "Command and control center for the spacecraft. Required for all ships.",
+    "category": "cockpit",
+    "required": true,
+    "stats": {
+      "base_cost": 50000000,
+      "build_days": 8,
+      "mass_kg": 2000,
+      "hex_size": 1,
+      "base_quality": 55,
+      "power_draw": 5
+    },
+    "testing": {
+      "cost_per_cycle": 2500000,
+      "days_per_cycle": 2,
+      "quality_per_test": 5
+    },
+    "degradation": {
+      "rate_multiplier": 0.8
+    }
+  },
+  {
+    "id": "engine_mount",
+    "name": "Engine Mount",
+    "description": "Structural framework for mounting the main engine. Required for propulsion.",
+    "category": "engine",
+    "required": true,
+    "stats": {
+      "base_cost": 30000000,
+      "build_days": 6,
+      "mass_kg": 1500,
+      "hex_size": 2,
+      "base_quality": 60,
+      "power_draw": 0
+    },
+    "testing": {
+      "cost_per_cycle": 1500000,
+      "days_per_cycle": 2,
+      "quality_per_test": 6
+    },
+    "degradation": {
+      "rate_multiplier": 0.5
+    },
+    "placement": {
+      "must_be_rear": true
+    }
+  },
+  {
+    "id": "exercise_facility",
+    "name": "Exercise Facility",
+    "description": "Gym equipment to maintain crew health in zero gravity.",
+    "category": "crew_module",
+    "required": false,
+    "stats": {
+      "base_cost": 20000000,
+      "build_days": 5,
+      "mass_kg": 800,
+      "hex_size": 1,
+      "base_quality": 70,
+      "power_draw": 2
+    },
+    "testing": {
+      "cost_per_cycle": 1000000,
+      "days_per_cycle": 1,
+      "quality_per_test": 7
+    },
+    "effects": {
+      "health_decay_reduction": 0.5,
+      "morale_bonus": 5
+    }
+  },
+  {
+    "id": "cafeteria",
+    "name": "Cafeteria",
+    "description": "Dining and social space for crew. Improves morale.",
+    "category": "crew_module",
+    "required": false,
+    "stats": {
+      "base_cost": 30000000,
+      "build_days": 6,
+      "mass_kg": 1200,
+      "hex_size": 1,
+      "base_quality": 65,
+      "power_draw": 3
+    },
+    "testing": {
+      "cost_per_cycle": 1500000,
+      "days_per_cycle": 2,
+      "quality_per_test": 6
+    },
+    "effects": {
+      "morale_decay_reduction": 0.3,
+      "social_bonus": 10
+    },
+    "adjacency": {
+      "bonus_near": ["crew_quarters"],
+      "bonus_amount": 5
+    }
+  },
+  {
+    "id": "crew_quarters",
+    "name": "Crew Quarters",
+    "description": "Living space for one crew member. Each crew member needs quarters.",
+    "category": "crew_module",
+    "required": true,
+    "stats": {
+      "base_cost": 25000000,
+      "build_days": 5,
+      "mass_kg": 1000,
+      "hex_size": 1,
+      "base_quality": 60,
+      "power_draw": 2,
+      "crew_capacity": 1
+    },
+    "testing": {
+      "cost_per_cycle": 1200000,
+      "days_per_cycle": 2,
+      "quality_per_test": 6
+    },
+    "effects": {
+      "fatigue_recovery_bonus": 0.2
+    }
+  },
+  {
+    "id": "cargo_bay",
+    "name": "Cargo Bay",
+    "description": "Storage for supplies and equipment. Essential for long missions.",
+    "category": "cargo",
+    "required": true,
+    "stats": {
+      "base_cost": 20000000,
+      "build_days": 4,
+      "mass_kg": 500,
+      "hex_size": 2,
+      "base_quality": 70,
+      "power_draw": 1,
+      "cargo_capacity": 5000
+    },
+    "testing": {
+      "cost_per_cycle": 1000000,
+      "days_per_cycle": 1,
+      "quality_per_test": 8
+    }
+  },
+  {
+    "id": "hangar_bay",
+    "name": "Hangar Bay",
+    "description": "Space for rovers, landers, and EVA equipment.",
+    "category": "special",
+    "required": false,
+    "stats": {
+      "base_cost": 60000000,
+      "build_days": 10,
+      "mass_kg": 3000,
+      "hex_size": 3,
+      "base_quality": 60,
+      "power_draw": 4
+    },
+    "testing": {
+      "cost_per_cycle": 3000000,
+      "days_per_cycle": 3,
+      "quality_per_test": 5
+    },
+    "effects": {
+      "eva_efficiency_bonus": 0.2,
+      "rover_capacity": 2
+    }
+  },
+  {
+    "id": "mav_docking",
+    "name": "MAV Docking Bay",
+    "description": "Docking port for the Mars Ascent Vehicle. Required for Mars landing.",
+    "category": "special",
+    "required": true,
+    "stats": {
+      "base_cost": 150000000,
+      "build_days": 15,
+      "mass_kg": 5000,
+      "hex_size": 2,
+      "base_quality": 50,
+      "power_draw": 3
+    },
+    "testing": {
+      "cost_per_cycle": 7500000,
+      "days_per_cycle": 4,
+      "quality_per_test": 4
+    },
+    "notes": "MAV is assembled separately and docked before departure"
+  },
+  {
+    "id": "science_lab",
+    "name": "Science Laboratory",
+    "description": "Research facility for conducting experiments and analyzing samples.",
+    "category": "special",
+    "required": false,
+    "stats": {
+      "base_cost": 45000000,
+      "build_days": 8,
+      "mass_kg": 2000,
+      "hex_size": 1,
+      "base_quality": 55,
+      "power_draw": 5
+    },
+    "testing": {
+      "cost_per_cycle": 2200000,
+      "days_per_cycle": 2,
+      "quality_per_test": 5
+    },
+    "effects": {
+      "experiment_bonus": 0.15,
+      "sample_analysis_speed": 1.5
+    }
+  },
+  {
+    "id": "medical_bay",
+    "name": "Medical Bay",
+    "description": "Healthcare facility for treating injuries and illness.",
+    "category": "special",
+    "required": true,
+    "stats": {
+      "base_cost": 40000000,
+      "build_days": 7,
+      "mass_kg": 1500,
+      "hex_size": 1,
+      "base_quality": 55,
+      "power_draw": 4
+    },
+    "testing": {
+      "cost_per_cycle": 2000000,
+      "days_per_cycle": 2,
+      "quality_per_test": 5
+    },
+    "effects": {
+      "healing_bonus": 0.5,
+      "sickness_recovery_bonus": 0.3
+    }
+  },
+  {
+    "id": "life_support",
+    "name": "Life Support System",
+    "description": "Oxygen recycling and air filtration. Critical for survival.",
+    "category": "life_support",
+    "required": true,
+    "stats": {
+      "base_cost": 35000000,
+      "build_days": 6,
+      "mass_kg": 1200,
+      "hex_size": 1,
+      "base_quality": 60,
+      "power_draw": 8
+    },
+    "testing": {
+      "cost_per_cycle": 1700000,
+      "days_per_cycle": 2,
+      "quality_per_test": 5
+    },
+    "degradation": {
+      "rate_multiplier": 1.5
+    },
+    "effects": {
+      "oxygen_recycling_efficiency": 0.85,
+      "water_recycling_efficiency": 0.85
+    },
+    "critical": true
+  },
+  {
+    "id": "fuel_tank",
+    "name": "Fuel Tank",
+    "description": "Storage for propellant. More tanks mean longer range.",
+    "category": "cargo",
+    "required": true,
+    "stats": {
+      "base_cost": 15000000,
+      "build_days": 4,
+      "mass_kg": 400,
+      "hex_size": 1,
+      "base_quality": 70,
+      "power_draw": 0,
+      "fuel_capacity": 10000
+    },
+    "testing": {
+      "cost_per_cycle": 750000,
+      "days_per_cycle": 1,
+      "quality_per_test": 8
+    },
+    "placement": {
+      "adjacent_to": ["engine_mount"]
+    }
+  },
+  {
+    "id": "solar_array",
+    "name": "Solar Array",
+    "description": "Power generation from sunlight. Output decreases with distance from sun.",
+    "category": "special",
+    "required": true,
+    "stats": {
+      "base_cost": 25000000,
+      "build_days": 5,
+      "mass_kg": 600,
+      "hex_size": 2,
+      "base_quality": 65,
+      "power_generation": 50
+    },
+    "testing": {
+      "cost_per_cycle": 1200000,
+      "days_per_cycle": 2,
+      "quality_per_test": 6
+    },
+    "degradation": {
+      "rate_multiplier": 1.2
+    },
+    "effects": {
+      "power_at_earth": 50,
+      "power_at_mars": 25
+    }
+  },
+  {
+    "id": "communications",
+    "name": "Communications Array",
+    "description": "High-gain antenna for Earth contact. Essential for mission control support.",
+    "category": "special",
+    "required": true,
+    "stats": {
+      "base_cost": 30000000,
+      "build_days": 5,
+      "mass_kg": 800,
+      "hex_size": 1,
+      "base_quality": 60,
+      "power_draw": 3
+    },
+    "testing": {
+      "cost_per_cycle": 1500000,
+      "days_per_cycle": 2,
+      "quality_per_test": 6
+    },
+    "effects": {
+      "signal_delay_earth": 3,
+      "signal_delay_mars": 22,
+      "morale_bonus_contact": 15
+    }
+  }
+]

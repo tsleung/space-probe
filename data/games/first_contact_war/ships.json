@@ -1,0 +1,114 @@
+{
+  "ships": [
+    {
+      "id": "interceptor",
+      "name": "Interceptor",
+      "type": 0,
+      "description": "Fast, light fighter. Good for harassment and patrol.",
+      "stats": {
+        "attack": 5,
+        "defense": 2,
+        "speed": 10,
+        "range": 2
+      },
+      "cost": {
+        "credits": 100,
+        "materials": 50,
+        "fuel": 20
+      },
+      "build_turns": 1
+    },
+    {
+      "id": "frigate",
+      "name": "Frigate",
+      "type": 1,
+      "description": "Balanced combat vessel. The backbone of any fleet.",
+      "stats": {
+        "attack": 15,
+        "defense": 10,
+        "speed": 6,
+        "range": 3
+      },
+      "cost": {
+        "credits": 500,
+        "materials": 300,
+        "fuel": 100
+      },
+      "build_turns": 2
+    },
+    {
+      "id": "cruiser",
+      "name": "Cruiser",
+      "type": 2,
+      "description": "Heavy combat ship with strong armor.",
+      "stats": {
+        "attack": 30,
+        "defense": 25,
+        "speed": 4,
+        "range": 4
+      },
+      "cost": {
+        "credits": 1500,
+        "materials": 1000,
+        "fuel": 300
+      },
+      "build_turns": 3
+    },
+    {
+      "id": "dreadnought",
+      "name": "Dreadnought",
+      "type": 3,
+      "description": "Massive capital ship. Devastating firepower, slow and expensive.",
+      "stats": {
+        "attack": 80,
+        "defense": 60,
+        "speed": 2,
+        "range": 5
+      },
+      "cost": {
+        "credits": 5000,
+        "materials": 3500,
+        "fuel": 1000
+      },
+      "build_turns": 5
+    },
+    {
+      "id": "carrier",
+      "name": "Carrier",
+      "type": 4,
+      "description": "Deploys fighters. Low direct firepower but amplifies fleet effectiveness.",
+      "stats": {
+        "attack": 10,
+        "defense": 40,
+        "speed": 3,
+        "range": 6,
+        "fighter_capacity": 20
+      },
+      "cost": {
+        "credits": 4000,
+        "materials": 2500,
+        "fuel": 800
+      },
+      "build_turns": 4
+    },
+    {
+      "id": "transport",
+      "name": "Colony Transport",
+      "type": 5,
+      "description": "Evacuates civilians. No combat capability.",
+      "stats": {
+        "attack": 0,
+        "defense": 5,
+        "speed": 5,
+        "range": 10,
+        "passenger_capacity": 100000
+      },
+      "cost": {
+        "credits": 1000,
+        "materials": 500,
+        "fuel": 400
+      },
+      "build_turns": 2
+    }
+  ]
+}

@@ -1,0 +1,348 @@
+{
+  "events": [
+    {
+      "id": "dust_storm_approaching",
+      "title": "Dust Storm Approaching",
+      "category": "environment",
+      "description": "Sensors detect a significant dust storm approaching the base. It will arrive within hours.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.04,
+        "sol_range": [10, 100],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "full_lockdown",
+          "text": "Full base lockdown, all crew indoors",
+          "outcomes": [
+            {
+              "weight": 0.8,
+              "description": "Storm passes. Base systems held up well.",
+              "effects": [
+                {"type": "time", "sols": 2},
+                {"type": "crew_morale", "target": "all", "amount": -10},
+                {"type": "component_damage", "target": "solar_array", "amount": 5},
+                {"type": "log", "message": "Weathered dust storm safely in lockdown"}
+              ]
+            },
+            {
+              "weight": 0.2,
+              "description": "Prolonged storm. Solar panels significantly degraded.",
+              "effects": [
+                {"type": "time", "sols": 4},
+                {"type": "crew_morale", "target": "all", "amount": -20},
+                {"type": "component_damage", "target": "solar_array", "amount": 20},
+                {"type": "log", "message": "Extended dust storm degraded solar capacity"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "secure_equipment",
+          "text": "Quick EVA to secure outdoor equipment first",
+          "outcomes": [
+            {
+              "weight": 0.6,
+              "description": "Equipment secured. All crew returned safely before storm hit.",
+              "effects": [
+                {"type": "time", "sols": 2},
+                {"type": "crew_fatigue", "target": "random", "amount": 25},
+                {"type": "log", "message": "Secured equipment before dust storm"}
+              ]
+            },
+            {
+              "weight": 0.4,
+              "description": "Storm arrived early. EVA crew had close call.",
+              "effects": [
+                {"type": "time", "sols": 2},
+                {"type": "crew_health", "target": "random", "amount": -15},
+                {"type": "crew_fatigue", "target": "random", "amount": 35},
+                {"type": "log", "message": "Close call during storm preparation EVA"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "continue_operations",
+          "text": "Continue operations, monitor storm closely",
+          "outcomes": [
+            {
+              "weight": 0.3,
+              "description": "Storm was milder than expected. Minimal impact.",
+              "effects": [
+                {"type": "time", "sols": 1},
+                {"type": "component_damage", "target": "solar_array", "amount": 3},
+                {"type": "log", "message": "Mild dust storm had minimal impact"}
+              ]
+            },
+            {
+              "weight": 0.7,
+              "description": "Storm caught crew off guard. Equipment damaged.",
+              "effects": [
+                {"type": "time", "sols": 3},
+                {"type": "component_damage", "target": "solar_array", "amount": 25},
+                {"type": "component_damage", "target": "random", "amount": 10},
+                {"type": "crew_morale", "target": "all", "amount": -15},
+                {"type": "log", "message": "Storm caused equipment damage"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "anomalous_reading",
+      "title": "Anomalous Sensor Reading",
+      "category": "discovery",
+      "description": "Instruments are detecting unusual readings from a nearby location. Could be significant.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.025,
+        "sol_range": [15, 110],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "investigate_eva",
+          "text": "Send EVA team to investigate",
+          "outcomes": [
+            {
+              "weight": 0.5,
+              "description": "Discovery! Unusual mineral formation with potential scientific value.",
+              "effects": [
+                {"type": "samples", "amount": 3},
+                {"type": "crew_morale", "target": "all", "amount": 20},
+                {"type": "crew_fatigue", "target": "random", "amount": 25},
+                {"type": "log", "message": "EVA investigation found valuable mineral formation"}
+              ]
+            },
+            {
+              "weight": 0.3,
+              "description": "Interesting but not remarkable. Good data collected.",
+              "effects": [
+                {"type": "samples", "amount": 1},
+                {"type": "crew_fatigue", "target": "random", "amount": 20},
+                {"type": "log", "message": "Anomaly investigation yielded routine data"}
+              ]
+            },
+            {
+              "weight": 0.2,
+              "description": "Sensor malfunction. Nothing of note at location.",
+              "effects": [
+                {"type": "crew_fatigue", "target": "random", "amount": 25},
+                {"type": "crew_morale", "target": "random", "amount": -5},
+                {"type": "log", "message": "Anomalous reading was sensor error"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "remote_analysis",
+          "text": "Analyze remotely with rover sensors",
+          "outcomes": [
+            {
+              "weight": 0.6,
+              "description": "Remote analysis suggests interesting geology. Worth future EVA.",
+              "effects": [
+                {"type": "set_flag", "flag": "interesting_site_found"},
+                {"type": "crew_morale", "target": "all", "amount": 5},
+                {"type": "log", "message": "Remote analysis flagged site for future investigation"}
+              ]
+            },
+            {
+              "weight": 0.4,
+              "description": "Inconclusive results. Mystery remains.",
+              "effects": [
+                {"type": "log", "message": "Remote analysis inconclusive"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "log_continue",
+          "text": "Log the reading and continue current work",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "Reading logged for potential future analysis.",
+              "effects": [
+                {"type": "log", "message": "Anomalous reading logged, continuing current operations"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "eva_emergency",
+      "title": "EVA Emergency",
+      "category": "crew",
+      "description": "A crew member on EVA reports suit malfunction. Oxygen levels dropping.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.02,
+        "sol_range": [5, 120],
+        "conditions": [
+          {"type": "has_flag", "flag": "eva_in_progress"}
+        ]
+      },
+      "choices": [
+        {
+          "id": "abort_immediate",
+          "text": "Immediate abort, direct return to base",
+          "outcomes": [
+            {
+              "weight": 0.85,
+              "description": "Crew member returns safely. Close call.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -10},
+                {"type": "crew_morale", "target": "all", "amount": -10},
+                {"type": "log", "message": "EVA emergency: crew returned safely"}
+              ]
+            },
+            {
+              "weight": 0.15,
+              "description": "Hypoxia exposure before reaching base.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -30},
+                {"type": "crew_morale", "target": "all", "amount": -20},
+                {"type": "log", "message": "EVA emergency: crew suffered hypoxia"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "buddy_assist",
+          "text": "Send buddy to assist with emergency oxygen",
+          "requirements": [
+            {"type": "crew_on_eva", "min": 2}
+          ],
+          "outcomes": [
+            {
+              "weight": 0.7,
+              "description": "Buddy provides emergency oxygen. Both return safely.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -5},
+                {"type": "crew_fatigue", "target": "random", "amount": 30},
+                {"type": "log", "message": "Buddy assist successful in EVA emergency"}
+              ]
+            },
+            {
+              "weight": 0.3,
+              "description": "Assist delayed. Minor exposure but everyone safe.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -20},
+                {"type": "crew_fatigue", "target": "random", "amount": 35},
+                {"type": "log", "message": "EVA buddy assist took longer than expected"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "field_repair",
+          "text": "Attempt field repair of suit",
+          "outcomes": [
+            {
+              "weight": 0.4,
+              "description": "Quick thinking! Repair successful, EVA continues.",
+              "effects": [
+                {"type": "crew_fatigue", "target": "random", "amount": 15},
+                {"type": "crew_morale", "target": "random", "amount": 10},
+                {"type": "log", "message": "Field repair saved EVA mission"}
+              ]
+            },
+            {
+              "weight": 0.6,
+              "description": "Repair failed. Emergency abort required.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -25},
+                {"type": "crew_morale", "target": "all", "amount": -15},
+                {"type": "log", "message": "Field repair failed, emergency abort"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "water_ice_discovery",
+      "title": "Water Ice Discovery",
+      "category": "discovery",
+      "description": "Excavation has revealed a significant deposit of subsurface water ice.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.02,
+        "sol_range": [20, 100],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "immediate_extraction",
+          "text": "Begin immediate extraction operations",
+          "outcomes": [
+            {
+              "weight": 0.7,
+              "description": "Extraction successful! Water reserves significantly boosted.",
+              "effects": [
+                {"type": "resource", "resource_id": "water", "amount": 200},
+                {"type": "samples", "amount": 2},
+                {"type": "crew_morale", "target": "all", "amount": 25},
+                {"type": "log", "message": "Water ice extraction boosted reserves"}
+              ]
+            },
+            {
+              "weight": 0.3,
+              "description": "Extraction partially successful. Equipment strained.",
+              "effects": [
+                {"type": "resource", "resource_id": "water", "amount": 80},
+                {"type": "samples", "amount": 1},
+                {"type": "component_damage", "target": "random", "amount": 10},
+                {"type": "log", "message": "Partial water extraction with equipment strain"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "careful_study",
+          "text": "Document and study before extraction",
+          "outcomes": [
+            {
+              "weight": 0.9,
+              "description": "Thorough documentation yields excellent scientific data.",
+              "effects": [
+                {"type": "samples", "amount": 4},
+                {"type": "resource", "resource_id": "water", "amount": 50},
+                {"type": "crew_morale", "target": "all", "amount": 15},
+                {"type": "log", "message": "Water ice discovery documented and sampled"}
+              ]
+            },
+            {
+              "weight": 0.1,
+              "description": "Study reveals the deposit is smaller than thought.",
+              "effects": [
+                {"type": "samples", "amount": 2},
+                {"type": "resource", "resource_id": "water", "amount": 30},
+                {"type": "log", "message": "Water deposit smaller than initial estimates"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "mark_return",
+          "text": "Mark location for future missions",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "Site marked and documented. Valuable data for future missions.",
+              "effects": [
+                {"type": "samples", "amount": 1},
+                {"type": "log", "message": "Water ice location documented for future missions"}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

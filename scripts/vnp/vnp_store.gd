@@ -1,22 +1,38 @@
 extends Node
 
 ## VNP Store - State management for Von Neumann Probe mode
-## The ONLY place with side effects: RNG, signals, turn processing
-## Following the pattern from game_store.gd
+## Real-time simulation with continuous resource generation
+## The ONLY place with side effects: RNG, signals, tick processing
 
 # ============================================================================
 # SIGNALS
 # ============================================================================
 
 signal state_changed(new_state: Dictionary)
-signal turn_advanced(turn: int, year: int)
+signal tick_processed(year: float)
 signal probe_created(probe: Dictionary)
 signal probe_destroyed(probe_id: String, probe_name: String)
 signal probe_arrived(probe: Dictionary, system: Dictionary)
 signal system_explored(system: Dictionary)
 signal resources_changed(resources: Dictionary)
 signal event_triggered(event: Dictionary)
+signal threat_spawned(threat: Dictionary)
 signal game_over(victory: bool, reason: String, score: int)
+
+# ============================================================================
+# TIMING CONSTANTS
+# ============================================================================
+
+const YEARS_PER_SECOND = 5.0  # Base game speed: 5 years pass per real second
+const TICK_RATE = 0.1  # Process every 0.1 seconds (10 ticks/second)
+const YEARS_PER_TICK = YEARS_PER_SECOND * TICK_RATE  # 0.5 years per tick
+
+# Resource rates (per year)
+const MINING_IRON_PER_YEAR = 20.0
+const MINING_RARE_PER_YEAR = 4.0
+const ENERGY_REGEN_PER_YEAR = 50.0
+const REPLICATION_YEARS = 30.0  # 30 years to build a probe (was 3 turns = 30 years)
+const TRAVEL_SPEED = 15.0  # Units per year
 
 # ============================================================================
 # STATE
@@ -24,6 +40,9 @@ signal game_over(victory: bool, reason: String, score: int)
 
 var _state: Dictionary = {}
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var _tick_accumulator: float = 0.0
+var _game_speed: float = 1.0  # Multiplier for game speed
+var _paused: bool = false
 
 # ============================================================================
 # INITIALIZATION
@@ -32,11 +51,34 @@ var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 func _ready():
 	reset()
 
+func _process(delta: float):
+	if _paused or _state.is_game_over:
+		return
+
+	_tick_accumulator += delta * _game_speed
+	while _tick_accumulator >= TICK_RATE:
+		_tick_accumulator -= TICK_RATE
+		_process_tick()
+
 func reset():
 	_state = VNPTypes.create_vnp_state()
+	_tick_accumulator = 0.0
+	_paused = false
 
 func get_state() -> Dictionary:
 	return _state.duplicate(true)
+
+func set_game_speed(speed: float) -> void:
+	_game_speed = clampf(speed, 0.1, 10.0)
+
+func get_game_speed() -> float:
+	return _game_speed
+
+func set_paused(paused: bool) -> void:
+	_paused = paused
+
+func is_paused() -> bool:
+	return _paused
 
 # ============================================================================
 # GETTERS
@@ -103,98 +145,130 @@ func dispatch(action: Dictionary) -> void:
 ## Start a new run with generated galaxy
 func start_new_run() -> void:
 	_rng.seed = int(Time.get_unix_time_from_system())
+	_paused = false
+	_tick_accumulator = 0.0
 
 	var galaxy_data = VNPGalaxyLogic.generate_galaxy(_rng.seed, 25)
 	dispatch(VNPReducer.action_start_run(_rng.seed, galaxy_data))
 
 	_add_log("Year 2200: First Von Neumann probe activated.", "success")
 
-## Advance the game by one turn - the core game loop
-func advance_turn() -> void:
+## Process one tick of the simulation (called from _process)
+func _process_tick() -> void:
 	if _state.is_game_over:
 		return
 
-	# If there's a pending event, don't advance
+	# If there's a pending event, pause simulation
 	if not _state.pending_event.is_empty():
 		return
 
-	# Process all probes
-	_process_probes()
+	var years = YEARS_PER_TICK
 
-	# Advance turn counter
-	dispatch(VNPReducer.action_advance_turn())
+	# Advance time
+	_state.year += years
 
-	# Energy regeneration (10 per turn base)
-	dispatch(VNPReducer.action_add_resources({"energy": 10}))
+	# Process all probes continuously
+	_process_probes_realtime(years)
 
-	# Check for random events
-	_check_events()
+	# Energy regeneration (continuous)
+	var energy_gain = ENERGY_REGEN_PER_YEAR * years
+	dispatch(VNPReducer.action_add_resources({"energy": energy_gain}))
+
+	# Check for random events (probability per tick)
+	_check_events_realtime(years)
+
+	# Check for threats
+	_check_threats(years)
 
 	# Check win/lose conditions
 	_check_game_end()
 
-	turn_advanced.emit(_state.current_turn, _state.year)
+	tick_processed.emit(_state.year)
+	state_changed.emit(_state)
 
-## Process all probes for this turn
-func _process_probes() -> void:
+## Process all probes for this tick (real-time)
+func _process_probes_realtime(years: float) -> void:
 	for probe_id in _state.probes.keys():
 		var probe = _state.probes[probe_id]
 
 		match probe.status:
+			VNPTypes.ProbeStatus.IDLE:
+				# Auto-mine if in a system with resources
+				_auto_mine_probe(probe_id, probe, years)
+
 			VNPTypes.ProbeStatus.TRAVELING:
-				_process_traveling_probe(probe_id, probe)
+				_process_traveling_probe_realtime(probe_id, probe, years)
 
 			VNPTypes.ProbeStatus.MINING:
-				_process_mining_probe(probe_id, probe)
+				_process_mining_probe_realtime(probe_id, probe, years)
 
 			VNPTypes.ProbeStatus.REPLICATING:
-				_process_replicating_probe(probe_id, probe)
+				_process_replicating_probe_realtime(probe_id, probe, years)
 
-func _process_traveling_probe(probe_id: String, probe: Dictionary) -> void:
-	var remaining = probe.travel_progress - 1
-
-	if remaining <= 0:
-		# Arrived at destination
-		var target_sys = _state.systems.get(probe.target_system, {})
-
-		dispatch(VNPReducer.action_update_probe(probe_id, {
-			"status": VNPTypes.ProbeStatus.IDLE,
-			"current_system": probe.target_system,
-			"target_system": "",
-			"travel_progress": 0
-		}))
-
-		# Explore the system if new
-		if not target_sys.is_empty() and not target_sys.is_explored:
-			dispatch(VNPReducer.action_explore_system(probe.target_system))
-			_add_log("%s arrived at %s - System explored!" % [probe.name, target_sys.name], "success")
-			system_explored.emit(target_sys)
-		else:
-			_add_log("%s arrived at %s" % [probe.name, target_sys.name], "info")
-
-		# Refresh probe data for signal
-		var updated_probe = _state.probes.get(probe_id, {})
-		probe_arrived.emit(updated_probe, target_sys)
-	else:
-		dispatch(VNPReducer.action_update_probe(probe_id, {
-			"travel_progress": remaining
-		}))
-
-func _process_mining_probe(probe_id: String, probe: Dictionary) -> void:
+func _auto_mine_probe(probe_id: String, probe: Dictionary, years: float) -> void:
 	var system = _state.systems.get(probe.current_system, {})
 	if system.is_empty():
 		return
 
-	# Calculate mining yield (base 10 iron, 2 rare per turn)
+	# Check if there are resources to mine
+	var total_resources = system.resources.get("iron", 0) + system.resources.get("rare", 0)
+	if total_resources > 0:
+		# Auto-start mining
+		dispatch(VNPReducer.action_start_mining(probe_id))
+		# Process immediately
+		_process_mining_probe_realtime(probe_id, _state.probes[probe_id], years)
+
+func _process_traveling_probe_realtime(probe_id: String, probe: Dictionary, years: float) -> void:
+	var from_sys = _state.systems.get(probe.current_system, {})
+	var to_sys = _state.systems.get(probe.target_system, {})
+
+	if from_sys.is_empty() or to_sys.is_empty():
+		return
+
+	# Calculate distance and progress
+	var total_distance = from_sys.position.distance_to(to_sys.position)
+	var travel_per_tick = TRAVEL_SPEED * years
+	var new_progress = probe.travel_progress + travel_per_tick
+
+	if new_progress >= total_distance:
+		# Arrived at destination
+		dispatch(VNPReducer.action_update_probe(probe_id, {
+			"status": VNPTypes.ProbeStatus.IDLE,
+			"current_system": probe.target_system,
+			"target_system": "",
+			"travel_progress": 0.0
+		}))
+
+		# Explore the system if new
+		if not to_sys.is_explored:
+			dispatch(VNPReducer.action_explore_system(probe.target_system))
+			_add_log("%s arrived at %s - System explored!" % [probe.name, to_sys.name], "success")
+			system_explored.emit(to_sys)
+		else:
+			_add_log("%s arrived at %s" % [probe.name, to_sys.name], "info")
+
+		var updated_probe = _state.probes.get(probe_id, {})
+		probe_arrived.emit(updated_probe, to_sys)
+	else:
+		dispatch(VNPReducer.action_update_probe(probe_id, {
+			"travel_progress": new_progress
+		}))
+
+func _process_mining_probe_realtime(probe_id: String, probe: Dictionary, years: float) -> void:
+	var system = _state.systems.get(probe.current_system, {})
+	if system.is_empty():
+		return
+
+	# Calculate mining yield (continuous)
 	var efficiency = probe.efficiency
-	var iron_rate = int(10 * efficiency)
-	var rare_rate = int(2 * efficiency)
+	var iron_rate = MINING_IRON_PER_YEAR * efficiency * years
+	var rare_rate = MINING_RARE_PER_YEAR * efficiency * years
 
 	var iron_available = system.resources.get("iron", 0)
 	var rare_available = system.resources.get("rare", 0)
 
-	var iron_mined = mini(iron_rate, iron_available)
-	var rare_mined = mini(rare_rate, rare_available)
+	var iron_mined = minf(iron_rate, iron_available)
+	var rare_mined = minf(rare_rate, rare_available)
 
 	if iron_mined > 0 or rare_mined > 0:
 		dispatch(VNPReducer.action_mine_resources(probe.current_system, {
@@ -202,17 +276,17 @@ func _process_mining_probe(probe_id: String, probe: Dictionary) -> void:
 			"rare": rare_mined
 		}))
 
-	# If system depleted, set probe idle
+	# If system depleted, set probe idle (it will look for new resources)
 	var updated_sys = _state.systems.get(probe.current_system, {})
 	var total_remaining = updated_sys.resources.get("iron", 0) + updated_sys.resources.get("rare", 0)
 	if total_remaining <= 0:
 		dispatch(VNPReducer.action_set_idle(probe_id))
-		_add_log("%s: %s depleted, awaiting orders." % [probe.name, system.name], "info")
+		_add_log("%s: %s depleted." % [probe.name, system.name], "info")
 
-func _process_replicating_probe(probe_id: String, probe: Dictionary) -> void:
-	var remaining = probe.task_progress - 1
+func _process_replicating_probe_realtime(probe_id: String, probe: Dictionary, years: float) -> void:
+	var new_progress = probe.task_progress + years
 
-	if remaining <= 0:
+	if new_progress >= REPLICATION_YEARS:
 		# Replication complete!
 		var new_id = "probe_%d" % _state.next_probe_id
 		var new_name = "Bob-%d" % _state.total_probes_built
@@ -233,7 +307,7 @@ func _process_replicating_probe(probe_id: String, probe: Dictionary) -> void:
 		probe_created.emit(new_probe)
 	else:
 		dispatch(VNPReducer.action_update_probe(probe_id, {
-			"task_progress": remaining
+			"task_progress": new_progress
 		}))
 
 # ============================================================================
@@ -246,7 +320,8 @@ func move_probe(probe_id: String, target_system_id: String) -> bool:
 	if probe.is_empty():
 		return false
 
-	if probe.status != VNPTypes.ProbeStatus.IDLE:
+	# Can travel if idle or mining (interrupts mining)
+	if probe.status != VNPTypes.ProbeStatus.IDLE and probe.status != VNPTypes.ProbeStatus.MINING:
 		return false
 
 	var from_sys = _state.systems.get(probe.current_system, {})
@@ -259,10 +334,11 @@ func move_probe(probe_id: String, target_system_id: String) -> bool:
 	if not VNPGalaxyLogic.are_connected(from_sys, target_system_id):
 		return false
 
-	var travel_time = VNPGalaxyLogic.calc_travel_time(from_sys, to_sys)
+	var distance = from_sys.position.distance_to(to_sys.position)
+	var travel_years = distance / TRAVEL_SPEED
 
-	dispatch(VNPReducer.action_move_probe(probe_id, target_system_id, travel_time))
-	_add_log("%s departing for %s (%d turns)" % [probe.name, to_sys.name, travel_time], "info")
+	dispatch(VNPReducer.action_move_probe(probe_id, target_system_id, 0.0))  # Start at 0 progress
+	_add_log("%s departing for %s (%.0f years)" % [probe.name, to_sys.name, travel_years], "info")
 
 	return true
 
@@ -295,7 +371,8 @@ func start_replication(probe_id: String) -> bool:
 	if probe.is_empty():
 		return false
 
-	if probe.status != VNPTypes.ProbeStatus.IDLE:
+	# Can replicate if idle or mining (interrupts mining)
+	if probe.status != VNPTypes.ProbeStatus.IDLE and probe.status != VNPTypes.ProbeStatus.MINING:
 		return false
 
 	# Check resources
@@ -307,7 +384,7 @@ func start_replication(probe_id: String) -> bool:
 	dispatch(VNPReducer.action_spend_resources(cost))
 	dispatch(VNPReducer.action_start_replication(probe_id))
 
-	_add_log("%s began replication (Cost: %d iron, %d energy)" % [probe.name, cost.iron, cost.energy], "info")
+	_add_log("%s began replication (%.0f years, Cost: %d iron, %d energy)" % [probe.name, REPLICATION_YEARS, cost.iron, cost.energy], "info")
 
 	return true
 
@@ -329,12 +406,15 @@ func can_replicate() -> bool:
 	return _state.resources.iron >= cost.iron and _state.resources.energy >= cost.energy
 
 # ============================================================================
-# EVENTS
+# REAL-TIME EVENTS & THREATS
 # ============================================================================
 
-func _check_events() -> void:
-	# 15% base event chance per turn
-	if _rng.randf() > 0.15:
+## Check for events in real-time (probability per year)
+func _check_events_realtime(years: float) -> void:
+	# Base chance: 5% per year
+	var event_chance = 0.05 * years
+
+	if _rng.randf() > event_chance:
 		return
 
 	# Pick a random probe for the event
@@ -351,6 +431,75 @@ func _check_events() -> void:
 	if not event.is_empty():
 		dispatch(VNPReducer.action_set_event(event))
 		event_triggered.emit(event)
+
+## Check for threats - things that require player attention
+func _check_threats(years: float) -> void:
+	# More probes = higher threat chance (galactic attention)
+	var probe_count = get_active_probe_count()
+	var threat_chance = 0.01 * years * sqrt(float(probe_count))
+
+	if _rng.randf() > threat_chance or probe_count < 3:
+		return
+
+	# Generate a threat that requires resource spending to handle
+	var threat_type = _rng.randi() % 3
+	var threat: Dictionary
+
+	match threat_type:
+		0:  # System hazard - spend energy to shield probes
+			var dangerous_systems = []
+			for sys_id in _state.systems.keys():
+				var sys = _state.systems[sys_id]
+				if sys.danger_level > 0.3:
+					dangerous_systems.append(sys)
+			if dangerous_systems.is_empty():
+				return
+			var target_sys = dangerous_systems[_rng.randi() % dangerous_systems.size()]
+			threat = {
+				"title": "Solar Flare Warning",
+				"description": "A massive solar flare is approaching %s! Probes there need emergency shielding." % target_sys.name,
+				"choices": [
+					VNPTypes.create_choice("shield_all", "Shield all probes (-%d energy)" % (probe_count * 20), {"energy": -(probe_count * 20)}),
+					VNPTypes.create_choice("sacrifice", "Let them weather it (each probe: 30%% damage chance)", {"damage_all_chance": 0.3, "system": target_sys.id})
+				],
+				"category": VNPTypes.EventCategory.HAZARD,
+				"affected_system": target_sys.id
+			}
+
+		1:  # Resource drain - spend resources or lose efficiency
+			threat = {
+				"title": "Cosmic Ray Burst",
+				"description": "Intense cosmic radiation is degrading probe systems across the galaxy!",
+				"choices": [
+					VNPTypes.create_choice("repair", "Emergency repairs (-%d iron)" % (probe_count * 10), {"iron": -(probe_count * 10)}),
+					VNPTypes.create_choice("endure", "Continue operations (all probes: -10%% efficiency for 100 years)", {"efficiency_penalty": 0.1, "duration": 100})
+				],
+				"category": VNPTypes.EventCategory.HAZARD
+			}
+
+		2:  # Expansion pressure - spend rare elements or slow down
+			threat = {
+				"title": "Quantum Interference",
+				"description": "Unknown interference is disrupting replication across the network!",
+				"choices": [
+					VNPTypes.create_choice("calibrate", "Recalibrate systems (-%d rare)" % (probe_count * 5), {"rare": -(probe_count * 5)}),
+					VNPTypes.create_choice("wait", "Wait it out (replication paused for 50 years)", {"pause_replication": 50})
+				],
+				"category": VNPTypes.EventCategory.HAZARD
+			}
+
+	if not threat.is_empty():
+		var event = VNPTypes.create_event({
+			"id": "threat_%d" % int(_state.year),
+			"category": threat.get("category", VNPTypes.EventCategory.HAZARD),
+			"title": threat.title,
+			"description": threat.description,
+			"choices": threat.choices,
+			"affected_system": threat.get("affected_system", "")
+		})
+		dispatch(VNPReducer.action_set_event(event))
+		event_triggered.emit(event)
+		threat_spawned.emit(threat)
 
 func _generate_event(probe: Dictionary, system: Dictionary) -> Dictionary:
 	var roll = _rng.randf()

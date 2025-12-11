@@ -318,7 +318,7 @@ func _update_statistics(state: Dictionary):
 	for c in state.colonists:
 		if c.life_stage == ColonySimTypes.LifeStage.CHILD:
 			children += 1
-		elif c.life_stage == ColonySimTypes.LifeStage.ELDERLY:
+		elif c.life_stage == ColonySimTypes.LifeStage.ELDER:
 			elderly += 1
 	text += "  Children: %d\n" % children
 	text += "  Elderly: %d\n" % elderly

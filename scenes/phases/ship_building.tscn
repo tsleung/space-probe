@@ -382,6 +382,66 @@ grow_vertical = 2
 bbcode_enabled = true
 scroll_following = true
 
+[node name="LaunchReadinessPanel" type="Panel" parent="HBoxContainer/SidePanel"]
+custom_minimum_size = Vector2(0, 180)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="HBoxContainer/SidePanel/LaunchReadinessPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 10.0
+offset_top = 5.0
+offset_right = -10.0
+offset_bottom = -5.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 4
+
+[node name="Header" type="Label" parent="HBoxContainer/SidePanel/LaunchReadinessPanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.8, 0.3, 1)
+theme_override_font_sizes/font_size = 14
+text = "LAUNCH STATUS"
+
+[node name="HSeparator" type="HSeparator" parent="HBoxContainer/SidePanel/LaunchReadinessPanel/VBox"]
+layout_mode = 2
+
+[node name="BlockersLabel" type="Label" parent="HBoxContainer/SidePanel/LaunchReadinessPanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.4, 0.4, 1)
+theme_override_font_sizes/font_size = 11
+text = "BLOCKERS:"
+
+[node name="BlockersList" type="RichTextLabel" parent="HBoxContainer/SidePanel/LaunchReadinessPanel/VBox"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+bbcode_enabled = true
+text = "[color=gray]None - Ready to launch![/color]"
+fit_content = true
+
+[node name="HSeparator2" type="HSeparator" parent="HBoxContainer/SidePanel/LaunchReadinessPanel/VBox"]
+layout_mode = 2
+
+[node name="SuccessLabel" type="Label" parent="HBoxContainer/SidePanel/LaunchReadinessPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Success Probability: 75%"
+
+[node name="SuccessBar" type="ProgressBar" parent="HBoxContainer/SidePanel/LaunchReadinessPanel/VBox"]
+layout_mode = 2
+max_value = 100.0
+value = 75.0
+show_percentage = false
+
+[node name="RiskLabel" type="Label" parent="HBoxContainer/SidePanel/LaunchReadinessPanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_font_sizes/font_size = 10
+text = "Low quality = higher failure chance during journey"
+autowrap_mode = 2
+
 [node name="GridPanel" type="Panel" parent="HBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 3

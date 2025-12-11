@@ -51,6 +51,12 @@ extends Control
 @onready var secondary_hints: Label = $HBoxContainer/SidePanel/HintsPanel/HintsVBox/SecondaryHints
 @onready var tab_container: TabContainer = $HBoxContainer/SidePanel/TabContainer
 
+# Launch Readiness Panel
+@onready var blockers_list: RichTextLabel = $HBoxContainer/SidePanel/LaunchReadinessPanel/VBox/BlockersList
+@onready var success_label: Label = $HBoxContainer/SidePanel/LaunchReadinessPanel/VBox/SuccessLabel
+@onready var success_bar: ProgressBar = $HBoxContainer/SidePanel/LaunchReadinessPanel/VBox/SuccessBar
+@onready var risk_label: Label = $HBoxContainer/SidePanel/LaunchReadinessPanel/VBox/RiskLabel
+
 # ============================================================================
 # LOCAL UI STATE (not game state)
 # ============================================================================
@@ -558,6 +564,9 @@ func _sync_ui_to_state():
 	readiness_bar.value = readiness
 	launch_button.disabled = not check.can_launch
 
+	# Update launch readiness panel
+	_update_launch_readiness_panel(check, readiness)
+
 	# Disable hire button if max crew
 	hire_button.disabled = GameStore.get_crew().size() >= 4
 
@@ -578,6 +587,68 @@ func _sync_cargo_ui():
 	var cargo = GameStore.get_cargo()
 	mav_check.set_pressed_no_signal(cargo.get("mav", false))
 	rovers_check.set_pressed_no_signal(cargo.get("rovers", 0) > 0)
+
+func _update_launch_readiness_panel(check: Dictionary, readiness: float):
+	# Update blockers list
+	if check.issues.is_empty():
+		blockers_list.text = "[color=#80ff80]All requirements met - READY TO LAUNCH![/color]"
+	else:
+		var blockers_text = ""
+		for issue in check.issues:
+			blockers_text += "[color=#ff6666]" + issue + "[/color]\n"
+		blockers_list.text = blockers_text.strip_edges()
+
+	# Calculate success probability based on component quality
+	# Higher quality = higher success, but there's always some risk
+	var components = GameStore.get_components()
+	var min_quality = ShipLogic.calc_min_quality(components)
+	var avg_quality = readiness
+
+	# Success probability formula:
+	# - Base 50% if minimum quality >= 50%
+	# - +30% for average quality (scaled 50-100% -> 0-30%)
+	# - +20% for minimum quality (scaled 50-100% -> 0-20%)
+	var base_success = 50.0
+	var avg_bonus = clampf((avg_quality - 50.0) / 50.0, 0.0, 1.0) * 30.0
+	var min_bonus = clampf((min_quality - 50.0) / 50.0, 0.0, 1.0) * 20.0
+	var success_probability = base_success + avg_bonus + min_bonus
+
+	# Cap at 99% - there's always a tiny risk
+	success_probability = minf(success_probability, 99.0)
+
+	# If no components, 0% success
+	if components.is_empty():
+		success_probability = 0.0
+
+	success_label.text = "Mission Success: %.0f%%" % success_probability
+	success_bar.value = success_probability
+
+	# Color the bar based on probability
+	if success_probability >= 85:
+		success_bar.modulate = Color(0.4, 1.0, 0.4)  # Green
+		risk_label.text = "Excellent! Low risk of component failures."
+	elif success_probability >= 70:
+		success_bar.modulate = Color(1.0, 1.0, 0.4)  # Yellow
+		risk_label.text = "Good odds. Test components to reduce failure risk."
+	elif success_probability >= 50:
+		success_bar.modulate = Color(1.0, 0.7, 0.3)  # Orange
+		risk_label.text = "Risky. Low quality components may fail during journey."
+	else:
+		success_bar.modulate = Color(1.0, 0.4, 0.4)  # Red
+		risk_label.text = "Dangerous! High chance of critical failures."
+
+	# Show weakest component if there is one
+	if not components.is_empty():
+		var weakest = _find_weakest_component(components)
+		if weakest.quality < 70:
+			risk_label.text += "\nWeakest: %s (%.0f%%)" % [weakest.display_name, weakest.quality]
+
+func _find_weakest_component(components: Array) -> Dictionary:
+	var weakest = components[0]
+	for comp in components:
+		if comp.quality < weakest.quality:
+			weakest = comp
+	return weakest
 
 # ============================================================================
 # INFO PANEL RENDERING

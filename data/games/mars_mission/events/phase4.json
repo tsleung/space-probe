@@ -1,0 +1,313 @@
+{
+  "events": [
+    {
+      "id": "system_cascade_warning",
+      "title": "System Cascade Warning",
+      "category": "ship",
+      "description": "Multiple systems are showing signs of stress. The long journey has taken its toll.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.04,
+        "day_range": [20, 150],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "full_diagnostic",
+          "text": "Run full system diagnostic and repair",
+          "requirements": [
+            {"type": "resource", "resource_id": "spare_parts", "min": 2}
+          ],
+          "outcomes": [
+            {
+              "weight": 0.75,
+              "description": "Issues identified and addressed. Systems stabilized.",
+              "effects": [
+                {"type": "resource", "resource_id": "spare_parts", "amount": -2},
+                {"type": "component_repair", "target": "all", "amount": 10},
+                {"type": "time", "days": 1},
+                {"type": "log", "message": "System diagnostic identified and repaired issues"}
+              ]
+            },
+            {
+              "weight": 0.25,
+              "description": "Some issues beyond repair. Systems patched but vulnerable.",
+              "effects": [
+                {"type": "resource", "resource_id": "spare_parts", "amount": -2},
+                {"type": "component_repair", "target": "random", "amount": 15},
+                {"type": "set_flag", "flag": "systems_vulnerable"},
+                {"type": "log", "message": "System repairs partial, vulnerabilities remain"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "prioritize_critical",
+          "text": "Focus on critical systems only",
+          "requirements": [
+            {"type": "resource", "resource_id": "spare_parts", "min": 1}
+          ],
+          "outcomes": [
+            {
+              "weight": 0.8,
+              "description": "Critical systems secured. Non-critical continue to degrade.",
+              "effects": [
+                {"type": "resource", "resource_id": "spare_parts", "amount": -1},
+                {"type": "component_repair", "target": "life_support", "amount": 15},
+                {"type": "component_damage", "target": "random", "amount": 5},
+                {"type": "log", "message": "Prioritized critical system repairs"}
+              ]
+            },
+            {
+              "weight": 0.2,
+              "description": "Critical system repair harder than expected.",
+              "effects": [
+                {"type": "resource", "resource_id": "spare_parts", "amount": -1},
+                {"type": "component_repair", "target": "life_support", "amount": 8},
+                {"type": "log", "message": "Critical repairs more difficult than anticipated"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "monitor_closely",
+          "text": "Monitor closely but conserve parts",
+          "outcomes": [
+            {
+              "weight": 0.4,
+              "description": "Systems hold steady for now.",
+              "effects": [
+                {"type": "crew_fatigue", "target": "random", "amount": 15},
+                {"type": "log", "message": "Monitoring systems closely"}
+              ]
+            },
+            {
+              "weight": 0.6,
+              "description": "Cascade failure begins. Emergency repairs needed.",
+              "effects": [
+                {"type": "component_damage", "target": "random", "amount": 20},
+                {"type": "component_damage", "target": "random", "amount": 15},
+                {"type": "crew_morale", "target": "all", "amount": -15},
+                {"type": "log", "message": "System cascade began, emergency repairs required"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "food_critical",
+      "title": "Food Supplies Critical",
+      "category": "resource",
+      "description": "Food supplies have dropped to critical levels. Difficult decisions ahead.",
+      "trigger": {
+        "type": "resource_below",
+        "resource_id": "food",
+        "threshold_days": 30
+      },
+      "choices": [
+        {
+          "id": "strict_rationing",
+          "text": "Implement strict rationing",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "Rations cut significantly. Crew will feel the effects.",
+              "effects": [
+                {"type": "set_rationing", "level": "severe"},
+                {"type": "crew_morale", "target": "all", "amount": -25},
+                {"type": "log", "message": "Implemented strict food rationing"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "moderate_reduction",
+          "text": "Moderate reduction with morale activities",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "Balanced approach. Crew understands the situation.",
+              "effects": [
+                {"type": "set_rationing", "level": "moderate"},
+                {"type": "crew_morale", "target": "all", "amount": -15},
+                {"type": "log", "message": "Moderate food rationing with morale support"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "maintain_rations",
+          "text": "Maintain current rations (risky)",
+          "outcomes": [
+            {
+              "weight": 0.3,
+              "description": "Crew remains well-fed for now. Reserves dropping fast.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 5},
+                {"type": "log", "message": "Maintaining rations despite low supplies"}
+              ]
+            },
+            {
+              "weight": 0.7,
+              "description": "Running out faster than planned. Crisis imminent.",
+              "effects": [
+                {"type": "set_flag", "flag": "food_crisis_imminent"},
+                {"type": "crew_morale", "target": "all", "amount": -20},
+                {"type": "log", "message": "Food supplies depleting faster than sustainable"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "earth_contact_restored",
+      "title": "Earth Contact Restored",
+      "category": "communication",
+      "description": "After a period of communication difficulties, clear contact with Earth is restored.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.03,
+        "day_range": [100, 180],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "personal_messages",
+          "text": "Prioritize personal messages to families",
+          "outcomes": [
+            {
+              "weight": 0.9,
+              "description": "Crew connects with loved ones. Morale significantly boosted.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 30},
+                {"type": "log", "message": "Crew connected with families via restored communications"}
+              ]
+            },
+            {
+              "weight": 0.1,
+              "description": "Some difficult news from home mixed with joy.",
+              "effects": [
+                {"type": "crew_morale", "target": "random", "amount": 35},
+                {"type": "crew_morale", "target": "random", "amount": -15},
+                {"type": "log", "message": "Family communications brought mixed news"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "mission_data",
+          "text": "Transmit mission data and receive updates",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "Critical data exchanged. Mission control provides guidance.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 15},
+                {"type": "log", "message": "Mission data transmitted, received guidance from Earth"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "balanced_approach",
+          "text": "Balance personal messages and mission data",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "Both needs met. Crew and mission benefit.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 22},
+                {"type": "log", "message": "Balanced personal and mission communications"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reentry_systems_check",
+      "title": "Reentry Systems Check",
+      "category": "ship",
+      "description": "As Earth approaches, it's time to verify all reentry systems are functional.",
+      "trigger": {
+        "type": "day_remaining",
+        "days_remaining": 14
+      },
+      "choices": [
+        {
+          "id": "thorough_check",
+          "text": "Thorough system-by-system verification",
+          "outcomes": [
+            {
+              "weight": 0.7,
+              "description": "All systems verified operational. Ready for reentry.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 20},
+                {"type": "time", "days": 1},
+                {"type": "log", "message": "Reentry systems verified operational"}
+              ]
+            },
+            {
+              "weight": 0.3,
+              "description": "Issues found. Repairs possible with remaining time.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": -10},
+                {"type": "component_damage", "target": "random", "amount": -10},
+                {"type": "resource", "resource_id": "spare_parts", "amount": -1},
+                {"type": "time", "days": 2},
+                {"type": "log", "message": "Reentry check found issues, repairs completed"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "quick_check",
+          "text": "Quick automated diagnostic",
+          "outcomes": [
+            {
+              "weight": 0.5,
+              "description": "Automated check shows green across the board.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 10},
+                {"type": "log", "message": "Quick diagnostic shows systems nominal"}
+              ]
+            },
+            {
+              "weight": 0.5,
+              "description": "Quick check may have missed something. Uncertainty remains.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": -5},
+                {"type": "set_flag", "flag": "reentry_uncertainty"},
+                {"type": "log", "message": "Quick check completed, some uncertainty remains"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "trust_readings",
+          "text": "Trust continuous monitoring readings",
+          "outcomes": [
+            {
+              "weight": 0.6,
+              "description": "Continuous monitoring has been reliable. Crew proceeds confidently.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": 5},
+                {"type": "log", "message": "Trusting continuous monitoring for reentry readiness"}
+              ]
+            },
+            {
+              "weight": 0.4,
+              "description": "Crew anxious about unverified systems.",
+              "effects": [
+                {"type": "crew_morale", "target": "all", "amount": -15},
+                {"type": "log", "message": "Crew anxious about skipping reentry verification"}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

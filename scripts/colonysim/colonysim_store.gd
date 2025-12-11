@@ -1,4 +1,5 @@
 extends Node
+class_name ColonySimStore
 
 ## Colony Sim Store - The ONLY place with side effects for colony simulation
 ## Wraps the pure reducer and provides:

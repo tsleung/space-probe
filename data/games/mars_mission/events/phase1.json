@@ -1,0 +1,365 @@
+{
+  "events": [
+    {
+      "id": "congressional_budget_review",
+      "title": "Congressional Budget Review",
+      "category": "political",
+      "description": "A congressional committee is reviewing the mission budget. Your handling of this could affect funding.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.02,
+        "day_range": [10, 60],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "full_transparency",
+          "text": "Provide full transparency on all expenditures",
+          "outcomes": [
+            {
+              "weight": 0.7,
+              "description": "The committee is impressed by your openness. Budget increased.",
+              "effects": [
+                {"type": "budget", "amount": 25000000},
+                {"type": "log", "message": "Congressional review resulted in budget increase"}
+              ]
+            },
+            {
+              "weight": 0.3,
+              "description": "Some committee members question certain expenses, but funding remains stable.",
+              "effects": [
+                {"type": "log", "message": "Congressional review completed without changes"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "highlight_achievements",
+          "text": "Focus presentation on mission achievements",
+          "outcomes": [
+            {
+              "weight": 0.5,
+              "description": "The committee is excited about the mission's potential!",
+              "effects": [
+                {"type": "budget", "amount": 40000000},
+                {"type": "log", "message": "Enthusiastic congressional support secured additional funding"}
+              ]
+            },
+            {
+              "weight": 0.5,
+              "description": "The committee wanted more financial details. Minor budget cut.",
+              "effects": [
+                {"type": "budget", "amount": -15000000},
+                {"type": "log", "message": "Congressional review resulted in minor budget reduction"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "minimize_contact",
+          "text": "Provide minimum required information",
+          "outcomes": [
+            {
+              "weight": 0.3,
+              "description": "The committee moves on to other matters.",
+              "effects": [
+                {"type": "log", "message": "Congressional review passed without incident"}
+              ]
+            },
+            {
+              "weight": 0.7,
+              "description": "The committee is concerned by the lack of transparency. Budget cut.",
+              "effects": [
+                {"type": "budget", "amount": -30000000},
+                {"type": "log", "message": "Congressional review resulted in significant budget cut"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "contractor_delay",
+      "title": "Contractor Supply Delay",
+      "category": "logistics",
+      "description": "A key contractor reports a delay in delivering critical components. How do you respond?",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.025,
+        "day_range": [5, 50],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "expedite_payment",
+          "text": "Pay extra for expedited delivery",
+          "outcomes": [
+            {
+              "weight": 0.85,
+              "description": "The contractor prioritizes your order. Components arrive on time.",
+              "effects": [
+                {"type": "budget", "amount": -10000000},
+                {"type": "log", "message": "Paid premium for expedited component delivery"}
+              ]
+            },
+            {
+              "weight": 0.15,
+              "description": "Despite the premium, there's still a slight delay.",
+              "effects": [
+                {"type": "budget", "amount": -10000000},
+                {"type": "time", "days": -2},
+                {"type": "log", "message": "Expedited delivery still resulted in minor delay"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "find_alternative",
+          "text": "Find an alternative supplier",
+          "outcomes": [
+            {
+              "weight": 0.6,
+              "description": "You find a capable alternative supplier.",
+              "effects": [
+                {"type": "budget", "amount": -5000000},
+                {"type": "log", "message": "Secured alternative supplier for delayed components"}
+              ]
+            },
+            {
+              "weight": 0.4,
+              "description": "Alternative supplier's components are lower quality.",
+              "effects": [
+                {"type": "component_quality", "target": "random", "amount": -10},
+                {"type": "log", "message": "Alternative supplier components have quality concerns"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "accept_delay",
+          "text": "Accept the delay and adjust schedule",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "You adjust the schedule to accommodate the delay.",
+              "effects": [
+                {"type": "time", "days": -5},
+                {"type": "log", "message": "Accepted contractor delay, adjusted schedule"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "technology_breakthrough",
+      "title": "Technology Breakthrough",
+      "category": "science",
+      "description": "Your engineering team reports a potential improvement to one of the ship's systems.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.015,
+        "day_range": [15, 65],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "implement_now",
+          "text": "Implement the improvement immediately",
+          "outcomes": [
+            {
+              "weight": 0.6,
+              "description": "The improvement is successfully integrated!",
+              "effects": [
+                {"type": "component_quality", "target": "random", "amount": 15},
+                {"type": "time", "days": -3},
+                {"type": "log", "message": "Successfully implemented engineering breakthrough"}
+              ]
+            },
+            {
+              "weight": 0.4,
+              "description": "Integration issues cause delays and the improvement is marginal.",
+              "effects": [
+                {"type": "component_quality", "target": "random", "amount": 5},
+                {"type": "time", "days": -7},
+                {"type": "log", "message": "Engineering improvement had integration challenges"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "test_thoroughly",
+          "text": "Test thoroughly before implementing",
+          "outcomes": [
+            {
+              "weight": 0.9,
+              "description": "Testing validates the improvement. Safe implementation follows.",
+              "effects": [
+                {"type": "component_quality", "target": "random", "amount": 12},
+                {"type": "time", "days": -5},
+                {"type": "budget", "amount": -5000000},
+                {"type": "log", "message": "Thoroughly tested and implemented engineering improvement"}
+              ]
+            },
+            {
+              "weight": 0.1,
+              "description": "Testing reveals the improvement isn't viable. Time well spent.",
+              "effects": [
+                {"type": "time", "days": -5},
+                {"type": "budget", "amount": -5000000},
+                {"type": "log", "message": "Testing revealed proposed improvement wasn't viable"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "document_later",
+          "text": "Document for future missions, focus on current build",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "The improvement is documented for future reference.",
+              "effects": [
+                {"type": "log", "message": "Documented engineering breakthrough for future missions"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "training_incident",
+      "title": "Crew Training Incident",
+      "category": "crew",
+      "description": "During training, one of your crew members is involved in a minor incident.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.02,
+        "day_range": [20, 70],
+        "conditions": [
+          {"type": "crew_count", "min": 1}
+        ]
+      },
+      "choices": [
+        {
+          "id": "full_medical",
+          "text": "Full medical evaluation and rest period",
+          "outcomes": [
+            {
+              "weight": 0.9,
+              "description": "Crew member recovers fully and returns to training.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -5},
+                {"type": "budget", "amount": -2000000},
+                {"type": "log", "message": "Crew member recovered from training incident"}
+              ]
+            },
+            {
+              "weight": 0.1,
+              "description": "Evaluation reveals a more serious issue requiring extended recovery.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -20},
+                {"type": "budget", "amount": -5000000},
+                {"type": "log", "message": "Training incident revealed underlying health concern"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "quick_assessment",
+          "text": "Quick assessment and return to training",
+          "outcomes": [
+            {
+              "weight": 0.7,
+              "description": "Crew member shakes it off and continues training.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -3},
+                {"type": "log", "message": "Crew member returned quickly to training after minor incident"}
+              ]
+            },
+            {
+              "weight": 0.3,
+              "description": "Pushing through leads to a more serious injury.",
+              "effects": [
+                {"type": "crew_health", "target": "random", "amount": -25},
+                {"type": "crew_morale", "target": "random", "amount": -15},
+                {"type": "log", "message": "Training incident worsened due to insufficient recovery time"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "documentary_request",
+      "title": "Documentary Crew Request",
+      "category": "media",
+      "description": "A documentary crew requests access to film the mission preparations.",
+      "trigger": {
+        "type": "random",
+        "base_probability": 0.015,
+        "day_range": [10, 50],
+        "conditions": []
+      },
+      "choices": [
+        {
+          "id": "full_access",
+          "text": "Grant full access",
+          "outcomes": [
+            {
+              "weight": 0.6,
+              "description": "Great publicity! Public support increases funding.",
+              "effects": [
+                {"type": "budget", "amount": 15000000},
+                {"type": "crew_morale", "target": "all", "amount": 5},
+                {"type": "log", "message": "Documentary coverage increased public support"}
+              ]
+            },
+            {
+              "weight": 0.4,
+              "description": "Documentary reveals some problems, but overall positive coverage.",
+              "effects": [
+                {"type": "budget", "amount": 5000000},
+                {"type": "log", "message": "Documentary coverage was mixed but beneficial"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "limited_access",
+          "text": "Grant limited, supervised access",
+          "outcomes": [
+            {
+              "weight": 0.8,
+              "description": "Controlled coverage generates positive press.",
+              "effects": [
+                {"type": "budget", "amount": 8000000},
+                {"type": "log", "message": "Limited documentary access generated positive coverage"}
+              ]
+            },
+            {
+              "weight": 0.2,
+              "description": "Documentary crew feels restricted, coverage is lukewarm.",
+              "effects": [
+                {"type": "log", "message": "Documentary coverage was limited due to access restrictions"}
+              ]
+            }
+          ]
+        },
+        {
+          "id": "decline",
+          "text": "Decline the request",
+          "outcomes": [
+            {
+              "weight": 1.0,
+              "description": "You maintain focus on the mission without media distractions.",
+              "effects": [
+                {"type": "log", "message": "Declined documentary request to maintain focus"}
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

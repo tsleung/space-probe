@@ -1,0 +1,32 @@
+{
+  "id": "von_neumann_probe",
+  "name": "Von Neumann Probe",
+  "description": "A single self-replicating probe explores the galaxy. Expand your swarm, gather resources, and reach the stars. A real-time idle/strategy hybrid.",
+  "version": "1.0.0",
+  "genre": "real_time_idle",
+  "time_mode": "real_time",
+  "author": "SpaceProbe Team",
+
+  "settings": {
+    "years_per_second": 5.0,
+    "tick_rate": 0.1,
+    "starting_probes": 1,
+    "starting_system": "sol",
+    "galaxy_size": 25,
+    "victory_conditions": {
+      "explore_percent": 50,
+      "probe_swarm_size": 20
+    }
+  },
+
+  "files": {
+    "balance": "balance.json",
+    "events": "events/main.json"
+  },
+
+  "reducers": {
+    "main": "VNPReducer"
+  },
+
+  "store": "VNPStore"
+}
