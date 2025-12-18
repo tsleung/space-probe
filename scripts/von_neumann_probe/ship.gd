@@ -1,10 +1,12 @@
 extends CharacterBody2D
 
 const VnpTypes = preload("res://scripts/von_neumann_probe/vnp_types.gd")
+const VnpSystems = preload("res://scripts/von_neumann_probe/vnp_systems.gd")
 const ProjectileScene = preload("res://scenes/von_neumann_probe/projectile.tscn")
 const ImpactFxScene = preload("res://scenes/von_neumann_probe/impact_fx.tscn")
 
 var store = null
+var vnp_main = null  # Reference to VnpMain for screen shake
 var ship_data = {}
 var ship_stats = {}
 var ai_controller = null  # Reference for fleet formation queries
@@ -58,8 +60,9 @@ var current_velocity: Vector2 = Vector2.ZERO
 const SPACE_DRAG: float = 0.3  # Slight drag to prevent infinite drift
 const THRUST_MULTIPLIER: float = 2.5  # How responsive thrust feels
 
-func init(vnp_store, initial_data, controller = null, snd_manager = null):
+func init(vnp_store, initial_data, controller = null, snd_manager = null, main_ref = null):
 	self.store = vnp_store
+	self.vnp_main = main_ref
 	self.ship_data = initial_data
 	self.ship_stats = VnpTypes.SHIP_STATS[ship_data.type]
 	self.ai_controller = controller
@@ -956,6 +959,13 @@ func _physics_process(delta):
 				current_threat = _assess_threat(target_ship_data, current_state)
 				threat_assessment_cooldown = 0.5  # Re-assess every 0.5s
 
+				# ATTACK-MOVE: Re-evaluate target based on rally point
+				# Switch to better targets that are more aligned with our objective
+				var better_target = _find_better_rally_target(current_state, my_current_data.target)
+				if better_target != -1 and better_target != my_current_data.target:
+					_dispatch_state_change("attacking", better_target)
+					return
+
 			# Get tactical behavior based on threat
 			var tactics = _get_tactical_behavior(current_threat, ship_size)
 			var effective_range = ship_stats.range * tactics.range_mult
@@ -1376,7 +1386,7 @@ func _get_formation_target() -> Vector2:
 
 
 func _find_nearest_enemy_for_formation(state: Dictionary) -> int:
-	"""Find nearest enemy that is within formation constraints"""
+	"""Find nearest enemy that is within formation constraints, biased toward rally"""
 	var nearest_enemy_id = -1
 	var best_score = -INF
 
@@ -1388,6 +1398,13 @@ func _find_nearest_enemy_for_formation(state: Dictionary) -> int:
 		fleet_center = ai_controller.get_fleet_center(ship_data.team)
 
 	var weapon_range = ship_stats.get("range", 300)
+
+	# Get rally point for attack-move bias
+	var rally_point = _get_rally_point(state)
+	var has_rally = rally_point != Vector2.ZERO
+	var to_rally_dir = Vector2.ZERO
+	if has_rally:
+		to_rally_dir = (rally_point - position).normalized()
 
 	for other_ship_id in state.ships:
 		var other_ship = state.ships[other_ship_id]
@@ -1415,6 +1432,12 @@ func _find_nearest_enemy_for_formation(state: Dictionary) -> int:
 			# Bonus for enemies within engagement range
 			if dist_to_enemy <= weapon_range * 2.5:
 				score += 500.0
+
+			# ATTACK-MOVE: Bonus for enemies in the direction of rally point
+			if has_rally and dist_to_enemy > 0:
+				var to_enemy_dir = (other_ship.position - position).normalized()
+				var alignment = to_rally_dir.dot(to_enemy_dir)  # -1 to 1
+				score += alignment * 225.0
 
 			# Bonus for finishing off wounded enemies
 			var other_stats = VnpTypes.SHIP_STATS.get(other_ship.type, {})
@@ -1458,6 +1481,22 @@ func _should_return_to_fleet() -> bool:
 	return dist_from_fleet > max_chase
 
 
+func _find_better_rally_target(state: Dictionary, current_target_id) -> int:
+	"""Check if there's a significantly better target aligned with rally direction"""
+	var rally_point = _get_rally_point(state)
+	var weapon_range = ship_stats.get("range", 300)
+
+	# Use pure function from VnpSystems
+	return VnpSystems.find_better_target(
+		position,
+		ship_data.team,
+		current_target_id,
+		weapon_range,
+		rally_point,
+		state.ships
+	)
+
+
 func _dispatch_state_change(new_state: String, target = null):
 	# Throttle state changes to prevent spam
 	var current_time = Time.get_ticks_msec() / 1000.0
@@ -1474,39 +1513,17 @@ func _dispatch_state_change(new_state: String, target = null):
 	return true
 
 func _find_nearest_enemy(state):
-	var nearest_enemy_id = -1
-	var best_score = -INF
+	# Use pure function from VnpSystems for targeting
+	var rally_point = _get_rally_point(state)
+	var weapon_range = ship_stats.get("range", 300)
 
-	# Engagement range - prefer enemies within this distance
-	var engagement_range = ship_stats.get("range", 300) * 2.0
-
-	for other_ship_id in state.ships:
-		var other_ship = state.ships[other_ship_id]
-		if other_ship.team != ship_data.team:
-			var dist = self.position.distance_to(other_ship.position)
-
-			# Score based on distance - heavily prefer nearby enemies
-			var score = 1000.0 - dist
-
-			# Bonus for enemies within engagement range
-			if dist <= engagement_range:
-				score += 500.0
-
-			# Bonus for attacking enemies that are already weakened
-			var other_stats = VnpTypes.SHIP_STATS.get(other_ship.type, {})
-			var max_health = other_stats.get("health", 100)
-			var health_percent = float(other_ship.health) / max_health
-			if health_percent < 0.5:
-				score += 200.0  # Finish off wounded
-
-			# Slight randomness to prevent all ships targeting same enemy
-			score += randf() * 50.0
-
-			if score > best_score:
-				best_score = score
-				nearest_enemy_id = other_ship_id
-
-	return nearest_enemy_id
+	return VnpSystems.find_best_target(
+		position,
+		ship_data.team,
+		weapon_range,
+		rally_point,
+		state.ships
+	)
 
 
 func _find_uncaptured_planet(state):
@@ -1605,6 +1622,8 @@ func _on_fire_rate_timer_timeout():
 					"start_position": self.global_position,
 					"start_rotation": self.rotation,
 					"target_id": target_id,
+					"store": store,
+					"vnp_main": vnp_main,
 				})
 
 			VnpTypes.WeaponType.MISSILE:
@@ -1628,6 +1647,8 @@ func _on_fire_rate_timer_timeout():
 							"start_rotation": self.rotation + (spread_index - 1) * 0.12,  # Slight angle spread
 							"target_id": target_id,
 							"arc_height_mult": 0.4 + randf() * 0.35,  # Varied arc heights
+							"store": store,
+							"vnp_main": vnp_main,
 						})
 					)
 
@@ -1646,6 +1667,8 @@ func _on_fire_rate_timer_timeout():
 					"target_id": target_id,
 					"turbolaser_speed": ship_stats.get("turbolaser_speed", 180),
 					"turbolaser_size": ship_stats.get("turbolaser_size", 12),
+					"store": store,
+					"vnp_main": vnp_main,
 				})
 
 func _show_turbolaser_charge():

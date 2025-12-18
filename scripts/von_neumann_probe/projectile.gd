@@ -10,6 +10,8 @@ var team: int = -1
 var weapon_type: int = -1
 var damage: float = 0
 var target_id: int = -1
+var store = null      # Passed via init for dispatch
+var vnp_main = null   # Passed via init for screen shake
 
 # Movement
 var speed: float = 800
@@ -39,12 +41,19 @@ var trail_line: Line2D = null
 var trail_points: Array[Vector2] = []
 const MAX_TRAIL_POINTS = 15
 
+# Resource tracking for cleanup (prevents texture leaks)
+var _trail_gradient: Gradient = null
+var _smoke_material: ParticleProcessMaterial = null
+var _glow_material: ParticleProcessMaterial = null
+
 
 func init(data: Dictionary):
 	team = data.get("team", -1)
 	weapon_type = data.get("weapon_type", VnpTypes.WeaponType.GUN)
 	damage = data.get("damage", 10)
 	target_id = data.get("target_id", -1)
+	store = data.get("store", null)
+	vnp_main = data.get("vnp_main", null)
 
 	var start_pos: Vector2 = data.get("start_position", Vector2.ZERO)
 	var start_rot: float = data.get("start_rotation", 0.0)
@@ -164,15 +173,15 @@ func _create_turbolaser_glow():
 	glow.lifetime = 0.4
 	glow.emitting = true
 
-	var mat = ParticleProcessMaterial.new()
-	mat.direction = Vector3(-1, 0, 0)
-	mat.spread = 20.0
-	mat.initial_velocity_min = 20.0
-	mat.initial_velocity_max = 50.0
-	mat.damping_min = 20.0
-	mat.damping_max = 40.0
-	mat.scale_min = 2.0
-	mat.scale_max = 4.0
+	_glow_material = ParticleProcessMaterial.new()
+	_glow_material.direction = Vector3(-1, 0, 0)
+	_glow_material.spread = 20.0
+	_glow_material.initial_velocity_min = 20.0
+	_glow_material.initial_velocity_max = 50.0
+	_glow_material.damping_min = 20.0
+	_glow_material.damping_max = 40.0
+	_glow_material.scale_min = 2.0
+	_glow_material.scale_max = 4.0
 
 	# Bright faction-colored glow
 	var turbo_color = VnpTypes.get_weapon_color(team, VnpTypes.WeaponType.TURBOLASER)
@@ -181,9 +190,9 @@ func _create_turbolaser_glow():
 	grad.set_color(1, Color(turbo_color.r, turbo_color.g, turbo_color.b, 0))
 	var tex = GradientTexture1D.new()
 	tex.gradient = grad
-	mat.color_ramp = tex
+	_glow_material.color_ramp = tex
 
-	glow.process_material = mat
+	glow.process_material = _glow_material
 	var mesh = QuadMesh.new()
 	mesh.size = Vector2(8, 8)
 	glow.draw_pass_1 = mesh
@@ -204,10 +213,10 @@ func _create_line_trail(width: float):
 
 	# Gradient from solid to transparent
 	var color = VnpTypes.get_weapon_color(team, weapon_type)
-	var gradient = Gradient.new()
-	gradient.set_color(0, Color(color.r, color.g, color.b, 0))  # Tail (old positions)
-	gradient.set_color(1, color)  # Head (current position)
-	trail_line.gradient = gradient
+	_trail_gradient = Gradient.new()
+	_trail_gradient.set_color(0, Color(color.r, color.g, color.b, 0))  # Tail (old positions)
+	_trail_gradient.set_color(1, color)  # Head (current position)
+	trail_line.gradient = _trail_gradient
 
 	# Add to scene root so trail stays in world space
 	get_tree().root.add_child(trail_line)
@@ -238,16 +247,16 @@ func _create_smoke_trail():
 	smoke.lifetime = 0.4  # Shorter trail
 	smoke.emitting = true
 
-	var mat = ParticleProcessMaterial.new()
-	mat.direction = Vector3(-1, 0, 0)
-	mat.spread = 15.0
-	mat.initial_velocity_min = 30.0
-	mat.initial_velocity_max = 60.0
-	mat.gravity = Vector3(0, -10, 0)
-	mat.damping_min = 15.0
-	mat.damping_max = 25.0
-	mat.scale_min = 0.8
-	mat.scale_max = 1.8
+	_smoke_material = ParticleProcessMaterial.new()
+	_smoke_material.direction = Vector3(-1, 0, 0)
+	_smoke_material.spread = 15.0
+	_smoke_material.initial_velocity_min = 30.0
+	_smoke_material.initial_velocity_max = 60.0
+	_smoke_material.gravity = Vector3(0, -10, 0)
+	_smoke_material.damping_min = 15.0
+	_smoke_material.damping_max = 25.0
+	_smoke_material.scale_min = 0.8
+	_smoke_material.scale_max = 1.8
 
 	# Use team-colored exhaust
 	var exhaust_color = VnpTypes.get_weapon_color(team, VnpTypes.WeaponType.MISSILE)
@@ -257,9 +266,9 @@ func _create_smoke_trail():
 	grad.set_color(1, Color(0.3, 0.3, 0.3, 0.0))
 	var grad_tex = GradientTexture1D.new()
 	grad_tex.gradient = grad
-	mat.color_ramp = grad_tex
+	_smoke_material.color_ramp = grad_tex
 
-	smoke.process_material = mat
+	smoke.process_material = _smoke_material
 	var mesh = QuadMesh.new()
 	mesh.size = Vector2(4, 4)  # Smaller particles
 	smoke.draw_pass_1 = mesh
@@ -306,7 +315,20 @@ func _physics_process(delta):
 func _exit_tree():
 	# Clean up trail when projectile is destroyed
 	if trail_line != null and is_instance_valid(trail_line):
+		trail_line.gradient = null  # Detach before freeing
 		trail_line.queue_free()
+
+	# Free tracked resources to prevent texture leaks
+	if _trail_gradient != null:
+		_trail_gradient = null
+	if _smoke_material != null:
+		if _smoke_material.color_ramp != null:
+			_smoke_material.color_ramp = null
+		_smoke_material = null
+	if _glow_material != null:
+		if _glow_material.color_ramp != null:
+			_glow_material.color_ramp = null
+		_glow_material = null
 
 
 func _move_railgun(delta):
@@ -541,9 +563,15 @@ func _spawn_explosion_particles(parent, amount, life, vel_min, vel_max, scale_mi
 
 	parent.add_child(particles)
 
-	# Cleanup
+	# Cleanup - free material and texture to prevent leaks
 	get_tree().create_timer(life + 0.5).timeout.connect(func():
 		if is_instance_valid(particles):
+			# Clear references before freeing to prevent texture leaks
+			if particles.process_material != null:
+				var m = particles.process_material as ParticleProcessMaterial
+				if m != null and m.color_ramp != null:
+					m.color_ramp = null
+				particles.process_material = null
 			particles.queue_free()
 	)
 
@@ -584,6 +612,10 @@ func _spawn_impact(pos: Vector2, scale_mult: float = 1.0):
 
 
 func _get_store():
+	# Use injected store reference if available
+	if store:
+		return store
+	# Fallback to getting from main (for compatibility)
 	var main = _get_main()
 	if main:
 		return main.store
@@ -591,6 +623,10 @@ func _get_store():
 
 
 func _get_main():
+	# Use injected reference if available
+	if vnp_main:
+		return vnp_main
+	# Fallback for compatibility (not recommended)
 	return get_tree().root.get_node_or_null("VnpMain")
 
 
@@ -707,8 +743,13 @@ func _spawn_deflection_trail(new_direction: Vector2):
 
 	get_tree().root.add_child(sparks)
 
-	# Cleanup
+	# Cleanup - free material and texture to prevent leaks
 	get_tree().create_timer(0.5).timeout.connect(func():
 		if is_instance_valid(sparks):
+			if sparks.process_material != null:
+				var m = sparks.process_material as ParticleProcessMaterial
+				if m != null and m.color_ramp != null:
+					m.color_ramp = null
+				sparks.process_material = null
 			sparks.queue_free()
 	)

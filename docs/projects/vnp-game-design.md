@@ -344,6 +344,25 @@ Compact panel with:
 - **VnpReducer**: Pure function state updates
 - **Actions**: BUILD_SHIP, DAMAGE_SHIP, CAPTURE_STRATEGIC_POINT, etc.
 
+### Pure Functions (VnpSystems)
+
+All testable game logic is extracted to `vnp_systems.gd` as static pure functions:
+
+| Category | Functions | Usage |
+|----------|-----------|-------|
+| **Movement** | `apply_thrust`, `apply_drag`, `clamp_velocity`, `calculate_movement` | Ship physics |
+| **Targeting** | `score_target`, `find_best_target`, `find_better_target` | Combat AI |
+| **Clustering** | `calculate_centroid`, `calculate_cluster_score`, `find_enemy_cluster` | Base weapon targeting |
+| **Fleet** | `calculate_fleet_center` | Formation positioning |
+| **Base Weapon** | `get_weapon_range`, `get_weapon_damage`, `evaluate_base_weapon_fire` | Superweapon AI |
+| **Geometry** | `point_to_line_distance`, `is_in_beam_path`, `apply_damage_falloff` | Beam collision |
+| **Bonuses** | `get_team_health_bonus`, `get_team_damage_bonus` | Strategic point effects |
+
+**Why Pure Functions?**
+- Unit testable without game scene (40 tests in `tests/unit/test_vnp_systems.gd`)
+- No side effects - deterministic results
+- Self-documenting through function signatures
+
 ### Key Files
 
 ```
@@ -351,6 +370,7 @@ scripts/von_neumann_probe/
 ├── vnp_main.gd          # Main game loop, timers, visual orchestration
 ├── vnp_store.gd         # State container
 ├── vnp_reducer.gd       # State mutations
+├── vnp_systems.gd       # Pure functions (tested)
 ├── vnp_types.gd         # Enums, constants, ship stats
 ├── vnp_ai_controller.gd # Build decisions, fleet formations
 ├── vnp_ui.gd            # UI creation and updates
@@ -359,6 +379,24 @@ scripts/von_neumann_probe/
 ├── projectile.gd        # Projectile movement, effects, damage
 └── base_weapon.gd       # Superweapon mechanics
 ```
+
+### Data-Driven Balance
+
+Ship stats and game parameters are defined in `vnp_types.gd` for easy tuning:
+
+```gdscript
+const SHIP_STATS = {
+    ShipType.FRIGATE: { "cost": 50, "health": 70, "speed": 280, "damage": 18, "range": 200, ... },
+    ShipType.DESTROYER: { "cost": 75, "health": 130, "speed": 180, "damage": 40, "range": 400, ... },
+    # etc.
+}
+```
+
+**Adjustable Parameters**:
+- Ship costs, health, speed, damage, range
+- Energy regeneration rates (60/sec player, 90/sec nemesis)
+- Strategic point bonuses (+15% damage, +10% health, +5 mass)
+- Base weapon charge timing and scaling
 
 ### Performance Optimizations
 
@@ -379,5 +417,12 @@ scripts/von_neumann_probe/
 
 ---
 
-*Document Version: 1.0*
+*Document Version: 1.1*
 *Last Updated: December 2024*
+
+---
+
+## Related Documents
+
+- [vnp-decisions.md](./vnp-decisions.md) - Architecture and design decisions
+- [engineering-principles.md](../principles/engineering-principles.md) - Project-wide coding principles

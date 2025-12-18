@@ -1,6 +1,7 @@
 extends Node2D
 
 const VnpTypes = preload("res://scripts/von_neumann_probe/vnp_types.gd")
+const VnpSystems = preload("res://scripts/von_neumann_probe/vnp_systems.gd")
 const ShipScene = preload("res://scenes/von_neumann_probe/ship.tscn")
 const DeathExplosionFxScene = preload("res://scenes/von_neumann_probe/death_explosion_fx.tscn")
 const AiController = preload("res://scripts/von_neumann_probe/vnp_ai_controller.gd")
@@ -48,6 +49,12 @@ const MAX_BASE_CHARGES = 5  # Maximum stored charges
 var selected_rally_target = null  # Currently highlighted target for player
 var rally_line: Line2D = null  # Visual dashed line showing rally route
 var player_rally_point: Vector2 = Vector2.ZERO  # Where player ships rally to
+
+# Double-click detection for FULL SEND
+var last_click_time: float = 0.0
+var last_click_pos: Vector2 = Vector2.ZERO
+const DOUBLE_CLICK_TIME = 0.35  # Max time between clicks
+const DOUBLE_CLICK_DIST = 50.0  # Max distance between clicks
 
 # Screen shake
 var shake_intensity: float = 0.0
@@ -113,8 +120,11 @@ func _process(delta):
 					base_charges[team] = charges + 1
 					base_weapon_cooldowns[team] = VnpTypes.BASE_WEAPON_COOLDOWN
 
-				# Auto mode: fire immediately when charged
-				if base_charge_mode.get(team, "auto") == "auto" and base_charges.get(team, 0) > 0:
+				# AI teams use smart firing heuristic
+				if team != VnpTypes.Team.PLAYER and base_charges.get(team, 0) > 0:
+					_ai_evaluate_base_weapon_fire(team)
+				# Player auto mode: fire immediately when charged
+				elif team == VnpTypes.Team.PLAYER and base_charge_mode.get(team, "auto") == "auto" and base_charges.get(team, 0) > 0:
 					_try_fire_base_weapon(team)
 
 		# Update UI with cooldowns and charges
@@ -153,7 +163,7 @@ func fire_base_weapon(team: int, charges: int = 1):
 	var base_pos = base_nodes[team].position
 	var weapon = BaseWeapon.new()
 	add_child(weapon)
-	weapon.init(store, team, base_pos, charges)
+	weapon.init(store, team, base_pos, charges, self)
 
 
 func toggle_charge_mode(team: int):
@@ -173,6 +183,39 @@ func burst_fire_base_weapon(team: int):
 	# Fire ALL charges at once
 	if base_charges[team] > 0:
 		_try_fire_base_weapon(team, true)
+
+
+func _ai_evaluate_base_weapon_fire(team: int):
+	# Smart AI heuristic for deciding when to fire base weapons
+	# Uses pure functions from VnpSystems for testability
+	var state = store.get_state()
+	var charges = base_charges.get(team, 0)
+	var base_pos = base_nodes[team].position
+
+	# Use pure function for range calculation
+	var current_range = VnpSystems.get_weapon_range(charges)
+
+	# Count enemies in range using pure function
+	var enemies_in_range = VnpSystems.count_enemies_in_range(base_pos, team, current_range, state.ships)
+
+	# Get enemy positions for cluster analysis
+	var enemy_positions = []
+	for ship_id in state.ships:
+		var ship = state.ships[ship_id]
+		if ship.team != team:
+			var dist = ship.position.distance_to(base_pos)
+			if dist <= current_range:
+				enemy_positions.append(ship.position)
+
+	# Calculate cluster quality using pure function
+	var cluster_score = VnpSystems.calculate_cluster_score(enemy_positions)
+
+	# Evaluate firing decision using pure function
+	var result = VnpSystems.evaluate_base_weapon_fire(charges, enemies_in_range, cluster_score, MAX_BASE_CHARGES)
+
+	if result.should_fire:
+		_try_fire_base_weapon(team, result.burst)
+
 
 func _setup_camera():
 	camera = Camera2D.new()
@@ -250,7 +293,20 @@ func _input(event):
 
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var click_pos = get_global_mouse_position()
-		_handle_rally_click(click_pos)
+		var current_time = Time.get_ticks_msec() / 1000.0
+
+		# Check for double click
+		var is_double_click = false
+		if current_time - last_click_time < DOUBLE_CLICK_TIME and click_pos.distance_to(last_click_pos) < DOUBLE_CLICK_DIST:
+			is_double_click = true
+
+		last_click_time = current_time
+		last_click_pos = click_pos
+
+		if is_double_click:
+			_handle_full_send(click_pos)
+		else:
+			_handle_rally_click(click_pos)
 
 
 func _handle_rally_click(click_pos: Vector2):
@@ -308,6 +364,122 @@ func _clear_rally_point():
 		"team": VnpTypes.Team.PLAYER,
 		"target": null
 	})
+
+
+func _handle_full_send(click_pos: Vector2):
+	# FULL SEND - Double click sends all ships aggressively to target
+	var state = store.get_state()
+	var target_pos = click_pos
+	var target_id = null
+
+	# Check if clicked on an enemy base
+	for team in base_nodes:
+		if team == VnpTypes.Team.PLAYER:
+			continue
+		var base_pos = base_nodes[team].position
+		if click_pos.distance_to(base_pos) < 60:
+			target_pos = base_pos
+			target_id = "enemy_base_%d" % team
+			break
+
+	# Check if clicked on a strategic point
+	if target_id == null:
+		for point_id in strategic_point_nodes:
+			var point_node = strategic_point_nodes[point_id]
+			if click_pos.distance_to(point_node.position) < 60:
+				target_pos = point_node.position
+				target_id = point_id
+				break
+
+	# Set rally point
+	_set_rally_point(target_pos, target_id if target_id else "full_send")
+
+	# FULL SEND - Force all player ships to attack-move to target
+	store.dispatch({
+		"type": "FULL_SEND",
+		"team": VnpTypes.Team.PLAYER,
+		"target": target_pos
+	})
+
+	# Visual effect - FULL SEND indicator
+	_show_full_send_effect(target_pos)
+
+	# Screen shake for impact
+	shake_screen(15.0)
+
+	if sound_manager:
+		sound_manager.play_ui_click()
+
+
+func _show_full_send_effect(target_pos: Vector2):
+	# Dramatic visual effect for FULL SEND
+	var player_base_pos = base_nodes[VnpTypes.Team.PLAYER].position
+
+	# Expanding ring from player base
+	var ring = Line2D.new()
+	ring.position = player_base_pos
+	ring.width = 6.0
+	ring.default_color = VnpTypes.get_team_color(VnpTypes.Team.PLAYER)
+	ring.default_color.a = 0.9
+	var ring_points = []
+	for i in range(33):
+		var angle = i * (TAU / 32)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 30)
+	ring.points = PackedVector2Array(ring_points)
+	add_child(ring)
+
+	# Arrow pointing to target
+	var direction = (target_pos - player_base_pos).normalized()
+	var arrow_line = Line2D.new()
+	arrow_line.width = 8.0
+	arrow_line.default_color = VnpTypes.get_team_color(VnpTypes.Team.PLAYER)
+	arrow_line.add_point(player_base_pos)
+	arrow_line.add_point(target_pos)
+	add_child(arrow_line)
+
+	# "FULL SEND" text flash at target
+	var label = Label.new()
+	label.text = "FULL SEND!"
+	label.position = target_pos - Vector2(60, 30)
+	label.add_theme_font_size_override("font_size", 24)
+	label.add_theme_color_override("font_color", VnpTypes.get_team_color(VnpTypes.Team.PLAYER))
+	add_child(label)
+
+	# Impact ring at target
+	var target_ring = Line2D.new()
+	target_ring.position = target_pos
+	target_ring.width = 5.0
+	target_ring.default_color = Color.WHITE
+	target_ring.default_color.a = 0.9
+	target_ring.points = PackedVector2Array(ring_points)
+	add_child(target_ring)
+
+	# Animate everything
+	var tween = create_tween()
+	tween.set_parallel(true)
+
+	# Ring expands from base
+	tween.tween_property(ring, "scale", Vector2(5, 5), 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(ring, "modulate:a", 0.0, 0.5)
+
+	# Arrow fades
+	tween.tween_property(arrow_line, "modulate:a", 0.0, 0.6)
+
+	# Label pops and fades
+	tween.tween_property(label, "scale", Vector2(1.3, 1.3), 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_property(label, "modulate:a", 0.0, 0.8).set_delay(0.2)
+
+	# Target ring expands
+	tween.tween_property(target_ring, "scale", Vector2(4, 4), 0.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(target_ring, "modulate:a", 0.0, 0.4)
+
+	# Cleanup
+	tween.tween_callback(func():
+		ring.queue_free()
+		arrow_line.queue_free()
+		label.queue_free()
+		target_ring.queue_free()
+	).set_delay(0.8)
 
 
 func _update_rally_line(from_pos: Vector2, to_pos: Vector2):
@@ -946,7 +1118,7 @@ func _spawn_base_turrets():
 func _spawn_ship(ship_id, ship_data):
 	var ship_instance = ShipScene.instantiate()
 	add_child(ship_instance)
-	ship_instance.init(store, ship_data, ai_controller, sound_manager)
+	ship_instance.init(store, ship_data, ai_controller, sound_manager, self)
 	ship_nodes[ship_id] = ship_instance
 
 func _create_world_object(name, pos, color):
