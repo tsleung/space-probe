@@ -34,15 +34,20 @@ signal game_ended(is_victory: bool, reason: String)
 # STATE
 # ============================================================================
 
-var _state: Dictionary = {}
+var _state: Dictionary = ColonySimTypes.create_colony_state()
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # ============================================================================
 # INITIALIZATION
 # ============================================================================
 
+func _init():
+	# Ensure state is initialized immediately (not waiting for _ready)
+	if _state.is_empty():
+		_state = ColonySimTypes.create_colony_state()
+
 func _ready():
-	_state = ColonySimTypes.create_colony_state()
+	pass  # State already initialized in _init
 
 ## Get current state (read-only copy)
 func get_state() -> Dictionary:

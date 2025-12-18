@@ -721,11 +721,11 @@ static func get_building_definition(type: BuildingType) -> Dictionary:
 			return {
 				"housing_capacity": 0,
 				"power_consumption": 15.0,
-				"construction_years": 2,
-				"required_workers": 3,
-				"produces": {"food": 200.0},
-				"consumes": {"water": 50.0},
-				"maintenance_cost": {"machine_parts": 2}
+				"construction_years": 1,
+				"required_workers": 2,
+				"produces": {"food": 500.0},
+				"consumes": {"water": 20.0},
+				"maintenance_cost": {"machine_parts": 1}
 			}
 		BuildingType.SOLAR_ARRAY:
 			return {

@@ -1,0 +1,99 @@
+{
+  "version": "1.0.0",
+
+  "starting_conditions": {
+    "initial_colonists": 12,
+    "starting_resources": {
+      "food": 3000,
+      "water": 1500,
+      "oxygen": 800,
+      "building_materials": 500,
+      "machine_parts": 100,
+      "medicine": 50,
+      "fuel": 200
+    },
+    "starting_buildings": [
+      {"type": "HAB_POD", "count": 3},
+      {"type": "GREENHOUSE", "count": 1},
+      {"type": "SOLAR_ARRAY", "count": 2},
+      {"type": "WATER_EXTRACTOR", "count": 1}
+    ]
+  },
+
+  "consumption": {
+    "food_per_colonist_per_year": 730,
+    "water_per_colonist_per_year": 180,
+    "oxygen_per_colonist_per_year": 36.5,
+    "power_per_colonist": 5.0
+  },
+
+  "population": {
+    "base_fertility_rate": 0.025,
+    "fertile_age_min": 18,
+    "fertile_age_max": 45,
+    "child_mortality_rate": 0.01,
+    "elder_mortality_base": 0.02,
+    "max_age": 95,
+    "pregnancy_months": 9
+  },
+
+  "buildings": {
+    "degradation_min_per_year": 2.0,
+    "degradation_max_per_year": 5.0,
+    "failure_threshold": 30,
+    "failure_chance_below_threshold": 0.3
+  },
+
+  "politics": {
+    "stability_decay_rate": 2.0,
+    "stability_recovery_rate": 5.0,
+    "council_formation_min_pop": 25,
+    "independence_min_year": 20,
+    "independence_min_sentiment": 50
+  },
+
+  "events": {
+    "max_events_per_year": 2,
+    "event_boost_after_years": 5,
+    "event_boost_multiplier": 1.5
+  },
+
+  "victory_conditions": {
+    "survival_years": 100,
+    "self_sufficiency_pop": 100,
+    "independence_available_year": 50
+  },
+
+  "defeat_conditions": {
+    "extinction": 0,
+    "min_stability": 5,
+    "starvation_threshold": 0
+  },
+
+  "ai_personalities": {
+    "pragmatist": {
+      "morale_weight": 1.0,
+      "stability_weight": 2.0,
+      "resource_weight": 1.0,
+      "risk_penalty": 1.5
+    },
+    "visionary": {
+      "morale_weight": 0.5,
+      "stability_weight": 1.0,
+      "resource_weight": 0.5,
+      "risk_penalty": 0.5
+    },
+    "humanist": {
+      "morale_weight": 3.0,
+      "stability_weight": 1.5,
+      "resource_weight": 0.8,
+      "risk_penalty": 1.0
+    },
+    "cautious": {
+      "morale_weight": 1.5,
+      "stability_weight": 4.0,
+      "resource_weight": 1.5,
+      "risk_penalty": 3.0
+    }
+  }
+}

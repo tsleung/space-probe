@@ -4,6 +4,7 @@ const VnpTypes = preload("res://scripts/vnp/vnp_types.gd")
 const ShipScene = preload("res://scenes/vnp/ship.tscn")
 const DeathExplosionFxScene = preload("res://scenes/vnp/death_explosion_fx.tscn")
 const AiController = preload("res://scripts/vnp/vnp_ai_controller.gd")
+const BaseWeapon = preload("res://scripts/vnp/base_weapon.gd")
 
 @onready var store = $VnpStore
 @onready var vnp_ui = $VnpUI
@@ -12,8 +13,8 @@ var screen_size = Vector2.ZERO
 const PLANET_COUNT = 10
 const WORLD_PADDING = 100
 
-# Balance constants
-const ENERGY_REGEN_RATE = 10
+# Balance constants - CRANKED UP FOR DRAMA
+const ENERGY_REGEN_RATE = 30  # 3x faster ship production
 const NEMESIS_ENERGY_MULTIPLIER = 1.5
 const VICTORY_DISPLAY_TIME = 3.0
 
@@ -27,6 +28,8 @@ var ai_controller = null
 # Timers
 var energy_regen_timer: Timer
 var victory_check_timer: Timer
+var planet_income_timer: Timer
+var base_weapon_cooldowns = {}  # team -> time_remaining
 
 # Screen shake
 var shake_intensity: float = 0.0
@@ -63,6 +66,45 @@ func _process(delta):
 			shake_intensity = 0.0
 			camera.offset = Vector2.ZERO
 
+	# Update base weapon cooldowns and auto-fire for AI
+	if not showing_victory:
+		for team in VnpTypes.Team.values():
+			if base_weapon_cooldowns[team] > 0:
+				base_weapon_cooldowns[team] -= delta
+			elif base_weapon_cooldowns[team] <= 0:
+				# AI teams auto-fire when ready
+				if team != VnpTypes.Team.PLAYER or true:  # All teams auto-fire for spectacle
+					_try_fire_base_weapon(team)
+
+		# Update UI with cooldowns
+		vnp_ui.update_cooldowns(base_weapon_cooldowns)
+
+func _try_fire_base_weapon(team: int):
+	var state = store.get_state()
+
+	# Check if there are any enemies to target
+	var has_enemies = false
+	for ship_id in state.ships:
+		if state.ships[ship_id].team != team:
+			has_enemies = true
+			break
+
+	if not has_enemies:
+		return
+
+	# Fire!
+	fire_base_weapon(team)
+	base_weapon_cooldowns[team] = VnpTypes.BASE_WEAPON_COOLDOWN
+
+func fire_base_weapon(team: int):
+	if not base_nodes.has(team):
+		return
+
+	var base_pos = base_nodes[team].position
+	var weapon = BaseWeapon.new()
+	add_child(weapon)
+	weapon.init(store, team, base_pos)
+
 func _setup_camera():
 	camera = Camera2D.new()
 	camera.name = "Camera2D"
@@ -87,6 +129,18 @@ func _setup_timers():
 	victory_check_timer.timeout.connect(_on_victory_check)
 	add_child(victory_check_timer)
 	victory_check_timer.start()
+
+	# Planet income timer
+	planet_income_timer = Timer.new()
+	planet_income_timer.name = "PlanetIncomeTimer"
+	planet_income_timer.wait_time = 2.0
+	planet_income_timer.timeout.connect(_on_planet_income)
+	add_child(planet_income_timer)
+	planet_income_timer.start()
+
+	# Initialize base weapon cooldowns
+	for team in VnpTypes.Team.values():
+		base_weapon_cooldowns[team] = 0.0
 
 func _setup_ai():
 	ai_controller = AiController.new()
@@ -119,14 +173,57 @@ func _on_victory_check():
 		return
 	store.dispatch({"type": "CHECK_VICTORY"})
 
+func _on_planet_income():
+	if showing_victory:
+		return
+	store.dispatch({"type": "PLANET_INCOME"})
+	_check_planet_capture()
+
 func shake_screen(intensity: float):
 	shake_intensity = max(shake_intensity, intensity)
+
+func _check_planet_capture():
+	# Ships near planets capture them for their team
+	var state = store.get_state()
+	for planet_id in state.planets:
+		var planet = state.planets[planet_id]
+		var planet_pos = planet.position
+
+		# Count ships near this planet per team
+		var team_presence = {}
+		for team in VnpTypes.Team.values():
+			team_presence[team] = 0
+
+		for ship_id in state.ships:
+			var ship = state.ships[ship_id]
+			var dist = ship.position.distance_to(planet_pos)
+			if dist < 80:  # Capture radius
+				team_presence[ship.team] += 1
+
+		# Team with most presence captures
+		var best_team = -1
+		var best_count = 0
+		for team in team_presence:
+			if team_presence[team] > best_count:
+				best_count = team_presence[team]
+				best_team = team
+
+		# Must have at least 1 ship to capture
+		if best_count > 0 and planet.get("owner", null) != best_team:
+			store.dispatch({
+				"type": "CAPTURE_PLANET",
+				"planet_id": planet_id,
+				"team": best_team
+			})
 
 func on_state_changed(state):
 	# Handle victory
 	if state.get("game_over", false) and not showing_victory:
 		_handle_victory(state.winner)
 		return
+
+	# Update planet visuals based on ownership
+	_update_planet_visuals(state)
 
 	var current_ship_ids = state.ships.keys()
 	var nodes_to_remove = []
@@ -148,22 +245,65 @@ func on_state_changed(state):
 		if not ship_nodes.has(ship_id):
 			_spawn_ship(ship_id, state.ships[ship_id])
 
+func _update_planet_visuals(state):
+	for planet_id in state.planets:
+		if planet_nodes.has(planet_id):
+			var planet_node = planet_nodes[planet_id]
+			var planet_data = state.planets[planet_id]
+			var owner = planet_data.get("owner", null)
+
+			var polygon = planet_node.get_child(0) as Polygon2D
+			if polygon:
+				if owner != null:
+					# Color by owning team with a pulsing ring
+					polygon.color = VnpTypes.get_team_color(owner)
+					_ensure_capture_ring(planet_node, owner)
+				else:
+					polygon.color = Color.GRAY
+					_remove_capture_ring(planet_node)
+
+func _ensure_capture_ring(planet_node: Node2D, team: int):
+	var ring_name = "CaptureRing"
+	var existing = planet_node.get_node_or_null(ring_name)
+	if existing:
+		existing.default_color = VnpTypes.get_team_color(team)
+		return
+
+	# Create a ring around captured planet
+	var ring = Line2D.new()
+	ring.name = ring_name
+	ring.width = 3.0
+	ring.default_color = VnpTypes.get_team_color(team)
+
+	# Circle points
+	var points = []
+	for i in range(25):
+		var angle = i * (PI * 2 / 24)
+		points.append(Vector2(cos(angle), sin(angle)) * 25)
+	ring.points = PackedVector2Array(points)
+	planet_node.add_child(ring)
+
+func _remove_capture_ring(planet_node: Node2D):
+	var ring = planet_node.get_node_or_null("CaptureRing")
+	if ring:
+		ring.queue_free()
+
 func _spawn_death_explosion(pos: Vector2, size: int, team: int):
 	var explosion = DeathExplosionFxScene.instantiate()
 	add_child(explosion)
 	explosion.global_position = pos
 	explosion.emitting = true
 
-	# Scale explosion and shake based on ship size
+	# Scale explosion and shake based on ship size - DRAMATIC
 	var shake_amounts = {
-		VnpTypes.ShipSize.SMALL: 5.0,
-		VnpTypes.ShipSize.MEDIUM: 12.0,
-		VnpTypes.ShipSize.LARGE: 25.0,
+		VnpTypes.ShipSize.SMALL: 10.0,
+		VnpTypes.ShipSize.MEDIUM: 25.0,
+		VnpTypes.ShipSize.LARGE: 50.0,
 	}
 	var scale_amounts = {
-		VnpTypes.ShipSize.SMALL: 1.0,
-		VnpTypes.ShipSize.MEDIUM: 1.8,
-		VnpTypes.ShipSize.LARGE: 3.0,
+		VnpTypes.ShipSize.SMALL: 2.0,
+		VnpTypes.ShipSize.MEDIUM: 3.5,
+		VnpTypes.ShipSize.LARGE: 6.0,
 	}
 
 	explosion.scale = Vector2.ONE * scale_amounts.get(size, 1.0)
@@ -189,6 +329,10 @@ func _restart_game():
 			ship_nodes[ship_id].queue_free()
 	ship_nodes.clear()
 
+	# Reset base weapon cooldowns
+	for team in VnpTypes.Team.values():
+		base_weapon_cooldowns[team] = 0.0
+
 	# Reset state
 	store.dispatch({"type": "RESET_GAME"})
 
@@ -201,8 +345,60 @@ func _restart_game():
 	vnp_ui.hide_victory()
 
 func _initialize_game_world():
+	_create_starfield()
 	_create_bases()
 	_create_planets()
+
+func _create_starfield():
+	# Background layer of distant stars
+	var starfield = Node2D.new()
+	starfield.name = "Starfield"
+	starfield.z_index = -100
+	add_child(starfield)
+
+	# Create many small stars
+	for i in range(200):
+		var star = Polygon2D.new()
+		var size = randf_range(1.0, 3.0)
+		star.polygon = PackedVector2Array([
+			Vector2(-size, 0), Vector2(0, -size), Vector2(size, 0), Vector2(0, size)
+		])
+		star.color = Color(1, 1, 1, randf_range(0.3, 0.8))
+		star.position = Vector2(randf_range(0, screen_size.x), randf_range(0, screen_size.y))
+		starfield.add_child(star)
+
+	# Create some larger bright stars
+	for i in range(30):
+		var star = Polygon2D.new()
+		var size = randf_range(2.0, 5.0)
+		star.polygon = PackedVector2Array([
+			Vector2(-size, 0), Vector2(0, -size), Vector2(size, 0), Vector2(0, size)
+		])
+		var star_colors = [Color(0.8, 0.9, 1.0), Color(1.0, 0.95, 0.8), Color(1.0, 0.8, 0.7), Color(0.7, 0.8, 1.0)]
+		star.color = star_colors[randi() % star_colors.size()]
+		star.position = Vector2(randf_range(0, screen_size.x), randf_range(0, screen_size.y))
+		starfield.add_child(star)
+
+	# Create nebula clouds (subtle colored regions)
+	for i in range(5):
+		var nebula = Polygon2D.new()
+		var points = []
+		var center = Vector2(randf_range(100, screen_size.x - 100), randf_range(100, screen_size.y - 100))
+		var radius = randf_range(150, 400)
+		for j in range(8):
+			var angle = j * (PI * 2 / 8)
+			var r = radius * randf_range(0.6, 1.4)
+			points.append(center + Vector2(cos(angle), sin(angle)) * r)
+		nebula.polygon = PackedVector2Array(points)
+		var nebula_colors = [
+			Color(0.2, 0.1, 0.4, 0.15),  # Purple
+			Color(0.1, 0.2, 0.4, 0.12),  # Blue
+			Color(0.3, 0.1, 0.2, 0.1),   # Red/pink
+			Color(0.1, 0.3, 0.3, 0.1),   # Teal
+		]
+		nebula.color = nebula_colors[randi() % nebula_colors.size()]
+		nebula.z_index = -99
+		add_child(nebula)
 
 func _create_bases():
 	var player_base_pos = Vector2(WORLD_PADDING, screen_size.y - WORLD_PADDING)

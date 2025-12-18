@@ -83,7 +83,9 @@ func _setup_muzzle_flash():
 	muzzle_flash.polygon = PackedVector2Array([
 		Vector2(0, -4), Vector2(12, 0), Vector2(0, 4)
 	])
-	muzzle_flash.color = Color.YELLOW
+	# Faction-specific muzzle flash color
+	var flash_color = VnpTypes.get_weapon_color(ship_data.team, ship_stats.get("weapon", VnpTypes.WeaponType.GUN))
+	muzzle_flash.color = flash_color.lightened(0.5)  # Brighter flash
 	muzzle_flash.visible = false
 
 	# Position at front of ship
@@ -218,19 +220,39 @@ func _on_fire_rate_timer_timeout():
 
 		match ship_stats.weapon:
 			VnpTypes.WeaponType.LASER:
-				laser_beam.default_color = Color(0.5, 1, 1, 1)  # Bright cyan for glow
+				# LASER: Instant hit with sustained burn effect
+				var laser_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.LASER)
+
+				# Main beam - bright core
+				laser_beam.default_color = laser_color
 				laser_beam.clear_points()
 				laser_beam.add_point(Vector2.ZERO)
 				laser_beam.add_point(to_local(target_data.position))
 
-				var tween = create_tween()
-				tween.tween_property(laser_beam, "width", 0.0, 0.3).from(6.0)
+				# Create glow beam (wider, more transparent) - add to root so it doesn't move with ship
+				var glow_beam = Line2D.new()
+				glow_beam.default_color = Color(laser_color.r, laser_color.g, laser_color.b, 0.4)
+				glow_beam.width = 24.0
+				glow_beam.add_point(global_position)
+				glow_beam.add_point(target_data.position)
+				get_tree().root.add_child(glow_beam)
 
+				# Animate beam fade - use sequential tween with proper cleanup
+				var tween = create_tween()
+				tween.tween_property(laser_beam, "width", 0.0, 0.2).from(14.0)
+
+				var glow_tween = get_tree().create_tween()
+				glow_tween.tween_property(glow_beam, "modulate:a", 0.0, 0.2)
+				glow_tween.tween_callback(func(): glow_beam.queue_free())
+
+				# Burning impact at target
 				var impact = ImpactFxScene.instantiate()
 				get_tree().root.add_child(impact)
 				impact.global_position = target_data.position
+				impact.scale = Vector2(1.5, 1.5)  # Larger burn mark
 				impact.emitting = true
 
+				# Instant damage - lasers are precise
 				store.dispatch({ "type": "DAMAGE_SHIP", "ship_id": target_id, "damage": total_damage })
 
 			VnpTypes.WeaponType.GUN, VnpTypes.WeaponType.MISSILE:

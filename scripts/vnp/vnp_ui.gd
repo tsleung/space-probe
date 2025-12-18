@@ -35,6 +35,27 @@ func _create_ui():
 		status_container.add_child(panel)
 		team_panels[team] = panel
 
+	# Add menu button to the status bar (top right)
+	var menu_button = Button.new()
+	menu_button.name = "MenuButton"
+	menu_button.text = "Menu"
+	menu_button.custom_minimum_size = Vector2(80, 35)
+	menu_button.pressed.connect(_on_menu_button_pressed)
+
+	var button_style = StyleBoxFlat.new()
+	button_style.bg_color = Color(0.3, 0.2, 0.2, 0.9)
+	button_style.border_color = Color(0.8, 0.4, 0.4)
+	button_style.set_border_width_all(2)
+	button_style.set_corner_radius_all(5)
+	button_style.set_content_margin_all(8)
+	menu_button.add_theme_stylebox_override("normal", button_style)
+
+	var hover_style = button_style.duplicate()
+	hover_style.bg_color = Color(0.5, 0.3, 0.3, 0.9)
+	menu_button.add_theme_stylebox_override("hover", hover_style)
+
+	status_container.add_child(menu_button)
+
 	# Victory label (centered, hidden by default)
 	victory_label = Label.new()
 	victory_label.name = "VictoryLabel"
@@ -48,6 +69,7 @@ func _create_ui():
 	victory_label.add_theme_constant_override("shadow_offset_y", 2)
 	victory_label.visible = false
 	add_child(victory_label)
+
 
 func _create_team_panel(team: int) -> PanelContainer:
 	var panel = PanelContainer.new()
@@ -97,7 +119,46 @@ func _create_team_panel(team: int) -> PanelContainer:
 	energy_label.add_theme_font_size_override("font_size", 14)
 	stats.add_child(energy_label)
 
+	# Planets
+	var planets_label = Label.new()
+	planets_label.name = "PlanetsLabel"
+	planets_label.text = "0 🌍"
+	planets_label.add_theme_font_size_override("font_size", 14)
+	stats.add_child(planets_label)
+
+	# Base weapon cooldown indicator
+	var weapon_container = HBoxContainer.new()
+	weapon_container.name = "WeaponContainer"
+	weapon_container.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(weapon_container)
+
+	var weapon_label = Label.new()
+	weapon_label.name = "WeaponLabel"
+	weapon_label.text = _get_base_weapon_name(team)
+	weapon_label.add_theme_font_size_override("font_size", 12)
+	weapon_label.add_theme_color_override("font_color", Color.WHITE.darkened(0.2))
+	weapon_container.add_child(weapon_label)
+
+	var cooldown_bar = ProgressBar.new()
+	cooldown_bar.name = "CooldownBar"
+	cooldown_bar.custom_minimum_size = Vector2(60, 8)
+	cooldown_bar.show_percentage = false
+	cooldown_bar.max_value = VnpTypes.BASE_WEAPON_COOLDOWN
+	cooldown_bar.value = VnpTypes.BASE_WEAPON_COOLDOWN
+	weapon_container.add_child(cooldown_bar)
+
 	return panel
+
+func _get_base_weapon_name(team: int) -> String:
+	var weapon_type = VnpTypes.BASE_WEAPONS.get(team, 0)
+	match weapon_type:
+		VnpTypes.BaseWeapon.ION_CANNON:
+			return "⚡ Ion"
+		VnpTypes.BaseWeapon.MISSILE_BARRAGE:
+			return "🚀 Missiles"
+		VnpTypes.BaseWeapon.SINGULARITY:
+			return "🌀 Singularity"
+	return "Weapon"
 
 func init(vnp_store, bases: Dictionary):
 	self.store = vnp_store
@@ -111,19 +172,38 @@ func init(vnp_store, bases: Dictionary):
 func on_state_changed(state):
 	for team in VnpTypes.Team.values():
 		var ship_count = _count_team_ships(state, team)
+		var planet_count = _count_team_planets(state, team)
 		var energy = state.teams[team].energy
 
 		var panel = team_panels[team]
 		var ships_label = panel.get_node("VBoxContainer/Stats/ShipsLabel")
 		var energy_label = panel.get_node("VBoxContainer/Stats/EnergyLabel")
+		var planets_label = panel.get_node("VBoxContainer/Stats/PlanetsLabel")
 
 		ships_label.text = "%d ships" % ship_count
 		energy_label.text = "%d energy" % energy
+		planets_label.text = "%d 🌍" % planet_count
+
+func update_cooldowns(cooldowns: Dictionary):
+	for team in cooldowns:
+		if team_panels.has(team):
+			var panel = team_panels[team]
+			var cooldown_bar = panel.get_node_or_null("VBoxContainer/WeaponContainer/CooldownBar")
+			if cooldown_bar:
+				# Invert: full bar means ready, empty means cooling down
+				cooldown_bar.value = VnpTypes.BASE_WEAPON_COOLDOWN - cooldowns[team]
 
 func _count_team_ships(state: Dictionary, team: int) -> int:
 	var count = 0
 	for ship_id in state.ships:
 		if state.ships[ship_id].team == team:
+			count += 1
+	return count
+
+func _count_team_planets(state: Dictionary, team: int) -> int:
+	var count = 0
+	for planet_id in state.planets:
+		if state.planets[planet_id].get("owner", null) == team:
 			count += 1
 	return count
 
@@ -143,3 +223,6 @@ func show_victory(winner_name: String):
 
 func hide_victory():
 	victory_label.visible = false
+
+func _on_menu_button_pressed():
+	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")

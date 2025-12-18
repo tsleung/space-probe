@@ -29,6 +29,9 @@ extends Control
 @onready var independence_button: Button = $MainContent/CenterPanel/PopulationPanel/TabContainer/Politics/IndependenceButton
 @onready var projection_label: RichTextLabel = $MainContent/CenterPanel/ProjectionPanel/ProjectionLabel
 
+# Center panel - Colony View
+@onready var colony_view = $MainContent/CenterPanel/ColonyViewPanel/ColonyView
+
 # Right panel - Events & Log
 @onready var event_title: Label = $MainContent/RightPanel/EventPanel/EventTitle
 @onready var event_description: RichTextLabel = $MainContent/RightPanel/EventPanel/EventDescription
@@ -40,6 +43,8 @@ extends Control
 @onready var advance_button: Button = $BottomBar/AdvanceButton
 @onready var advance_5_button: Button = $BottomBar/Advance5Button
 @onready var auto_button: Button = $BottomBar/AutoButton
+@onready var ai_button: Button = $BottomBar/AIButton
+@onready var ai_personality_button: OptionButton = $BottomBar/AIPersonalityButton
 @onready var speed_slider: HSlider = $BottomBar/SpeedSlider
 @onready var speed_label: Label = $BottomBar/SpeedLabel
 @onready var save_button: Button = $BottomBar/SaveButton
@@ -72,68 +77,114 @@ var _selected_building_idx: int = -1
 var _selected_build_type: int = -1
 var _peak_population: int = 0
 
+# AI Spectate mode - enabled by default for watch mode
+var _ai_enabled: bool = true
+var _ai_personality: ColonySimAI.Personality = ColonySimAI.Personality.PRAGMATIST
+var _ai_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 # ============================================================================
 # LIFECYCLE
 # ============================================================================
 
 func _ready():
-	_init_store()
-	_connect_signals()
-	_sync_ui()
-	_init_log()
-
-func _init_store():
-	# Create colony store instance if needed
+	# Create and initialize the colony store
 	_colony_store = ColonySimStore.new()
 	add_child(_colony_store)
+	_colony_store.start_new_colony(12)
 
-	# Start new colony if no existing game
-	if _colony_store.get_year() == 0:
-		_colony_store.start_new_colony(12)
-
-func _connect_signals():
-	# Store signals
+	# Connect store signals
 	_colony_store.state_changed.connect(_on_state_changed)
 	_colony_store.year_advanced.connect(_on_year_advanced)
-	_colony_store.event_triggered.connect(_on_event_triggered)
-	_colony_store.event_resolved.connect(_on_event_resolved)
 	_colony_store.game_ended.connect(_on_game_ended)
 	_colony_store.log_entry_added.connect(_on_log_entry)
 
-	# UI signals
-	advance_button.pressed.connect(_on_advance_year)
-	advance_5_button.pressed.connect(_on_advance_5_years)
-	auto_button.toggled.connect(_on_auto_toggled)
-	speed_slider.value_changed.connect(_on_speed_changed)
-	workers_button.pressed.connect(_on_auto_assign_workers)
-	save_button.pressed.connect(_on_save)
-	menu_button.pressed.connect(_on_menu)
+	# Connect UI button signals (deferred to ensure nodes exist)
+	call_deferred("_connect_ui_signals")
 
-	build_button.pressed.connect(_on_build_pressed)
-	repair_button.pressed.connect(_on_repair_pressed)
-	building_list.item_selected.connect(_on_building_selected)
+	# Give colony view access to store
+	if colony_view:
+		colony_view.set_store(_colony_store)
 
-	election_button.pressed.connect(_on_election)
-	independence_button.pressed.connect(_on_independence_vote)
+	# Enable auto-play immediately
+	_auto_advance = true
+	_ai_enabled = true
+	_auto_advance_speed = 0.5  # 2x speed (0.5 seconds per year)
+
+	# Initial UI sync (deferred)
+	call_deferred("_sync_ui")
+
+func _connect_ui_signals():
+	# UI button signals - use safe connection pattern
+	if advance_button:
+		advance_button.pressed.connect(_on_advance_year)
+	if advance_5_button:
+		advance_5_button.pressed.connect(_on_advance_5_years)
+	if auto_button:
+		auto_button.toggled.connect(_on_auto_toggled)
+	if ai_button:
+		ai_button.toggled.connect(_on_ai_toggled)
+	if ai_personality_button:
+		ai_personality_button.item_selected.connect(_on_ai_personality_changed)
+	if speed_slider:
+		speed_slider.value_changed.connect(_on_speed_changed)
+	if workers_button:
+		workers_button.pressed.connect(_on_auto_assign_workers)
+	if save_button:
+		save_button.pressed.connect(_on_save)
+	if menu_button:
+		menu_button.pressed.connect(_on_menu)
+	if build_button:
+		build_button.pressed.connect(_on_build_pressed)
+	if repair_button:
+		repair_button.pressed.connect(_on_repair_pressed)
+	if building_list:
+		building_list.item_selected.connect(_on_building_selected)
+	if election_button:
+		election_button.pressed.connect(_on_election)
+	if independence_button:
+		independence_button.pressed.connect(_on_independence_vote)
 
 	# Build dialog
-	build_type_list.item_selected.connect(_on_build_type_selected)
-	cancel_build_button.pressed.connect(_on_build_cancel)
-	confirm_build_button.pressed.connect(_on_build_confirm)
-	build_dialog.close_requested.connect(_on_build_cancel)
+	if build_type_list:
+		build_type_list.item_selected.connect(_on_build_type_selected)
+	if cancel_build_button:
+		cancel_build_button.pressed.connect(_on_build_cancel)
+	if confirm_build_button:
+		confirm_build_button.pressed.connect(_on_build_confirm)
+	if build_dialog:
+		build_dialog.close_requested.connect(_on_build_cancel)
 
 	# Game over
-	restart_button.pressed.connect(_on_restart)
-	main_menu_button.pressed.connect(_on_menu)
+	if restart_button:
+		restart_button.pressed.connect(_on_restart)
+	if main_menu_button:
+		main_menu_button.pressed.connect(_on_menu)
 
 func _process(delta: float):
-	if _auto_advance and not _colony_store.is_game_over():
+	# Simple auto-advance loop
+	if _auto_advance and _colony_store and not _colony_store.is_game_over():
 		_auto_advance_timer += delta
 		if _auto_advance_timer >= _auto_advance_speed:
 			_auto_advance_timer = 0.0
-			_on_advance_year()
+
+			# Resolve any events with AI
+			var events = _colony_store.get_active_events()
+			for event in events:
+				var choice = ColonySimAI.choose_event_option(event, _colony_store.get_state(), _ai_personality, randf())
+				_colony_store.resolve_event(event.id, choice)
+
+			# Advance the year
+			_colony_store.advance_year()
+
+			# AI building (30% chance)
+			if randf() < 0.3:
+				var building = ColonySimAI.choose_building(_colony_store.get_state(), _ai_personality, randf())
+				if building >= 0:
+					_colony_store.start_construction(building)
 
 func _init_log():
+	if not colony_log:
+		return
 	colony_log.clear()
 	var log_entries = _colony_store.get_colony_log()
 	var start = maxi(0, log_entries.size() - 30)
@@ -145,33 +196,50 @@ func _init_log():
 # ============================================================================
 
 func _sync_ui():
+	if not _colony_store:
+		return
 	var state = _colony_store.get_state()
+	if state.is_empty():
+		return
+
+	# Get data directly from state
+	var colonists = state.colonists if state.has("colonists") else []
+	var buildings = state.buildings if state.has("buildings") else []
+	var resources = state.resources if state.has("resources") else {}
 
 	# Track peak population
-	_peak_population = maxi(_peak_population, state.colonists.size())
+	_peak_population = maxi(_peak_population, colonists.size())
 
-	# Top bar
-	phase_label.text = "Era: %s" % _colony_store.get_phase_name()
-	year_label.text = "Year: %d" % state.current_year
-	population_label.text = "Pop: %d" % state.colonists.size()
-	stability_label.text = "Stability: %.0f%%" % state.politics.stability
+	# Update colony view with explicit data
+	if colony_view and colony_view.has_method("update_state"):
+		colony_view.update_state(buildings, colonists)
 
-	# Color stability based on value
-	if state.politics.stability < 30:
-		stability_label.modulate = Color.RED
-	elif state.politics.stability < 60:
-		stability_label.modulate = Color.YELLOW
-	else:
-		stability_label.modulate = Color.GREEN
+	# Top bar - with null checks
+	if phase_label:
+		phase_label.text = "Era: %s" % _colony_store.get_phase_name()
+	if year_label:
+		year_label.text = "Year: %d" % state.current_year
+	if population_label:
+		population_label.text = "Pop: %d" % colonists.size()
+	if stability_label:
+		var stability = state.politics.stability if state.has("politics") else 75.0
+		stability_label.text = "Stability: %.0f%%" % stability
+		# Color stability based on value
+		if stability < 30:
+			stability_label.modulate = Color.RED
+		elif stability < 60:
+			stability_label.modulate = Color.YELLOW
+		else:
+			stability_label.modulate = Color.GREEN
 
 	# Resources
-	_update_resources(state.resources)
+	_update_resources(resources)
 
 	# Buildings
-	_update_buildings(state.buildings)
+	_update_buildings(buildings)
 
 	# Population tabs
-	_update_colonists(state.colonists)
+	_update_colonists(colonists)
 	_update_statistics(state)
 	_update_politics(state)
 
@@ -179,19 +247,23 @@ func _sync_ui():
 	_update_projections()
 
 	# Events
-	_update_events(state.active_events)
+	var active_events = state.active_events if state.has("active_events") else []
+	_update_events(active_events)
 
 	# Button states
 	_update_button_states(state)
 
 func _update_resources(resources: Dictionary):
+	if not resource_container:
+		return
 	for child in resource_container.get_children():
 		child.queue_free()
 
-	var resource_order = ["food", "water", "oxygen", "power", "materials", "fuel", "science", "culture"]
+	# Match the actual resource keys from create_resource_stockpile
+	var resource_order = ["food", "water", "oxygen", "fuel", "building_materials", "machine_parts", "medicine"]
 
 	for resource_name in resource_order:
-		if resources.has(resource_name):
+		if resources.has(resource_name) and resources[resource_name] > 0:
 			var amount = resources[resource_name]
 			var hbox = HBoxContainer.new()
 			resource_container.add_child(hbox)
@@ -222,6 +294,8 @@ func _update_resources(resources: Dictionary):
 				bar.modulate = Color.GREEN
 
 func _update_buildings(buildings: Array):
+	if not building_list:
+		return
 	building_list.clear()
 	for building in buildings:
 		var status = ""
@@ -292,6 +366,9 @@ func _get_generation_color(generation: int) -> Color:
 		_: return Color.WHITE
 
 func _update_statistics(state: Dictionary):
+	if not _colony_store or not stats_label:
+		return
+
 	var gen_breakdown = _colony_store.get_generation_breakdown()
 	var faction_breakdown = _colony_store.get_faction_breakdown()
 
@@ -315,10 +392,11 @@ func _update_statistics(state: Dictionary):
 
 	var children = 0
 	var elderly = 0
-	for c in state.colonists:
-		if c.life_stage == ColonySimTypes.LifeStage.CHILD:
+	var colonists = state.get("colonists", [])
+	for c in colonists:
+		if c.get("life_stage", -1) == ColonySimTypes.LifeStage.CHILD:
 			children += 1
-		elif c.life_stage == ColonySimTypes.LifeStage.ELDER:
+		elif c.get("life_stage", -1) == ColonySimTypes.LifeStage.ELDER:
 			elderly += 1
 	text += "  Children: %d\n" % children
 	text += "  Elderly: %d\n" % elderly
@@ -352,24 +430,33 @@ func _update_politics(state: Dictionary):
 	independence_button.visible = state.current_year >= 20 and pol.independence_sentiment >= 50
 
 func _update_projections():
+	if not _colony_store or not projection_label:
+		return
+
 	var projection = _colony_store.project_next_year()
+	if projection.is_empty():
+		return
 
 	var text = "[b]Next Year Forecast[/b]\n\n"
 
 	text += "[u]Net Resources:[/u]\n"
-	for key in projection.net.keys():
-		var net = projection.net[key]
+	var net_resources = projection.get("net", {})
+	for key in net_resources.keys():
+		var net = net_resources[key]
 		var color = "green" if net >= 0 else "red"
 		var sign = "+" if net >= 0 else ""
 		text += "  %s: [color=%s]%s%.0f[/color]\n" % [key.capitalize(), color, sign, net]
 
 	text += "\n[u]Capacity:[/u]\n"
-	var power = projection.power_balance
-	var housing = projection.housing_balance
+	# power_balance and housing_balance are dictionaries with .balance and .available keys
+	var power_dict = projection.get("power_balance", {})
+	var housing_dict = projection.get("housing_balance", {})
+	var power = power_dict.get("balance", 0.0)
+	var housing = housing_dict.get("available", 0)
 	text += "  Power: [color=%s]%s%.0f[/color]\n" % ["green" if power >= 0 else "red", "+" if power >= 0 else "", power]
 	text += "  Housing: [color=%s]%s%d[/color]\n" % ["green" if housing >= 0 else "red", "+" if housing >= 0 else "", housing]
 
-	text += "\n[u]Food Security:[/u] %.1f years" % projection.food_surplus_years
+	text += "\n[u]Food Security:[/u] %.1f years" % projection.get("food_surplus_years", 0.0)
 
 	projection_label.text = text
 
@@ -397,18 +484,25 @@ func _update_events(active_events: Array):
 
 func _update_button_states(state: Dictionary):
 	# Disable controls during events that need resolution
-	var has_active_event = not state.active_events.is_empty()
+	var events = state.get("active_events", [])
+	var has_active_event = events.size() > 0
 
-	advance_button.disabled = has_active_event
-	advance_5_button.disabled = has_active_event
-	auto_button.disabled = has_active_event
+	if advance_button:
+		advance_button.disabled = has_active_event
+	if advance_5_button:
+		advance_5_button.disabled = has_active_event
+	if auto_button:
+		auto_button.disabled = has_active_event
 
-	if has_active_event and _auto_advance:
+	# Don't disable auto-advance in AI mode - AI handles events
+	if has_active_event and _auto_advance and not _ai_enabled:
 		_auto_advance = false
-		auto_button.button_pressed = false
+		if auto_button:
+			auto_button.button_pressed = false
 
 	# Repair button
-	repair_button.disabled = _selected_building_idx < 0
+	if repair_button:
+		repair_button.disabled = _selected_building_idx < 0
 
 # ============================================================================
 # EVENT HANDLERS
@@ -422,7 +516,11 @@ func _on_year_advanced(year: int):
 
 func _on_event_triggered(event: Dictionary):
 	_update_events([event])
-	# Pause auto-advance during events
+	# In AI mode, don't pause - AI will handle it
+	if _ai_enabled:
+		# AI will resolve in next frame
+		return
+	# In manual mode, pause auto-advance during events
 	if _auto_advance:
 		_auto_advance = false
 		auto_button.button_pressed = false
@@ -449,8 +547,10 @@ func _on_log_entry(entry: Dictionary):
 	_add_log_entry(entry)
 
 func _add_log_entry(entry: Dictionary):
+	if not colony_log:
+		return
 	var color = "white"
-	match entry.log_type:
+	match entry.get("log_type", "info"):
 		"crisis": color = "red"
 		"death": color = "orange"
 		"birth": color = "cyan"
@@ -460,7 +560,7 @@ func _add_log_entry(entry: Dictionary):
 		"success": color = "green"
 		"info": color = "gray"
 
-	colony_log.append_text("[color=%s][Year %d] %s[/color]\n" % [color, entry.year, entry.message])
+	colony_log.append_text("[color=%s][Year %d] %s[/color]\n" % [color, entry.get("year", 0), entry.get("message", "")])
 
 func _on_advance_year():
 	if not _colony_store.is_game_over():
@@ -474,6 +574,46 @@ func _on_advance_5_years():
 func _on_auto_toggled(toggled: bool):
 	_auto_advance = toggled
 	_auto_advance_timer = 0.0
+
+func _on_ai_toggled(toggled: bool):
+	set_ai_enabled(toggled)
+	# When AI is enabled, also enable auto-advance for real-time play
+	if toggled and not _auto_advance:
+		_auto_advance = true
+		auto_button.button_pressed = true
+
+	# Log the change
+	if toggled:
+		_add_log_entry({
+			"year": _colony_store.get_year(),
+			"message": "AI Governor resumed control.",
+			"log_type": "political"
+		})
+	else:
+		_add_log_entry({
+			"year": _colony_store.get_year(),
+			"message": "Manual control restored.",
+			"log_type": "political"
+		})
+
+func _on_ai_personality_changed(index: int):
+	var personality = ColonySimAI.Personality.PRAGMATIST
+	match index:
+		0: personality = ColonySimAI.Personality.PRAGMATIST
+		1: personality = ColonySimAI.Personality.VISIONARY
+		2: personality = ColonySimAI.Personality.HUMANIST
+		3: personality = ColonySimAI.Personality.CAUTIOUS
+
+	var old_name = ColonySimAI.get_personality_name(_ai_personality)
+	set_ai_personality(personality)
+	var new_name = ColonySimAI.get_personality_name(personality)
+
+	if old_name != new_name:
+		_add_log_entry({
+			"year": _colony_store.get_year(),
+			"message": "AI Governor changed: %s -> %s" % [old_name, new_name],
+			"log_type": "political"
+		})
 
 func _on_speed_changed(value: float):
 	_auto_advance_speed = 1.0 / value
@@ -573,3 +713,99 @@ func _on_election():
 
 func _on_independence_vote():
 	_colony_store.hold_independence_vote()
+
+# ============================================================================
+# AI SPECTATE MODE
+# ============================================================================
+
+func _ai_resolve_pending_events():
+	"""Have AI automatically resolve any pending events"""
+	var active_events = _colony_store.get_active_events()
+	var state = _colony_store.get_state()
+
+	for event in active_events:
+		var choice_idx = ColonySimAI.choose_event_option(
+			event,
+			state,
+			_ai_personality,
+			_ai_rng.randf()
+		)
+
+		# Log AI decision
+		if choice_idx < event.choices.size():
+			var choice = event.choices[choice_idx]
+			_add_log_entry({
+				"year": _colony_store.get_year(),
+				"message": "AI chose: %s" % choice.text,
+				"log_type": "info"
+			})
+
+		_colony_store.resolve_event(event.id, choice_idx)
+		state = _colony_store.get_state()  # Refresh state
+
+func _ai_maybe_build():
+	"""Have AI potentially construct a building"""
+	var state = _colony_store.get_state()
+
+	# 30% chance to consider building
+	if _ai_rng.randf() > 0.3:
+		return
+
+	var building_type = ColonySimAI.choose_building(
+		state,
+		_ai_personality,
+		_ai_rng.randf()
+	)
+
+	if building_type >= 0:
+		if _colony_store.start_construction(building_type):
+			_add_log_entry({
+				"year": _colony_store.get_year(),
+				"message": "AI built: %s" % ColonySimTypes.get_building_name(building_type),
+				"log_type": "info"
+			})
+
+func set_ai_enabled(enabled: bool):
+	"""Enable or disable AI spectate mode"""
+	_ai_enabled = enabled
+	if enabled:
+		_ai_rng.seed = int(Time.get_unix_time_from_system())
+		_add_log_entry({
+			"year": _colony_store.get_year(),
+			"message": "AI Governor (%s) taking control" % ColonySimAI.get_personality_name(_ai_personality),
+			"log_type": "milestone"
+		})
+
+func set_ai_personality(personality: ColonySimAI.Personality):
+	"""Set the AI personality"""
+	_ai_personality = personality
+	if _ai_enabled:
+		_add_log_entry({
+			"year": _colony_store.get_year(),
+			"message": "AI Governor personality: %s" % ColonySimAI.get_personality_name(_ai_personality),
+			"log_type": "info"
+		})
+
+func is_ai_enabled() -> bool:
+	return _ai_enabled
+
+func get_ai_personality() -> ColonySimAI.Personality:
+	return _ai_personality
+
+func start_spectate_mode(personality: ColonySimAI.Personality = ColonySimAI.Personality.PRAGMATIST):
+	"""Start full spectate mode - AI controls everything, auto-advance enabled"""
+	_ai_personality = personality
+	_ai_enabled = true
+	_auto_advance = true
+	_ai_rng.seed = int(Time.get_unix_time_from_system())
+
+	# Update UI
+	auto_button.button_pressed = true
+
+	_add_log_entry({
+		"year": _colony_store.get_year(),
+		"message": "=== SPECTATE MODE: %s Governor ===" % ColonySimAI.get_personality_name(_ai_personality),
+		"log_type": "milestone"
+	})
+
+	_sync_ui()

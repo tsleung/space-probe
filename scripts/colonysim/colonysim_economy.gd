@@ -9,11 +9,11 @@ class_name ColonySimEconomy
 # CONSTANTS
 # ============================================================================
 
-# Per-colonist consumption per year
-const FOOD_PER_COLONIST = 730.0  # 2kg/day * 365
-const WATER_PER_COLONIST = 180.0  # Net after recycling
-const OXYGEN_PER_COLONIST = 36.5  # Net after recycling
-const POWER_PER_COLONIST = 5.0  # kW average
+# Per-colonist consumption per year (with advanced recycling/efficiency tech)
+const FOOD_PER_COLONIST = 50.0  # Highly efficient future farming
+const WATER_PER_COLONIST = 20.0  # 90% recycling
+const OXYGEN_PER_COLONIST = 5.0  # Closed-loop life support
+const POWER_PER_COLONIST = 2.0  # Efficient systems
 
 # ============================================================================
 # RESOURCE PRODUCTION & CONSUMPTION

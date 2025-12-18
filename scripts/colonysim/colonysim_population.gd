@@ -606,6 +606,18 @@ static func update_morale(colonists: Array, conditions: Dictionary, random_value
 # WORKFORCE
 # ============================================================================
 
+## Get all working-age colonists who can work
+static func get_workforce(colonists: Array) -> Array:
+	var workers: Array = []
+	for colonist in colonists:
+		if not colonist.is_alive:
+			continue
+		if colonist.life_stage != ColonySimTypes.LifeStage.ADULT:
+			continue
+		if colonist.health >= 40:
+			workers.append(colonist)
+	return workers
+
 ## Get counts of available workers by specialty
 static func get_workforce_summary(colonists: Array) -> Dictionary:
 	var summary = {

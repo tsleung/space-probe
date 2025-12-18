@@ -100,14 +100,21 @@ func _setup_battle_system() -> void:
 	# Initialize battle system with named ships
 	_battle_system = FCWBattleSystem.new()
 
-	# Create battle view overlay
+	# Create battle view in bottom-right corner (doesn't block galaxy view)
 	_battle_view = FCWBattleView.new()
 	_battle_view.name = "BattleView"
 	_battle_view.visible = false
-	_battle_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Position in bottom-right corner, 400x280 size
+	_battle_view.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	_battle_view.offset_left = -420
+	_battle_view.offset_top = -300
+	_battle_view.offset_right = -20
+	_battle_view.offset_bottom = -20
+	_battle_view.custom_minimum_size = Vector2(400, 280)
 	add_child(_battle_view)
 	_battle_view.battle_complete.connect(_on_battle_complete)
 	_battle_view.ship_destroyed.connect(_on_ship_destroyed)
+	_battle_view.expand_toggled.connect(_on_battle_view_expand_toggled)
 
 func _start_new_game() -> void:
 	store.start_new_game()
@@ -120,9 +127,7 @@ func _process(delta: float) -> void:
 	if store.is_game_over():
 		return
 
-	# Pause during battle view
-	if _battle_view and _battle_view.is_active():
-		return
+	# Battle view runs in corner - no pause needed
 
 	# Handle attack animation phase
 	if _is_in_attack_phase:
@@ -595,10 +600,35 @@ func _on_auto_play_toggled(pressed: bool) -> void:
 func _on_battle_complete() -> void:
 	# Resume normal game flow after battle view
 	_sync_ui()
+	# Reset to small view when battle ends
+	if _battle_view.is_expanded():
+		_battle_view.set_expanded(false)
+		_set_battle_view_size(false)
 
 func _on_ship_destroyed(ship_name: String) -> void:
 	# Log ship destruction
 	_add_to_event_log("SHIP LOST: %s" % ship_name, true)
+
+func _on_battle_view_expand_toggled(is_expanded: bool) -> void:
+	_set_battle_view_size(is_expanded)
+
+func _set_battle_view_size(expanded: bool) -> void:
+	if expanded:
+		# Expanded view: larger, takes up more of the screen
+		_battle_view.set_anchors_preset(Control.PRESET_CENTER)
+		_battle_view.offset_left = -500
+		_battle_view.offset_top = -350
+		_battle_view.offset_right = 500
+		_battle_view.offset_bottom = 350
+		_battle_view.custom_minimum_size = Vector2(1000, 700)
+	else:
+		# Corner view: small, bottom-right
+		_battle_view.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+		_battle_view.offset_left = -420
+		_battle_view.offset_top = -300
+		_battle_view.offset_right = -20
+		_battle_view.offset_bottom = -20
+		_battle_view.custom_minimum_size = Vector2(400, 280)
 
 func _add_to_event_log(message: String, is_critical: bool) -> void:
 	# Add a custom message to the event log display

@@ -9,9 +9,9 @@ const MIN_SHIP_COST = 50  # Frigate cost
 func get_initial_state():
 	return {
 		"teams": {
-			VnpTypes.Team.PLAYER: {"energy": 500},
-			VnpTypes.Team.ENEMY_1: {"energy": 500},
-			VnpTypes.Team.NEMESIS: {"energy": 1000},
+			VnpTypes.Team.PLAYER: {"energy": 800},
+			VnpTypes.Team.ENEMY_1: {"energy": 800},
+			VnpTypes.Team.NEMESIS: {"energy": 1500},
 		},
 		"ships": {}, # { id: { team, type, position, health, target... } }
 		"planets": {}, # { id: { position, resource_amount, owner } }
@@ -22,7 +22,7 @@ func get_initial_state():
 
 # Reducer function to update state based on actions
 func reduce(state, action):
-	var new_state = state # Start with the current state
+	var new_state = state.duplicate(true)  # Deep copy to detect changes
 
 	match action["type"]:
 		"BUILD_SHIP":
@@ -72,6 +72,26 @@ func reduce(state, action):
 				
 		"INITIALIZE_PLANETS":
 			new_state["planets"] = action["planets"]
+
+		"CAPTURE_PLANET":
+			var planet_id = action["planet_id"]
+			var team = action["team"]
+			if new_state["planets"].has(planet_id):
+				var old_owner = new_state["planets"][planet_id].get("owner", null)
+				new_state["planets"][planet_id]["owner"] = team
+				# Capturing a planet gives bonus energy
+				if old_owner != team:
+					var bonus = 100  # Capture bonus
+					new_state["teams"][team]["energy"] += bonus
+
+		"PLANET_INCOME":
+			# Each owned planet generates passive income
+			for planet_id in new_state["planets"]:
+				var planet = new_state["planets"][planet_id]
+				var owner = planet.get("owner", null)
+				if owner != null and new_state["teams"].has(owner):
+					var income = 5  # Energy per planet per tick
+					new_state["teams"][owner]["energy"] += income
 
 		"CHECK_VICTORY":
 			if not new_state.get("game_over", false):

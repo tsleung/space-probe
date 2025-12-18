@@ -110,12 +110,26 @@ var _nebula_offset: float = 0.0  # Slow drift
 # LIFECYCLE
 # ============================================================================
 
+var _initialized: bool = false
+
 func _ready() -> void:
-	# Initialize herald position
-	_herald_position = _get_zone_pixel_pos(FCWTypes.ZoneId.KUIPER)
-	_herald_target_position = _herald_position
+	# Defer initialization until size is valid
+	pass
+
+func _ensure_initialized() -> void:
+	# Don't initialize until we have a valid size
+	if _initialized or size.x < 10 or size.y < 10:
+		return
+	_initialized = true
+	# Initialize herald at its current target zone
+	_herald_position = _get_zone_pixel_pos(_herald_target_zone)
+	_herald_target_position = _get_zone_pixel_pos(_herald_target_zone)
 
 func _process(delta: float) -> void:
+	_ensure_initialized()
+	if not _initialized:
+		return  # Wait for valid size
+
 	_global_time += delta
 	_nebula_offset += delta * 0.02  # Slow drift
 
@@ -171,6 +185,9 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:
+	if not _initialized:
+		return  # Don't draw until positions are valid
+
 	var rect = get_rect()
 
 	# Apply screen shake offset
@@ -863,7 +880,9 @@ func update_state(state: Dictionary, zone_defenses: Dictionary) -> void:
 		# Herald is moving to a new target
 		_herald_current_zone = _herald_target_zone
 		_herald_target_zone = new_target
-		_herald_target_position = _get_zone_pixel_pos(new_target)
+		# Only update position if we have valid size
+		if _initialized:
+			_herald_target_position = _get_zone_pixel_pos(new_target)
 		_herald_travel_progress = 0.0
 
 	_herald_strength = state.herald_strength

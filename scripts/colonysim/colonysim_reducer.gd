@@ -281,30 +281,66 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 		new_state.colonists.append(founder)
 
 	# Create starting buildings
-	var hab = ColonySimTypes.create_building(ColonySimTypes.BuildingType.HAB_POD)
-	hab.id = "hab_001"
-	hab.is_operational = true
-	hab.construction_progress = 1.0
+	var hab = ColonySimTypes.create_building({
+		"type": ColonySimTypes.BuildingType.HAB_POD,
+		"id": "hab_001",
+		"is_operational": true,
+		"construction_progress": 1.0,
+		"housing_capacity": 16
+	})
 	new_state.buildings.append(hab)
 
-	var farm = ColonySimTypes.create_building(ColonySimTypes.BuildingType.GREENHOUSE)
-	farm.id = "farm_001"
-	farm.is_operational = true
-	farm.construction_progress = 1.0
+	var farm = ColonySimTypes.create_building({
+		"type": ColonySimTypes.BuildingType.GREENHOUSE,
+		"id": "farm_001",
+		"is_operational": true,
+		"construction_progress": 1.0
+	})
 	new_state.buildings.append(farm)
 
-	var power = ColonySimTypes.create_building(ColonySimTypes.BuildingType.SOLAR_ARRAY)
-	power.id = "solar_001"
-	power.is_operational = true
-	power.construction_progress = 1.0
+	var power = ColonySimTypes.create_building({
+		"type": ColonySimTypes.BuildingType.SOLAR_ARRAY,
+		"id": "solar_001",
+		"is_operational": true,
+		"construction_progress": 1.0
+	})
 	new_state.buildings.append(power)
 
-	# Starting resources (tight margins for tension!)
-	new_state.resources.food = 200.0  # ~1 year for small crew
-	new_state.resources.water = 150.0
-	new_state.resources.oxygen = 100.0
-	new_state.resources.fuel = 50.0
-	new_state.resources.building_materials = 100.0
+	var power2 = ColonySimTypes.create_building({
+		"type": ColonySimTypes.BuildingType.SOLAR_ARRAY,
+		"id": "solar_002",
+		"is_operational": true,
+		"construction_progress": 1.0
+	})
+	new_state.buildings.append(power2)
+
+	# Second hab for population growth
+	var hab2 = ColonySimTypes.create_building({
+		"type": ColonySimTypes.BuildingType.HAB_POD,
+		"id": "hab_002",
+		"is_operational": true,
+		"construction_progress": 1.0,
+		"housing_capacity": 16
+	})
+	new_state.buildings.append(hab2)
+
+	# Second greenhouse for food security
+	var farm2 = ColonySimTypes.create_building({
+		"type": ColonySimTypes.BuildingType.GREENHOUSE,
+		"id": "farm_002",
+		"is_operational": true,
+		"construction_progress": 1.0
+	})
+	new_state.buildings.append(farm2)
+
+	# Starting resources (generous for AI spectate mode)
+	new_state.resources.food = 2000.0  # 2-3 years supply
+	new_state.resources.water = 1000.0
+	new_state.resources.oxygen = 500.0
+	new_state.resources.fuel = 200.0
+	new_state.resources.building_materials = 300.0
+	new_state.resources.machine_parts = 100.0
+	new_state.resources.medicine = 50.0
 
 	# Initialize log
 	new_state.mission_log = [{
