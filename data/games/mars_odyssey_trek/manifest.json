@@ -1,0 +1,33 @@
+{
+  "id": "mot",
+  "name": "Mars Odyssey Trek",
+  "description": "Oregon Trail in space. Build a ship, travel to Mars, survive, and return home.",
+  "version": "1.0.0",
+
+  "phases": [
+    "ship_building",
+    "travel_to_mars",
+    "mars_arrival",
+    "mars_base",
+    "mars_departure",
+    "travel_to_earth",
+    "earth_arrival",
+    "game_over"
+  ],
+  "initial_phase": "ship_building",
+
+  "systems": {
+    "hex_grid": true,
+    "crew": true,
+    "resources": true,
+    "events": true,
+    "components": true
+  },
+
+  "settings": {
+    "max_crew": 4,
+    "min_crew": 1,
+    "base_travel_days": 180,
+    "classroom_mode": true
+  }
+}

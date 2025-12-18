@@ -172,7 +172,7 @@ Systems are:
 JSON files defining game content:
 
 ```
-data/games/mars_mission/
+data/games/mars_odyssey_trek/   # MOT
 ├── manifest.json      # Game metadata
 ├── phases.json        # Phase definitions
 ├── components.json    # Ship components
@@ -207,7 +207,7 @@ Two validators ensure correctness:
 ```gdscript
 {
     # Meta
-    "game_id": "mars_mission",
+    "game_id": "mot",
     "current_phase": "travel_to_mars",
     "difficulty": "normal",
 
@@ -345,10 +345,10 @@ space-probe/
 │   │   └── utils/         # Utilities
 │   │
 │   ├── games/              # Game-specific code
-│   │   ├── mars_mission/  # Mars game
-│   │   ├── fcw/           # First Contact War
-│   │   ├── vnp/           # Von Neumann Probe
-│   │   └── colony_sim/    # Colony Simulation
+│   │   ├── mot/           # MOT (Mars Odyssey Trek)
+│   │   ├── fcw/           # FCW (First Contact War)
+│   │   ├── vnp/           # VNP (Von Neumann Probe)
+│   │   └── mcs/           # MCS (Mars Colony Sim)
 │   │
 │   ├── ui/                 # UI layer
 │   │   ├── shared/        # Shared components

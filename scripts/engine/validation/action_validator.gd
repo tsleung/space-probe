@@ -47,7 +47,7 @@ func validate(action: Dictionary, state: Dictionary) -> Result:
 		return business
 
 	# 5. Game-specific validation
-	var game_id = state.get("game_id", "mars_mission")
+	var game_id = state.get("game_id", "mot")
 	if _game_validators.has(game_id):
 		var game_result = _game_validators[game_id].validate(action, state, _game_data)
 		if not game_result.is_ok():
@@ -348,7 +348,7 @@ func _validate_can_hire_crew(action: Dictionary, state: Dictionary) -> Result:
 				{"crew_id": crew_id}
 			)
 
-	# Check crew limit (4 for mars_mission)
+	# Check crew limit (4 for MOT)
 	var max_crew = _game_data.get("balance", {}).get("max_crew", 4)
 	if crew.size() >= max_crew:
 		return Result.error(

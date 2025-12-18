@@ -91,7 +91,7 @@ static func _reduce_new_game(
 	balance: Dictionary,
 	_rng  # RandomNumberGenerator
 ) -> Dictionary:
-	var game_id = action.get("game_id", "mars_mission")
+	var game_id = action.get("game_id", "mot")
 	var difficulty = action.get("difficulty", "normal")
 
 	# Create initial state inline (no external dependencies)

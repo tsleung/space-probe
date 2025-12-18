@@ -1,0 +1,23 @@
+{
+  "id": "mcs",
+  "name": "Mars Colony Sim",
+  "description": "Watch generations of colonists build a civilization on Mars. AI spectate mode lets you sit back and watch history unfold.",
+  "version": "1.0.0",
+  "author": "SpaceProbe Team",
+  "main_scene": "res://scenes/mars_colony_sim/mcs.tscn",
+  "icon": "res://assets/icons/mars_colony_sim.png",
+  "category": "simulation",
+  "tags": ["idle", "simulation", "spectate", "generational"],
+  "features": {
+    "ai_spectate": true,
+    "real_time": true,
+    "turn_based": true,
+    "save_load": true
+  },
+  "requirements": {
+    "min_godot_version": "4.5"
+  },
+  "data_files": {
+    "balance": "balance.json"
+  }
+}

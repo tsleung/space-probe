@@ -36,7 +36,7 @@ func dispatch(action: Dictionary, state: Dictionary, rng: RNGManager) -> Result:
 	var action_type = action.get("type", "")
 
 	# Get game-specific reducer
-	var game_id = state.get("game_id", "mars_mission")
+	var game_id = state.get("game_id", "mot")
 	var current_phase = state.get("current_phase", "ship_building")
 
 	# Try phase-specific reducer first
@@ -116,7 +116,7 @@ func _handle_core_action(action: Dictionary, state: Dictionary, _rng: RNGManager
 static func _reduce_initialize_game(state: Dictionary, action: Dictionary) -> Result:
 	var new_state = state.duplicate(true)
 	new_state["initialized"] = true
-	new_state["game_id"] = action.get("game_id", new_state.get("game_id", "mars_mission"))
+	new_state["game_id"] = action.get("game_id", new_state.get("game_id", "mot"))
 	new_state["difficulty"] = action.get("difficulty", new_state.get("difficulty", "normal"))
 	return Result.ok(new_state)
 

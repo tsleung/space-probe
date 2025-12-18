@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-SpaceProbe is a collection of space simulation games built in Godot 4.5 (GDScript). The core game is a Mars mission simulator inspired by Oregon Trail. Additional expansion games include First Contact War (strategy) and Von Neumann Probe (real-time idle).
+SpaceProbe is a collection of space simulation games built in Godot 4.5 (GDScript). The games include:
+
+- **MOT (Mars Odyssey Trek)** - The core game, a Mars mission simulator inspired by Oregon Trail
+- **FCW (First Contact War)** - Strategy expansion
+- **VNP (Von Neumann Probe)** - Real-time idle expansion
+- **MCS (Mars Colony Sim)** - Colony building expansion
 
 ## Design Documentation
 
@@ -16,6 +21,28 @@ See `docs/` for detailed specs:
 - `docs/principles/engineering-principles.md` - Coding principles
 - `docs/principles/llm-development.md` - LLM collaboration guidelines
 - `docs/projects/` - Phase completion documentation
+- `docs/projects/vnp-game-design.md` - VNP game mechanics and design
+
+## Documentation Practices
+
+**Keep docs updated as mechanics evolve.** When making changes:
+
+1. **If mechanics are settled**: Update the relevant game design doc with the new mechanics
+2. **If mechanics are in flux**: Add a note in the doc marking the area as "under active development" with discussion/direction notes
+3. **Design discussions**: Document the reasoning and tradeoffs being considered, even if the final decision hasn't been made
+
+Example note for evolving mechanics:
+```markdown
+## Base Weapon System (Under Development)
+
+**Current Direction**: Charge-based system where accumulated charges affect both power and range.
+- x1 charge = close range, desperation fire
+- x5 charges = long range, can clear center of map
+
+**Open Questions**: Charge accumulation rate, visual spectacle scaling
+```
+
+This ensures context is preserved across sessions and collaborators can understand the design intent.
 
 ## Running the Project
 
@@ -74,19 +101,22 @@ All game content is data-driven:
 ```
 data/
 ├── games/
-│   ├── mars_mission/     # Core game
+│   ├── mars_odyssey_trek/    # MOT - Core game
 │   │   ├── manifest.json
 │   │   ├── balance.json
 │   │   ├── engines.json
 │   │   ├── components.json
 │   │   ├── crew_roster.json
 │   │   └── events/
-│   ├── first_contact_war/  # FCW expansion
+│   ├── first_contact_war/    # FCW expansion
 │   │   ├── manifest.json
 │   │   ├── balance.json
 │   │   ├── ships.json
 │   │   └── zones.json
-│   └── von_neumann_probe/  # VNP expansion
+│   ├── von_neumann_probe/    # VNP expansion
+│   │   ├── manifest.json
+│   │   └── balance.json
+│   └── mars_colony_sim/      # MCS expansion
 │       ├── manifest.json
 │       └── balance.json
 ├── shared/
@@ -145,11 +175,12 @@ static func apply_daily_update(state, balance, rng: RNGManager) -> Dictionary:
 
 ### Game-Specific Code
 
-Each expansion has its own Store/Reducer:
+Each game has its own Store/Reducer in a dedicated directory:
 
-- **Mars Mission**: Uses shared engine systems
-- **First Contact War**: `scripts/fcw/fcw_store.gd`, `fcw_reducer.gd`
-- **Von Neumann Probe**: `scripts/vnp/vnp_store.gd`, `vnp_reducer.gd`
+- **MOT (Mars Odyssey Trek)**: `scripts/mars_odyssey_trek/` - Uses shared engine systems
+- **FCW (First Contact War)**: `scripts/first_contact_war/fcw_store.gd`, `fcw_reducer.gd`
+- **VNP (Von Neumann Probe)**: `scripts/von_neumann_probe/vnp_store.gd`, `vnp_reducer.gd`
+- **MCS (Mars Colony Sim)**: `scripts/mars_colony_sim/mcs_store.gd`, `mcs_reducer.gd`
 
 ### UI Binding
 
@@ -176,10 +207,10 @@ func _ready():
 Edit JSON files directly:
 ```bash
 # Adjust resource consumption
-vim data/games/mars_mission/balance.json
+vim data/games/mars_odyssey_trek/balance.json
 
 # Add new event
-vim data/games/mars_mission/events/phase2.json
+vim data/games/mars_odyssey_trek/events/phase2.json
 ```
 
 ### Testing
@@ -206,7 +237,7 @@ func test_resource_consumption():
 
 ## Quick Reference
 
-### Game Phases (Mars Mission)
+### Game Phases (MOT - Mars Odyssey Trek)
 1. `ship_building` - Construct ship, hire crew
 2. `travel_to_mars` - 180+ day journey
 3. `mars_arrival` - Landing sequence

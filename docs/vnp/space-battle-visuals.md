@@ -137,58 +137,66 @@ Each weapon type has distinct behavior, visuals, and tactical role:
 - **Trail**: Thin 4px gradient trail with faction color
 - **Impact**: Small spark burst on each pierce, projectile continues
 - **Tactical**: Glass cannon, 200 range, rapid fire (4/sec), must close distance
+- **Launch Effect - Power Surge**:
+  - 25-particle muzzle blast (white -> faction color -> fade)
+  - Expanding ring flash at muzzle (scales 3.5x over 0.15s)
+  - Team-colored particles for faction identity
 
 #### Laser (Destroyers) - "Instant Precision"
 - **Behavior**: Instant hit, no travel time, guaranteed damage
 - **Visual**: Dual-layer beam effect
   - Core beam: 14px width, bright faction color
   - Glow beam: 24px width, 40% opacity outer glow
-- **Animation**: Both beams fade over 0.25 seconds
+- **Animation**: Both beams fade over 0.2 seconds
 - **Impact**: 1.5x scaled burn mark at target location
 - **Tactical**: Sniper role, 400 range, slower fire (1.5/sec)
 
-#### Missile (Cruisers) - "Arc and Explode"
-- **Behavior**: Arcing bezier trajectory with homing, massive AOE
-- **Arc System**: Quadratic bezier curve
-  - Rises to 35% of distance at arc peak
-  - Randomly arcs left or right for visual variety
-  - Smoothly tracks moving targets throughout flight
-- **Speed**: 300 (slow but inevitable)
-- **Visual**: Chunky rocket shape with fins
-- **Smoke Trail**: 40-particle GPUParticles2D
-  - Bright orange exhaust -> gray smoke gradient
-  - Particles rise slightly (gravity: -20)
-  - 0.8 second lifetime, lingers behind missile path
+#### Missile (Cruisers) - "Shower Salvo"
+- **Behavior**: Fires 3-missile salvo with staggered launch
+  - Each missile arcs on independent bezier curve
+  - Varied arc heights (40-75% of distance)
+  - Slight angular spread for shower pattern
+  - Each tracks target independently
+- **Speed**: 500 (fast, aggressive)
+- **Visual**: Sleek thin rocket shape
+- **Smoke Trail**: 20-particle GPUParticles2D per missile
+  - Team-colored exhaust -> gray smoke gradient
+  - Particles rise slightly (gravity: -10)
+  - 0.4 second lifetime, tight trail
+- **Damage**: Split across 3 missiles, each with 80-unit AOE
 - **Tactical**: Bombardment, 500 range, slow reload (0.8/sec)
 
-### Missile Explosions - 5 Layers!
+### Missile Explosions - Faction-Distinctive Colors
 
-Missiles create spectacular multi-layered explosions:
+Each faction has a unique explosion palette for instant recognition:
 
-1. **White Flash** (instant)
-   - 30 particles, 0.15s lifetime
-   - White-hot center burst, velocity 200-400
+**Player (Blue Fleet) - Plasma Explosions**
+- Flash: Ice white (0.8, 0.9, 1.0)
+- Fire: Bright cyan -> deep blue fade
+- Sparks: Electric blue
+- Ring: Cool blue shockwave
 
-2. **Fire Burst** (expanding)
-   - 60 particles, 0.4s lifetime
-   - Orange core -> red edges, velocity 150-350, scale 3-6x
+**Enemy (Orange Fleet) - Fire Explosions**
+- Flash: Hot white (1.0, 0.95, 0.8)
+- Fire: Bright orange -> deep red fade
+- Sparks: Yellow-gold
+- Ring: Orange shockwave
 
-3. **Smoke Cloud** (lingering)
-   - 40 particles, 1.2s lifetime
-   - Brown -> gray, rises upward (gravity -30)
-   - Velocity 50-120, scale 4-10x
+**Nemesis (Purple Fleet) - Void Explosions**
+- Flash: Pink-white (1.0, 0.7, 1.0)
+- Fire: Hot magenta -> deep purple fade
+- Sparks: Pink-magenta
+- Ring: Purple shockwave
 
-4. **Debris/Sparks** (fast outward)
-   - 25 particles, 0.6s lifetime
-   - Yellow sparks, velocity 300-500
+**Per-Missile Particle Counts:**
+1. Flash: 15 particles, 0.1s
+2. Fire: 35 particles, 0.35s
+3. Smoke: 20 particles, 0.8s (neutral gray)
+4. Sparks: 15 particles, 0.45s
+5. Shockwave: 65% scale ring
 
-5. **Shockwave Ring** (expanding circle)
-   - Line2D circle, 8px width
-   - Scales from 1x to 15x over 0.4s
-   - Fades out while thinning
-
-- **Screen Shake**: 35 intensity
-- **Area Damage**: 120 radius with distance falloff
+- **Screen Shake**: 12 per missile (cumulative 36 for full salvo)
+- **Area Damage**: 80 radius per missile with distance falloff
 
 ### Ship Death Explosions
 
@@ -197,23 +205,296 @@ Scaled by ship size using GPUParticles2D (80 particles):
 | Size | Ships | Shake | Scale |
 |------|-------|-------|-------|
 | Small | Frigate, Harvester | 10 | 2x |
-| Medium | Destroyer | 25 | 3.5x |
-| Large | Cruiser | 50 | 6x |
+| Medium | Destroyer, Defender, Shielder | 25 | 3.5x |
+| Large | Cruiser, Graviton | 50 | 6x |
 
-### Engine Trails
+### Defensive Ships (Dec 2024)
 
-- 20 particles per ship via GPUParticles2D
-- Team-colored with 30% lightening
-- Emits backward from ship rear
-- 0.4 second lifetime
-- Position offset based on ship size class
+Three support ship types that counter enemy weapons:
 
-### Muzzle Flash
+#### Defender (PDC) - "Missile Swatter"
+- **Role**: Point Defense Cannon intercepts enemy missiles
+- **Weapon**: PDC (WeaponType.PDC)
+- **Cost**: 80 energy
+- **Stats**: 100 health, 160 speed, 250 range
+- **Behavior**:
+  - Follows nearest ally (support role)
+  - Scans for enemy missiles within range
+  - Fires 3-5 tracer lines at missiles (8x/sec)
+  - 40% intercept chance per burst
+  - Intercepted missiles explode harmlessly mid-flight
+- **Visual**:
+  - Bristling hull shape with turret bumps
+  - White-blue tracers (faction-colored)
+  - Small interception explosion when missile destroyed
 
-- Triangle polygon at ship front
-- Faction-specific weapon color (50% lightened)
+#### Shielder - "Bubble Guardian"
+- **Role**: Creates shield bubble that protects allies from lasers
+- **Weapon**: Shield (WeaponType.SHIELD)
+- **Cost**: 90 energy
+- **Stats**: 80 health, 140 speed, 120 shield radius
+- **Behavior**:
+  - Follows nearest ally (support role)
+  - Creates visible shield bubble around itself
+  - Allies within radius get laser damage reduction
+- **Visual**:
+  - Rounded dome-like hull shape
+  - Pulsing shield bubble (Line2D circle)
+  - Shield brightens when protecting allies
+  - Team-colored shield (blue/orange/purple with 40% alpha)
+
+#### Graviton - "Void Manipulator" ⭐ NEW
+- **Role**: Creates gravity well that deflects railgun projectiles around allies
+- **Weapon**: Gravity (WeaponType.GRAVITY)
+- **Cost**: 150 energy (expensive support)
+- **Stats**: 180 health, 80 speed, 140 gravity radius (scaled down from 200)
+- **Behavior**:
+  - Slow, hulking mass manipulator
+  - Creates massive gravity well around itself
+  - Railgun projectiles entering the field have 85% deflection chance (balanced from 90%)
+  - Deflected projectiles curve around and deal 30% reduced damage
+- **Visual - Swirling Vortex Effect** (scaled down for balance):
+  - **Dark void center**: Black polygon (22px radius, 60% opacity) - ominous core
+  - **Outer ring**: Slowly rotating, 3px wide, dimmed faction color
+  - **Inner ring**: Counter-rotating faster, 2.5px wide, bright faction color
+  - **Vortex particles**: 30 particles spiraling inward (reduced from 60)
+    - Spawn at edge (140px radius)
+    - Radial acceleration: -120 to -160 (pulled inward)
+    - Tangential acceleration: 60-100 (spiral motion)
+    - Bright at edge -> fade to black at center
+  - **Pulsing intensity**: Modulate alpha 0.6-1.0 over 3 seconds
+  - **Protection glow**: Rings thicken when allies within radius
+
+  *Design note: Original effect was "absolutely terrifying" (user quote) - scaled down 30% so it doesn't visually dominate the battlefield. Still imposing but not raid-boss level.*
+- **Deflection Visual**:
+  - Ripple wave expands from deflection point (6x scale over 0.3s)
+  - Curved trail showing projectile bend (old direction -> new)
+  - Purple-tinted sparks at deflection point (12 particles)
+  - Brief flash on gravity well (1.5x brightness pulse)
+- **Tactical Design**:
+  - The only counter to railgun (frigate) spam
+  - Expensive to prevent overuse
+  - Slow movement means positioning matters
+  - Doesn't block missiles or lasers - specialized role
+  - Creates dramatic "shots bending around" moments
+
+### Engine Trails - Ship-Type Specific (Dec 2024)
+
+Design note: *"Each ship should have an element of scary or not, but we should be mindful what we want the emotional journey to be when we see ships! Like rock paper scissors gets epic on its own."*
+
+| Ship Type | Particles | Lifetime | Velocity | Feel |
+|-----------|-----------|----------|----------|------|
+| Frigate | 25 | 0.35s | 80-120 | Fast, aggressive |
+| Destroyer | 30 | 0.5s | 60-90 | Steady, precise |
+| Cruiser | 45 | 0.7s | 40-70 | Heavy, powerful |
+| Defender | 28 | 0.45s | 55-85 | Alert, ready |
+| Shielder | 22 | 0.5s | 45-75 | Protective |
+| Graviton | 35 | 0.6s | 30-50 | Slow, ominous |
+| Harvester | 18 | 0.4s | 50-70 | Utilitarian |
+
+**Emotional Journey Per Ship:**
+- **Frigates**: *"The swarm approaches"* - fast trails, darting motion
+- **Destroyers**: *"Locked on"* - steady trails, precise positioning
+- **Cruisers**: *"Here comes the bombardment"* - heavy trails, imposing presence
+- **Defenders**: *"Wall of lead"* - alert stance, rapid PDC tracers
+- **Shielders**: *"Safe zone"* - protective bubble, pulsing glow
+- **Graviton**: *"Reality bending"* - swirling vortex, dark presence
+
+### Muzzle Flash - Weapon-Specific Shapes
+
+| Weapon | Shape | Feel |
+|--------|-------|------|
+| Railgun | Sharp triangle (18px) | Punchy burst |
+| Laser | Wide hexagon glow | Charging beam |
+| Missile | Fiery bloom | Launch flare |
+| PDC | Small triangle (8px) | Rapid flash |
+
+- Faction-specific weapon color (60% lightened)
 - Fades to 0 alpha over 0.1 seconds
-- Offset from ship bow based on size
+- Offset from ship bow based on ship type
+
+### Ship Movement & Tactical AI (Dec 2024)
+
+Design philosophy from user: *"I would love for the smaller faster ships to never stop moving, it seems odd that they'd stop and get shot when they can be doing hit and run, strafing runs. The large ships aren't fast enough to be able to do the same, it feels like a good advantage of being small and fast."*
+
+#### Size-Based Combat Movement
+
+| Size | Ships | Combat Behavior | Speed |
+|------|-------|-----------------|-------|
+| SMALL | Frigate, Harvester | Constant strafing, never stops | 200-280 |
+| MEDIUM | Destroyer, Defender, Shielder | Slow orbit at 40% speed | 140-180 |
+| LARGE | Cruiser, Graviton | Stop and fire | 80-100 |
+
+**Small Ships - Strafing Runs**
+- Circle target at 80% of weapon range
+- Full speed movement at all times
+- Random direction reversals for unpredictability
+- Subtle weaving motion for evasive feel
+- Nose always pointed at target while moving
+- *"Hit and run - can't catch me!"*
+
+**Medium Ships - Controlled Orbit**
+- Slow orbit at 85% of weapon range
+- 40% movement speed while firing
+- More deliberate, tactical feel
+- *"Mobile but methodical"*
+
+**Large Ships - Stationary Fire**
+- Stop completely to fire
+- Park and unleash bombardment
+- *"Too heavy to dance - but you won't survive my salvo"*
+
+#### Side Thrusters Visual Feedback
+
+Maneuvering thrusters fire when ships strafe laterally:
+- Left thruster fires when moving right (points down)
+- Right thruster fires when moving left (points up)
+- Intensity scales with lateral movement speed
+- Size-appropriate particle counts (8/12/15 for S/M/L)
+- Team-colored exhaust
+
+#### Adaptive Tactical AI
+
+User quote: *"If they know they're attacking a ship that's slow and single fire capability, close distance quickly and kill while evading the attack or swarm it if its worth the kill. If it has short range AOE spray, scatter and stay back, or try to flank around."*
+
+**Threat Assessment System**
+
+Ships analyze nearby enemies every 0.5s and categorize threats:
+
+| Threat Type | Trigger | Tactical Response |
+|-------------|---------|-------------------|
+| SLOW_HEAVY | vs Cruiser | Rush in, get close (60% range), fast evasive orbit |
+| FAST_SWARM | 3+ Frigates nearby | Tight formation, focused fire |
+| SNIPER | vs Destroyer | Small ships rush; large ships trade at range |
+| AOE_SPRAY | vs Defender or 2+ Cruisers | Scatter! Stay at max range, flank around |
+| SUPPORT | vs Shielder/Graviton | Priority kill, aggressive rush |
+
+**Tactical Behaviors**
+
+1. **Rush** - Close distance aggressively at 110% speed with slight weaving
+2. **Scatter** - Push away from allies to avoid AOE clustering
+3. **Flank** - Position on opposite side of target from allies
+4. **Keep Distance** - Maintain maximum weapon range
+
+**Scatter Force Calculation**
+- Ships within 100 units of allies push apart
+- Force scales inversely with distance
+- Prevents clustering against AOE threats
+
+**Flank Position Calculation**
+- Find center of allied ships
+- Position on opposite side of target
+- Creates pincer movements naturally
+
+### Star Bases - Capital Structures (Dec 2024)
+
+User design philosophy: *"I think we should also be introducing point defense, or star bases which are extremely risky to attack - this makes the strafing runs and speed make more sense. It's like a huge stationary ship - I'm imagining X-Wings attacking a Star Destroyer, another similar capital ship would get wrecked but the fighters can dodge the turbolasers and get close."*
+
+#### Star Base
+- **Role**: Massive stationary defensive structure - "Star Destroyer" feel
+- **Type**: MASSIVE size class (new)
+- **Cost**: 500 energy (spawned free at game start per team)
+- **Stats**: 800 health, 0 speed (stationary), 600 range
+- **Weapon**: Turbolaser (new weapon type)
+
+**Turbolaser Mechanics**
+- **Speed**: 180 (slow projectile - easy to dodge for fast ships)
+- **Damage**: 120 (devastating when it hits)
+- **Fire Rate**: 0.5/sec (2 second reload)
+- **Key Design**: Small fast ships can strafe and dodge; capital ships get wrecked
+
+**Star Base Visuals**
+- Massive angular hull (60px length, no scaling)
+- 4 turret indicators around structure
+- Hexagonal inner ring (80px radius, tech feel)
+- Pulsing danger zone ring (600px radius)
+- Rotating sensor sweep line
+- Slow rotation to track targets
+
+**Turbolaser Visual**
+- Big elongated bolt (12px size)
+- Bright overbright modulation (1.5x)
+- Thick 10px trail
+- 30-particle trailing glow (faction-colored)
+- Dramatic charging effect on fire:
+  - Circular charge glow (20px -> 40px)
+  - Expanding ring flash (30px -> 90px)
+
+**Turbolaser Impact**
+- 20-particle bright flash
+- 40-particle main explosion
+- 25-particle sparks
+- 1.2x scale shockwave
+- 30 intensity screen shake
+
+**Star Base Death - Massive Destruction**
+- 100 intensity screen shake
+- 12x scale explosion
+- 5 secondary explosions in sequence (0.15s apart)
+- Massive shockwave ring (20x scale over 1s)
+- *"The Death Star explodes"* moment
+
+**Tactical Implications**
+- Small ships (Frigates) can strafe and dodge turbolasers
+- Medium ships (Destroyers) take significant risk
+- Large ships (Cruisers) nearly guaranteed to be hit
+- Justifies all the strafing run mechanics we built
+- Creates X-Wing vs Star Destroyer gameplay
+
+### Asteroids-Style Momentum Physics (Dec 2024)
+
+User quote: *"The movement should be more like Asteroids, where the ships carry momentum and use thrust to modify it. We can make the field bigger as we're introducing more maneuver."*
+
+#### Physics System
+- Ships have persistent velocity (momentum)
+- Thrust applies acceleration, not instant velocity
+- Space drag (0.3) prevents infinite drift
+- Maximum speed clamped at 1.2x base speed (momentum overspeed)
+
+**Movement Feel by Size**
+
+| Size | Thrust Mult | Max Speed | Drag | Feel |
+|------|-------------|-----------|------|------|
+| SMALL | 2.5x | 1.4x (rush) | 0.5x | Zippy, drifty |
+| MEDIUM | 2.5x | 1.2x | 1.0x | Weighty but mobile |
+| LARGE | 2.5x | 1.2x | 1.0x | Gradual brake |
+| MASSIVE | - | 0 | - | Stationary |
+
+**Strafing with Momentum**
+- Thrust towards desired orbit position
+- Velocity builds over time
+- Ships drift through turns
+- Creates "slide" feel at high speed
+- Side thrusters fire based on lateral velocity component
+
+**Rush Maneuver (Enhanced)**
+- 1.3x thrust multiplier for aggressive close
+- 50% drag reduction (full burn feel)
+- Slight weaving added to thrust direction
+- Up to 1.4x base speed achievable
+
+**Large Ship Braking**
+- Gradual velocity reduction (2.0 lerp per second)
+- Stops at < 5 velocity magnitude
+- Heavy, momentum-preserving feel
+
+### Expanded Battlefield (Dec 2024)
+
+World size increased to support momentum-based combat:
+
+| Parameter | Value |
+|-----------|-------|
+| World Scale | 1.5x viewport |
+| World Padding | 150 units |
+| Planet Count | 12 |
+| Star Count | 450 (scaled) |
+| Bright Stars | 67 (scaled) |
+| Nebula Count | 10 (scaled) |
+
+- Camera zoomed out to 0.67x to show full arena
+- Bases positioned at corners of larger world
+- Ships push towards world center (1.5x viewport center)
+- More maneuvering room for momentum physics
 
 ### Faction Color Palettes
 
@@ -223,6 +504,9 @@ Scaled by ship size using GPUParticles2D (80 particles):
 | Railgun | `(0.7, 0.85, 1.0)` | Ice blue |
 | Laser | `(0.2, 0.9, 1.0)` | Cyan beam |
 | Missile | `(0.4, 0.7, 1.0)` | Blue trail |
+| PDC | `(0.9, 0.95, 1.0)` | White-blue tracers |
+| Shield | `(0.3, 0.6, 1.0, 0.4)` | Blue bubble |
+| Gravity | `(0.2, 0.1, 0.4, 0.6)` | Dark blue void |
 
 **Enemy (Orange Fleet)**
 | Weapon | Color | Description |
@@ -230,6 +514,9 @@ Scaled by ship size using GPUParticles2D (80 particles):
 | Railgun | `(1.0, 0.9, 0.3)` | Yellow autocannon |
 | Laser | `(0.5, 1.0, 0.3)` | Green plasma |
 | Missile | `(1.0, 0.5, 0.2)` | Orange torpedo |
+| PDC | `(1.0, 1.0, 0.7)` | Yellow-white tracers |
+| Shield | `(1.0, 0.6, 0.2, 0.4)` | Orange bubble |
+| Gravity | `(0.3, 0.15, 0.1, 0.6)` | Dark orange void |
 
 **Nemesis (Purple Fleet)**
 | Weapon | Color | Description |
@@ -237,6 +524,9 @@ Scaled by ship size using GPUParticles2D (80 particles):
 | Railgun | `(0.8, 0.3, 1.0)` | Purple pulse |
 | Laser | `(0.6, 0.2, 0.9)` | Purple disruptor |
 | Missile | `(0.9, 0.2, 0.8)` | Magenta antimatter |
+| PDC | `(0.9, 0.7, 1.0)` | Light purple tracers |
+| Shield | `(0.7, 0.2, 0.9, 0.4)` | Purple bubble |
+| Gravity | `(0.15, 0.0, 0.2, 0.6)` | Deep purple void |
 
 ### Base Weapons (Special Abilities)
 

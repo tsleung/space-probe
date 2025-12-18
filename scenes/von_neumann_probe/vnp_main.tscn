@@ -1,0 +1,44 @@
+[gd_scene load_steps=7 format=3 uid="uid://b5w5d5f4y3v2x"]
+
+[ext_resource type="Script" path="res://scripts/von_neumann_probe/vnp_main.gd" id="1_jgj2s"]
+[ext_resource type="PackedScene" uid="uid://cgrj6q2e37fjc" path="res://scenes/von_neumann_probe/vnp_store.tscn" id="2_abcde"]
+[ext_resource type="PackedScene" uid="uid://cwsy7hr6b7e5c" path="res://scenes/von_neumann_probe/vnp_ui.tscn" id="3_defgh"]
+
+[sub_resource type="Environment" id="Environment_abcde"]
+background_mode = 1
+background_color = Color(0.05, 0.05, 0.07, 1)
+glow_enabled = true
+glow_intensity = 0.5
+glow_strength = 1.2
+glow_blend_mode = 0
+glow_hdr_threshold = 0.8
+
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_xyt82"]
+vertices = PackedVector2Array(0, 0, 1920, 0, 1920, 1080, 0, 1080)
+polygons = [PackedInt32Array(0, 1, 2, 3)]
+outlines = [PackedVector2Array(0, 0, 1920, 0, 1920, 1080, 0, 1080)]
+source_geometry_group_name = &"navigation_polygon_source_group"
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_5mfvy"]
+size = Vector2(1920, 1080)
+
+[node name="VnpMain" type="Node2D"]
+script = ExtResource("1_jgj2s")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_abcde")
+
+[node name="VnpStore" parent="." instance=ExtResource("2_abcde")]
+
+[node name="VnpUI" parent="." instance=ExtResource("3_defgh")]
+
+[node name="NavigationRegion2D" type="NavigationRegion2D" parent="."]
+navigation_polygon = SubResource("NavigationPolygon_xyt82")
+
+[node name="StaticBody2D" type="StaticBody2D" parent="NavigationRegion2D"]
+collision_layer = 4
+collision_mask = 0
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="NavigationRegion2D/StaticBody2D"]
+position = Vector2(960, 540)
+shape = SubResource("RectangleShape2D_5mfvy")

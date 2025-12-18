@@ -91,7 +91,7 @@ Random events occur during gameplay:
 VNP follows the Redux-style pattern from the main game:
 
 ```
-scripts/vnp/
+scripts/von_neumann_probe/
 ├── vnp_types.gd      # Data structures (Probe, StarSystem, VNPState)
 ├── vnp_reducer.gd    # Pure reducer: (state, action) -> new_state
 ├── vnp_store.gd      # State management autoload, signals, RNG
@@ -99,7 +99,7 @@ scripts/vnp/
 ├── vnp_main.gd       # Main UI controller
 └── vnp_galaxy_view.gd   # Custom drawing for galaxy map
 
-scenes/vnp/
+scenes/von_neumann_probe/
 └── vnp_main.tscn     # Main game scene
 ```
 

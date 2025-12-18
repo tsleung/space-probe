@@ -1,0 +1,3604 @@
+extends Control
+class_name FCWSolarMap
+
+## Visual Solar System Map for First Contact War
+## DRAMATIC EDITION - Explosions, lasers, warp jumps, and desperation
+
+signal zone_clicked(zone_id: int)
+signal zone_hovered(zone_id: int)
+
+# ============================================================================
+# ZOOM LEVELS - Multi-level view like Star Wars Rebellion
+# ============================================================================
+
+enum ZoomLevel {
+	GALAXY,   # Sol as tiny point among billions - "Humanity's last light"
+	SYSTEM,   # Current strategic view - all 6 zones
+	PLANET    # Single zone enlarged with staging areas - intense focus
+}
+
+# ============================================================================
+# CONSTANTS
+# ============================================================================
+
+# Zone positions in normalized coordinates (0-1 range, scaled to control size)
+const ZONE_POSITIONS = {
+	FCWTypes.ZoneId.EARTH: Vector2(0.85, 0.5),
+	FCWTypes.ZoneId.MARS: Vector2(0.65, 0.5),
+	FCWTypes.ZoneId.ASTEROID_BELT: Vector2(0.45, 0.3),
+	FCWTypes.ZoneId.JUPITER: Vector2(0.45, 0.7),
+	FCWTypes.ZoneId.SATURN: Vector2(0.25, 0.35),
+	FCWTypes.ZoneId.KUIPER: Vector2(0.1, 0.5)
+}
+
+const ZONE_SIZES = {
+	FCWTypes.ZoneId.EARTH: 40.0,
+	FCWTypes.ZoneId.MARS: 25.0,
+	FCWTypes.ZoneId.ASTEROID_BELT: 20.0,
+	FCWTypes.ZoneId.JUPITER: 35.0,
+	FCWTypes.ZoneId.SATURN: 30.0,
+	FCWTypes.ZoneId.KUIPER: 15.0
+}
+
+const ZONE_COLORS = {
+	FCWTypes.ZoneId.EARTH: Color(0.2, 0.5, 1.0),      # Blue
+	FCWTypes.ZoneId.MARS: Color(0.9, 0.4, 0.2),       # Red-orange
+	FCWTypes.ZoneId.ASTEROID_BELT: Color(0.6, 0.6, 0.6),  # Gray
+	FCWTypes.ZoneId.JUPITER: Color(0.9, 0.7, 0.5),    # Orange-tan
+	FCWTypes.ZoneId.SATURN: Color(0.9, 0.85, 0.6),    # Yellow-tan
+	FCWTypes.ZoneId.KUIPER: Color(0.4, 0.5, 0.7)      # Cold blue
+}
+
+# Staging areas - moons, stations, asteroid clusters around each zone
+# Format: {zone_id: [{name, offset, type, size}]}
+enum StagingType { MOON, ASTEROID_CLUSTER, STATION, RING }
+
+const STAGING_AREAS = {
+	FCWTypes.ZoneId.EARTH: [
+		{"name": "Luna", "offset": Vector2(-50, -30), "type": StagingType.MOON, "size": 8},
+		{"name": "L2 Station", "offset": Vector2(55, 20), "type": StagingType.STATION, "size": 5},
+	],
+	FCWTypes.ZoneId.MARS: [
+		{"name": "Phobos", "offset": Vector2(-35, -20), "type": StagingType.MOON, "size": 5},
+		{"name": "Deimos", "offset": Vector2(30, 25), "type": StagingType.MOON, "size": 4},
+	],
+	FCWTypes.ZoneId.ASTEROID_BELT: [
+		{"name": "Ceres Cluster", "offset": Vector2(-40, 0), "type": StagingType.ASTEROID_CLUSTER, "size": 12},
+		{"name": "Vesta Field", "offset": Vector2(35, -25), "type": StagingType.ASTEROID_CLUSTER, "size": 10},
+	],
+	FCWTypes.ZoneId.JUPITER: [
+		{"name": "Europa", "offset": Vector2(-45, -35), "type": StagingType.MOON, "size": 7},
+		{"name": "Ganymede", "offset": Vector2(50, 10), "type": StagingType.MOON, "size": 9},
+		{"name": "Io Station", "offset": Vector2(-30, 40), "type": StagingType.STATION, "size": 5},
+	],
+	FCWTypes.ZoneId.SATURN: [
+		{"name": "Titan", "offset": Vector2(-45, 25), "type": StagingType.MOON, "size": 8},
+		{"name": "Rings", "offset": Vector2(0, 0), "type": StagingType.RING, "size": 45},
+		{"name": "Enceladus", "offset": Vector2(40, -20), "type": StagingType.MOON, "size": 5},
+	],
+	FCWTypes.ZoneId.KUIPER: [
+		{"name": "Pluto", "offset": Vector2(-25, -15), "type": StagingType.MOON, "size": 6},
+		{"name": "Eris Cluster", "offset": Vector2(30, 20), "type": StagingType.ASTEROID_CLUSTER, "size": 8},
+	]
+}
+
+# ============================================================================
+# PARTICLE TYPES
+# ============================================================================
+
+class Particle:
+	var pos: Vector2
+	var vel: Vector2
+	var color: Color
+	var life: float
+	var max_life: float
+	var size: float
+
+class Ship:
+	var pos: Vector2
+	var start_pos: Vector2
+	var target: Vector2
+	var control_point: Vector2  # For bezier curve
+	var color: Color
+	var engine_color: Color
+	var progress: float = 0.0
+	var trail: Array = []  # Trail positions
+	var trail_colors: Array = []  # Trail colors (fade)
+
+	# Flight characteristics
+	enum ShipClass { FRIGATE, CRUISER, CARRIER, DREADNOUGHT }
+	var ship_class: int = ShipClass.FRIGATE
+	var speed: float = 1.0  # Base speed multiplier
+	var size: float = 6.0
+	var rotation: float = 0.0
+	var bank_angle: float = 0.0  # Visual banking
+
+	# Engine effects
+	var engine_intensity: float = 1.0
+	var afterburner: bool = false
+	var afterburner_timer: float = 0.0
+
+	# Formation
+	var formation_offset: Vector2 = Vector2.ZERO
+	var formation_index: int = 0
+
+	func get_bezier_pos(t: float) -> Vector2:
+		# Quadratic bezier curve for smooth flight path
+		var t1 = 1.0 - t
+		return t1 * t1 * start_pos + 2 * t1 * t * control_point + t * t * target
+
+	func get_bezier_tangent(t: float) -> Vector2:
+		# Derivative for direction
+		var t1 = 1.0 - t
+		return 2 * t1 * (control_point - start_pos) + 2 * t * (target - control_point)
+
+class Laser:
+	var start: Vector2
+	var end: Vector2
+	var color: Color
+	var life: float = 0.3
+	var width: float = 2.0
+
+class Explosion:
+	var pos: Vector2
+	var radius: float = 0.0
+	var max_radius: float
+	var life: float = 1.0
+	var color: Color
+
+class Skirmish:
+	## Ongoing combat zone near a staging area
+	var pos: Vector2
+	var radius: float = 30.0
+	var intensity: float = 1.0  # 0-1, fades over time
+	var staging_name: String = ""
+	var zone_id: int = -1
+	var ships_engaged: int = 0
+	var is_herald_attack: bool = false
+	var laser_timer: float = 0.0
+	var explosion_timer: float = 0.0
+
+class AttackWave:
+	## Incoming Herald attack wave
+	var ships: Array = []  # Ship objects in this wave
+	var target_zone: int = -1
+	var target_staging: Dictionary = {}  # Staging area info
+	var wave_size: int = 5
+	var spawn_timer: float = 0.0
+	var ships_spawned: int = 0
+	var spawn_position: Vector2 = Vector2.ZERO  # Where ships spawn FROM (herald position when wave started)
+
+class CivilianShip:
+	## Civilian transports, miners, freighters - signs of peaceful life
+	enum CivType { TRANSPORT, MINER, FREIGHTER, LINER, TANKER }
+	var pos: Vector2
+	var start_pos: Vector2
+	var target: Vector2
+	var control_point: Vector2
+	var progress: float = 0.0
+	var civ_type: int = CivType.TRANSPORT
+	var color: Color = Color(0.6, 0.7, 0.8)
+	var size: float = 4.0
+	var speed: float = 0.25
+	var trail: Array = []
+	var from_zone: int = -1
+	var to_zone: int = -1
+
+	func get_bezier_pos(t: float) -> Vector2:
+		var t1 = 1.0 - t
+		return t1 * t1 * start_pos + 2 * t1 * t * control_point + t * t * target
+
+class ColonyShip:
+	## Evacuation colony ships - large, slow, precious. Carrying humanity's hope.
+	var pos: Vector2
+	var start_pos: Vector2
+	var target: Vector2  # Edge of map (toward stars)
+	var progress: float = 0.0
+	var speed: float = 0.08  # Slow, stately departure
+	var name: String = "Colony Ship"
+	var souls_aboard: int = 0
+	var trail: Array = []
+	var warp_flash: float = 0.0  # Initial warp flash effect
+
+	static var ship_names: Array = [
+		"New Dawn", "Last Hope", "Exodus", "Sanctuary", "Pioneer",
+		"Harbinger", "Salvation", "Odyssey", "Perseverance", "Genesis",
+		"Horizon", "Eternal", "Vanguard", "Promise", "Aurora"
+	]
+
+	static func create(start: Vector2, target: Vector2, population: int) -> ColonyShip:
+		var ship = ColonyShip.new()
+		ship.pos = start
+		ship.start_pos = start
+		ship.target = target
+		ship.souls_aboard = population
+		ship.name = ship_names[randi() % ship_names.size()]
+		ship.warp_flash = 1.0
+		return ship
+
+class Transmission:
+	## Radio transmission overlay - storytelling through comms
+	var text: String = ""
+	var sender: String = ""
+	var pos: Vector2 = Vector2.ZERO
+	var life: float = 6.0
+	var max_life: float = 6.0
+	var priority: int = 0  # 0=routine, 1=important, 2=critical, 3=desperate
+	var fade_in: float = 0.0
+	var typing_progress: float = 0.0  # For typewriter effect
+
+# ============================================================================
+# NARRATIVE CONSTANTS
+# ============================================================================
+
+# Transmission templates for different situations
+const TRANSMISSIONS_PEACE = [
+	{"sender": "Ceres Mining", "text": "Ore shipment en route to Mars. All nominal."},
+	{"sender": "Luna Traffic", "text": "Passenger liner departing for Jupiter colonies."},
+	{"sender": "Belt Haulers", "text": "Freighter convoy cleared for Earth approach."},
+	{"sender": "Titan Refinery", "text": "Fuel reserves at 94%. Production steady."},
+	{"sender": "Europa Station", "text": "Research vessel returning with samples."},
+	{"sender": "Traffic Control", "text": "Solar lanes clear. Safe travels, all ships."},
+]
+
+const TRANSMISSIONS_TENSION = [
+	{"sender": "Fleet Command", "text": "All ships maintain defensive positions."},
+	{"sender": "Early Warning", "text": "Herald signatures detected. Stand by."},
+	{"sender": "Civilian Auth", "text": "Non-essential traffic suspended."},
+	{"sender": "Mars Defense", "text": "Scrambling patrol wings. Code Yellow."},
+	{"sender": "Intel", "text": "Enemy strength assessment in progress..."},
+]
+
+const TRANSMISSIONS_COMBAT = [
+	{"sender": "Battlegroup", "text": "Engaging hostile forces! All hands!"},
+	{"sender": "Defense Grid", "text": "Shields holding! Return fire!"},
+	{"sender": "Squadron Lead", "text": "Break and attack! For Earth!"},
+	{"sender": "Flagship", "text": "All batteries, concentrate fire!"},
+	{"sender": "Wing Commander", "text": "Stay in formation! Cover each other!"},
+]
+
+const TRANSMISSIONS_DESPERATE = [
+	{"sender": "Mayday", "text": "Hull breach! Evacuating decks 3 through 7!"},
+	{"sender": "Last Stand", "text": "We'll hold them here. Get the civvies out."},
+	{"sender": "Evac Fleet", "text": "Transports away! Buying them time!"},
+	{"sender": "Command", "text": "All ships, fall back to secondary line!"},
+	{"sender": "Distress", "text": "This is our final transmission..."},
+]
+
+const TRANSMISSIONS_VICTORY = [
+	{"sender": "Fleet Command", "text": "Hostiles retreating! Zone secure!"},
+	{"sender": "All Channels", "text": "We held the line! Casualties being assessed."},
+	{"sender": "Medical", "text": "Search and rescue underway for survivors."},
+	{"sender": "Command", "text": "Outstanding work. Rest while you can."},
+]
+
+const TRANSMISSIONS_LOSS = [
+	{"sender": "Command", "text": "...zone lost. All surviving ships withdraw."},
+	{"sender": "Rescue Ops", "text": "Searching for escape pods... so few..."},
+	{"sender": "Memorial", "text": "Moment of silence for the fallen."},
+	{"sender": "Intel", "text": "Regrouping. The Herald advances."},
+]
+
+# ============================================================================
+# STATE
+# ============================================================================
+
+var _zones: Dictionary = {}
+var _herald_position: Vector2 = Vector2.ZERO
+var _herald_target_position: Vector2 = Vector2.ZERO
+var _herald_start_position: Vector2 = Vector2.ZERO  # Position at start of transit
+var _herald_current_zone: int = FCWTypes.ZoneId.KUIPER
+var _herald_target_zone: int = FCWTypes.ZoneId.KUIPER
+var _herald_strength: int = 50
+var _herald_visible: bool = false  # Herald only visible after detection (week 3+)
+var _herald_transit: Dictionary = {}  # Current herald transit data
+var _current_turn: int = 1
+var _selected_zone: int = -1
+var _hovered_zone: int = -1
+var _fleet_assignments: Dictionary = {}
+var _fleets_in_transit: Array = []  # Fleets traveling between zones
+var _week_progress: float = 0.0  # Continuous progress through current week (0.0-1.0)
+var _attack_flash_timer: float = 0.0
+var _is_attacking: bool = false
+var _global_time: float = 0.0
+
+# Animation
+var _herald_travel_progress: float = 1.0  # 0 = at origin, 1 = at target (now controlled by set_time_progress)
+
+# Visual Effects
+var _particles: Array = []  # Engine trails, debris, sparks
+var _ships: Array = []  # Moving ship sprites
+var _lasers: Array = []  # Active laser beams
+var _explosions: Array = []  # Active explosions
+var _screen_shake: Vector2 = Vector2.ZERO
+var _screen_shake_intensity: float = 0.0
+var _danger_pulse: float = 0.0  # Red vignette intensity
+var _warp_flashes: Array = []  # [{pos, life}]
+var _zone_damage_flash: Dictionary = {}  # zone_id -> flash intensity
+var _fallen_zones: Array = []  # Track which zones have fallen for debris
+var _nebula_offset: float = 0.0  # Slow drift
+var _skirmishes: Array = []  # Active skirmish zones
+var _attack_waves: Array = []  # Incoming Herald attack waves
+var _herald_ships: Array = []  # Herald ships (red, menacing)
+
+# Civilian/Narrative systems
+var _civilian_ships: Array = []  # Peaceful traffic
+var _transmissions: Array = []  # Radio comms overlay
+var _civilian_spawn_timer: float = 0.0
+var _transmission_cooldown: float = 0.0
+var _narrative_state: int = 0  # 0=peace, 1=tension, 2=combat, 3=desperate
+var _last_narrative_state: int = 0
+var _mood_transition_timer: float = 0.0
+
+# Exodus system - colony ships escaping to the stars
+var _colony_ships: Array = []  # Active colony ships en route
+var _exodus_ships_escaped: int = 0  # Total ships that reached safety
+var _exodus_souls_escaped: int = 0  # Total people on escaped ships
+var _last_evacuation_count: int = 0  # Track when to spawn new colony ships
+var _colony_ship_spawn_accumulator: int = 0  # Accumulate evacuation until ship spawns
+var _lives_intercepted: int = 0  # Lives lost to Herald interception (from game state)
+
+# Narrative tracking
+var _zones_lost_this_session: int = 0
+var _total_evacuated: int = 0
+var _milestone_flags: Dictionary = {}  # Track which milestones triggered
+
+# Zoom system - multi-level view
+var _zoom_level: int = ZoomLevel.SYSTEM  # Current zoom level
+var _zoom_target: int = ZoomLevel.SYSTEM  # Target zoom level (for animation)
+var _zoom_transition: float = 1.0  # 0 = at origin zoom, 1 = at target zoom
+var _zoom_focus_zone: int = -1  # Which zone to focus on in PLANET view
+var _zoom_planet_scale: float = 3.0  # How much to enlarge in planet view
+var _zoom_galaxy_scale: float = 0.05  # How small Sol is in galaxy view
+
+# Galaxy view state
+var _galaxy_stars: Array = []  # Pre-generated star positions for galaxy
+var _galaxy_sol_pulse: float = 0.0  # Pulsing effect for Sol marker
+
+# ============================================================================
+# LIFECYCLE
+# ============================================================================
+
+var _initialized: bool = false
+
+func _ready() -> void:
+	# Defer initialization until size is valid
+	pass
+
+func _ensure_initialized() -> void:
+	# Don't initialize until we have a valid size
+	if _initialized or size.x < 10 or size.y < 10:
+		return
+	_initialized = true
+	# Initialize herald at its current zone (starts at Kuiper)
+	var herald_pos = _get_zone_pixel_pos(_herald_current_zone)
+	_herald_position = herald_pos
+	_herald_start_position = herald_pos
+	_herald_target_position = herald_pos
+
+func _process(delta: float) -> void:
+	_ensure_initialized()
+	if not _initialized:
+		return  # Wait for valid size
+
+	_global_time += delta
+	_nebula_offset += delta * 0.02  # Slow drift
+
+	# NOTE: Herald movement is now handled in set_time_progress() for smooth multi-week travel
+	# Trail particles are spawned there when Herald is in transit
+
+	# Flash when attacking - spawn combat effects
+	if _is_attacking:
+		_attack_flash_timer += delta * 5.0
+		_danger_pulse = minf(_danger_pulse + delta * 2.0, 1.0)
+		# Spawn lasers and explosions during combat
+		if randf() < delta * 15.0:
+			_spawn_combat_laser()
+		if randf() < delta * 8.0:
+			_spawn_combat_explosion()
+	else:
+		_danger_pulse = maxf(_danger_pulse - delta * 1.5, 0.0)
+
+	# Update screen shake
+	if _screen_shake_intensity > 0:
+		_screen_shake = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _screen_shake_intensity
+		_screen_shake_intensity = maxf(_screen_shake_intensity - delta * 20.0, 0.0)
+	else:
+		_screen_shake = Vector2.ZERO
+
+	# Update particles
+	_update_particles(delta)
+
+	# Update ships in transit
+	_update_ships(delta)
+
+	# Update lasers
+	_update_lasers(delta)
+
+	# Update explosions
+	_update_explosions(delta)
+
+	# Update warp flashes
+	_update_warp_flashes(delta)
+
+	# Update zone damage flashes
+	for zone_id in _zone_damage_flash.keys():
+		_zone_damage_flash[zone_id] = maxf(_zone_damage_flash[zone_id] - delta * 3.0, 0.0)
+
+	# Update skirmishes
+	_update_skirmishes(delta)
+
+	# Update attack waves
+	_update_attack_waves(delta)
+
+	# Update herald ships
+	_update_herald_ships(delta)
+
+	# Update civilian traffic
+	_update_civilian_ships(delta)
+	_maybe_spawn_civilian_ship(delta)
+
+	# Update colony ships (exodus fleet)
+	_update_colony_ships(delta)
+
+	# Update transmissions
+	_update_transmissions(delta)
+	_maybe_spawn_transmission(delta)
+
+	# Update zoom transitions
+	_update_zoom(delta)
+
+	# Ambient particles near zones with ships (only in system view)
+	if _zoom_level == ZoomLevel.SYSTEM:
+		_spawn_ambient_particles(delta)
+
+	queue_redraw()
+
+func _draw() -> void:
+	if not _initialized:
+		return  # Don't draw until positions are valid
+
+	var rect = get_rect()
+
+	# Route to appropriate view based on zoom level
+	match _zoom_level:
+		ZoomLevel.GALAXY:
+			_draw_galaxy_view(rect)
+		ZoomLevel.SYSTEM:
+			_draw_system_view(rect)
+		ZoomLevel.PLANET:
+			_draw_planet_view(rect)
+		_:
+			# Default fallback to system view
+			_draw_system_view(rect)
+
+	# Always draw transmissions on top (UI overlay)
+	_draw_transmissions(rect)
+
+	# Draw zoom transition overlay if transitioning
+	if _zoom_transition < 1.0:
+		_draw_zoom_transition(rect)
+
+func _draw_system_view(rect: Rect2) -> void:
+	## The main strategic view - all zones visible
+	# Apply screen shake offset
+	var offset = _screen_shake
+
+	# Draw nebula background
+	_draw_nebula(rect, offset)
+
+	# Draw starfield background
+	_draw_starfield(rect, offset)
+
+	# Draw zone connections with energy flow
+	_draw_connections(rect, offset)
+
+	# Draw fallen zone debris
+	_draw_debris(rect, offset)
+
+	# Draw particles (behind zones)
+	_draw_particles(offset)
+
+	# Draw staging areas (behind planets)
+	for zone_id in FCWTypes.ZoneId.values():
+		_draw_staging_areas(zone_id, rect, offset)
+
+	# Draw zones
+	for zone_id in FCWTypes.ZoneId.values():
+		_draw_zone(zone_id, rect, offset)
+
+	# Draw skirmishes (combat zones)
+	_draw_skirmishes(offset)
+
+	# Draw warp flashes
+	_draw_warp_flashes(offset)
+
+	# Draw civilian traffic (behind military ships)
+	_draw_civilian_ships(offset)
+
+	# Draw colony ships (exodus fleet) - prominent, hopeful
+	_draw_colony_ships(offset)
+
+	# Draw fleets in transit (strategic fleet movements)
+	_draw_fleets_in_transit(offset)
+
+	# Draw ships in transit
+	_draw_ships(offset)
+
+	# Draw herald attack ships
+	_draw_herald_ships(offset)
+
+	# Draw player fleets at zones
+	_draw_player_fleets(rect, offset)
+
+	# Draw lasers
+	_draw_lasers(offset)
+
+	# Draw explosions
+	_draw_explosions(offset)
+
+	# Draw Herald fleet
+	_draw_herald(rect, offset)
+
+	# Draw attack indicator if attacking
+	if _is_attacking:
+		_draw_attack_indicator(rect, offset)
+
+	# Draw danger vignette
+	if _danger_pulse > 0.01:
+		_draw_danger_vignette(rect)
+
+	# Draw exodus counter (top of screen, always visible when ships are escaping)
+	_draw_exodus_counter(rect)
+
+# ============================================================================
+# DRAWING
+# ============================================================================
+
+func _draw_nebula(rect: Rect2, offset: Vector2) -> void:
+	# Dark space with subtle colored nebula clouds
+	draw_rect(rect, Color(0.01, 0.01, 0.03))
+
+	# Draw subtle nebula patches
+	var rng = RandomNumberGenerator.new()
+	rng.seed = 54321
+	for i in range(8):
+		var base_pos = Vector2(rng.randf() * rect.size.x, rng.randf() * rect.size.y)
+		var nebula_pos = base_pos + Vector2(sin(_nebula_offset + i), cos(_nebula_offset * 0.7 + i)) * 10 + offset
+		var nebula_color = Color(
+			rng.randf_range(0.1, 0.3),
+			rng.randf_range(0.0, 0.15),
+			rng.randf_range(0.15, 0.4),
+			0.03
+		)
+		var nebula_size = rng.randf_range(80, 200)
+		# Multiple overlapping circles for cloud effect
+		for j in range(5):
+			var jitter = Vector2(rng.randf_range(-30, 30), rng.randf_range(-30, 30))
+			draw_circle(nebula_pos + jitter, nebula_size * (1.0 - j * 0.15), nebula_color)
+
+func _draw_starfield(rect: Rect2, offset: Vector2) -> void:
+	# Multi-layer starfield with twinkling
+	var rng = RandomNumberGenerator.new()
+
+	# Layer 1: Distant dim stars
+	rng.seed = 12345
+	for i in range(100):
+		var pos = Vector2(rng.randf() * rect.size.x, rng.randf() * rect.size.y) + offset * 0.3
+		var twinkle = sin(_global_time * rng.randf_range(1.0, 3.0) + i) * 0.3 + 0.7
+		var brightness = rng.randf_range(0.1, 0.4) * twinkle
+		draw_circle(pos, 0.5, Color(brightness, brightness, brightness * 0.9))
+
+	# Layer 2: Brighter stars
+	rng.seed = 67890
+	for i in range(40):
+		var pos = Vector2(rng.randf() * rect.size.x, rng.randf() * rect.size.y) + offset * 0.5
+		var twinkle = sin(_global_time * rng.randf_range(2.0, 5.0) + i * 0.5) * 0.4 + 0.6
+		var brightness = rng.randf_range(0.5, 1.0) * twinkle
+		var star_color = Color(brightness, brightness * rng.randf_range(0.9, 1.0), brightness * rng.randf_range(0.8, 1.0))
+		draw_circle(pos, rng.randf_range(0.8, 1.5), star_color)
+
+	# Layer 3: Occasional bright stars with glow
+	rng.seed = 11111
+	for i in range(8):
+		var pos = Vector2(rng.randf() * rect.size.x, rng.randf() * rect.size.y) + offset * 0.7
+		var twinkle = sin(_global_time * 1.5 + i * 2.0) * 0.3 + 0.7
+		draw_circle(pos, 4, Color(1.0, 1.0, 0.9, 0.1 * twinkle))
+		draw_circle(pos, 2, Color(1.0, 1.0, 0.95, 0.6 * twinkle))
+
+func _draw_connections(rect: Rect2, offset: Vector2) -> void:
+	# Draw lines between connected zones with energy flow effect
+	for zone_id in FCWTypes.ZONE_CONNECTIONS:
+		var pos1 = _get_zone_pixel_pos(zone_id) + offset
+		for connected_zone in FCWTypes.ZONE_CONNECTIONS[zone_id]:
+			if connected_zone > zone_id:  # Avoid double-drawing
+				var pos2 = _get_zone_pixel_pos(connected_zone) + offset
+
+				# Base connection line
+				draw_line(pos1, pos2, Color(0.15, 0.2, 0.3, 0.4), 1.0)
+
+				# Energy pulse traveling along the line (if both zones controlled)
+				var zone1_data = _zones.get(zone_id, {})
+				var zone2_data = _zones.get(connected_zone, {})
+				if zone1_data.get("status", 0) == FCWTypes.ZoneStatus.CONTROLLED and zone2_data.get("status", 0) == FCWTypes.ZoneStatus.CONTROLLED:
+					var pulse_pos = fmod(_global_time * 0.3 + zone_id * 0.1, 1.0)
+					var pulse_point = pos1.lerp(pos2, pulse_pos)
+					draw_circle(pulse_point, 2, Color(0.3, 0.6, 1.0, 0.6))
+
+func _draw_debris(rect: Rect2, offset: Vector2) -> void:
+	# Draw debris particles around fallen zones
+	var rng = RandomNumberGenerator.new()
+	for zone_id in _fallen_zones:
+		var pos = _get_zone_pixel_pos(zone_id) + offset
+		var base_size = ZONE_SIZES.get(zone_id, 20.0)
+		rng.seed = zone_id * 1000 + int(_global_time * 2) % 100
+
+		for i in range(15):
+			var angle = rng.randf() * TAU + _global_time * 0.1
+			var dist = base_size + rng.randf_range(5, 40)
+			var debris_pos = pos + Vector2(cos(angle), sin(angle)) * dist
+			var debris_size = rng.randf_range(1, 3)
+			var alpha = rng.randf_range(0.2, 0.5)
+			draw_circle(debris_pos, debris_size, Color(0.4, 0.3, 0.2, alpha))
+
+func _draw_particles(offset: Vector2) -> void:
+	for p in _particles:
+		var alpha = p.life / p.max_life
+		var color = Color(p.color.r, p.color.g, p.color.b, p.color.a * alpha)
+		draw_circle(p.pos + offset, p.size * alpha, color)
+
+func _draw_zone(zone_id: int, _rect: Rect2, offset: Vector2) -> void:
+	var pos = _get_zone_pixel_pos(zone_id) + offset
+	var base_size = ZONE_SIZES.get(zone_id, 20.0)
+	var color = ZONE_COLORS.get(zone_id, Color.WHITE)
+
+	var zone_data = _zones.get(zone_id, {})
+	var status = zone_data.get("status", FCWTypes.ZoneStatus.CONTROLLED)
+
+	# Status-based modifications
+	match status:
+		FCWTypes.ZoneStatus.FALLEN:
+			color = color.darkened(0.7)
+			# Draw cracked/damaged effect
+			var crack_intensity = 0.3
+			draw_circle(pos, base_size + 3, Color(0.3, 0.1, 0.0, crack_intensity))
+		FCWTypes.ZoneStatus.UNDER_ATTACK:
+			# Intense pulse effect
+			var pulse = sin(_attack_flash_timer * 4.0) * 0.4 + 0.6
+			color = color.lerp(Color.RED, 0.6 * pulse)
+			# Shield flicker effect
+			var shield_alpha = sin(_attack_flash_timer * 8.0) * 0.3 + 0.4
+			draw_arc(pos, base_size + 5, 0, TAU, 32, Color(0.5, 0.8, 1.0, shield_alpha), 2.0)
+
+	# Damage flash overlay
+	var damage_flash = _zone_damage_flash.get(zone_id, 0.0)
+	if damage_flash > 0:
+		color = color.lerp(Color.WHITE, damage_flash)
+
+	# Selection/hover highlight
+	if zone_id == _selected_zone:
+		draw_circle(pos, base_size + 10, Color(1.0, 1.0, 0.5, 0.3))
+		draw_arc(pos, base_size + 10, 0, TAU, 32, Color(1.0, 1.0, 0.5, 0.8), 2.0)
+	elif zone_id == _hovered_zone:
+		draw_circle(pos, base_size + 6, Color(1.0, 1.0, 1.0, 0.15))
+
+	# Herald target indicator - TERRIFYING ATTACK WARNING
+	if zone_id == _herald_target_zone and status != FCWTypes.ZoneStatus.FALLEN:
+		var target_pulse = sin(_attack_flash_timer * 3.0) * 0.4 + 0.6
+		var fast_pulse = sin(_attack_flash_timer * 8.0) * 0.5 + 0.5
+
+		# Outer danger zone - large pulsing red ring
+		draw_arc(pos, base_size + 30, 0, TAU, 48, Color(1.0, 0.0, 0.0, target_pulse * 0.4), 4.0)
+		draw_arc(pos, base_size + 35, 0, TAU, 48, Color(1.0, 0.0, 0.0, target_pulse * 0.2), 2.0)
+
+		# Multiple warning rings - closing in
+		draw_arc(pos, base_size + 15, 0, TAU, 32, Color(1.0, 0.2, 0.1, target_pulse * 0.9), 3.0)
+		draw_arc(pos, base_size + 20, 0, TAU, 32, Color(1.0, 0.1, 0.0, target_pulse * 0.6), 2.0)
+
+		# Rotating warning segments
+		var rot = _global_time * 2.0
+		for i in range(6):
+			var start_angle = rot + i * TAU / 6
+			draw_arc(pos, base_size + 40, start_angle, start_angle + 0.2, 8, Color(1.0, 0.3, 0.1, fast_pulse * 0.8), 3.0)
+
+		# ATTACK LABEL - BIG and SCARY
+		var font = ThemeDB.fallback_font
+		var label_pos = pos + Vector2(-50, -base_size - 50)
+		var label_bg = Rect2(label_pos - Vector2(5, 12), Vector2(100, 18))
+		draw_rect(label_bg, Color(0.5, 0.0, 0.0, fast_pulse * 0.9))
+		draw_rect(label_bg, Color(1.0, 0.3, 0.2, fast_pulse), false, 2.0)
+		draw_string(font, label_pos, "⚠ UNDER ATTACK ⚠", HORIZONTAL_ALIGNMENT_CENTER, 100, 12, Color(1.0, 1.0, 1.0, fast_pulse))
+
+		# Show overwhelming numbers if herald is stronger
+		if _herald_strength > 0:
+			var threat_ratio = float(_herald_strength) / maxf(zone_data.get("defense", 1), 1)
+			var threat_text = ""
+			var threat_color = Color.WHITE
+			if threat_ratio > 2.0:
+				threat_text = "OVERWHELMING FORCE"
+				threat_color = Color(1.0, 0.2, 0.2)
+			elif threat_ratio > 1.5:
+				threat_text = "SUPERIOR NUMBERS"
+				threat_color = Color(1.0, 0.5, 0.3)
+			elif threat_ratio > 1.0:
+				threat_text = "OUTNUMBERED"
+				threat_color = Color(1.0, 0.7, 0.4)
+			else:
+				threat_text = "HOLDING"
+				threat_color = Color(0.5, 1.0, 0.5)
+
+			if threat_text.length() > 0:
+				draw_string(font, pos + Vector2(-40, base_size + 25), threat_text, HORIZONTAL_ALIGNMENT_CENTER, 80, 10, Color(threat_color.r, threat_color.g, threat_color.b, target_pulse))
+
+	# Planet glow (atmospheric effect)
+	if status != FCWTypes.ZoneStatus.FALLEN:
+		draw_circle(pos, base_size + 3, Color(color.r, color.g, color.b, 0.2))
+
+	# Draw the planet
+	draw_circle(pos, base_size, color)
+
+	# Planet shine highlight
+	if status != FCWTypes.ZoneStatus.FALLEN:
+		var highlight_pos = pos + Vector2(-base_size * 0.3, -base_size * 0.3)
+		draw_circle(highlight_pos, base_size * 0.3, Color(1, 1, 1, 0.2))
+
+	# Draw zone name
+	var font = ThemeDB.fallback_font
+	var font_size = 12
+	var zone_name = FCWTypes.get_zone_name(zone_id)
+	var text_size = font.get_string_size(zone_name, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
+	var name_color = Color.WHITE if status != FCWTypes.ZoneStatus.FALLEN else Color(0.5, 0.5, 0.5)
+	draw_string(font, pos + Vector2(-text_size.x / 2, base_size + 18), zone_name, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size, name_color)
+
+	# Draw defense value with color coding
+	if status != FCWTypes.ZoneStatus.FALLEN:
+		var defense = zone_data.get("defense", 0)
+		var def_text = "DEF: %d" % defense
+		var def_color: Color
+		if defense >= _herald_strength * 1.3:
+			def_color = Color(0.3, 1.0, 0.3)  # Strong
+		elif defense >= _herald_strength:
+			def_color = Color(1.0, 1.0, 0.3)  # Marginal
+		else:
+			def_color = Color(1.0, 0.3, 0.3)  # Weak
+		draw_string(font, pos + Vector2(-25, base_size + 30), def_text, HORIZONTAL_ALIGNMENT_CENTER, 50, 10, def_color)
+
+func _draw_staging_areas(zone_id: int, _rect: Rect2, offset: Vector2) -> void:
+	var zone_pos = _get_zone_pixel_pos(zone_id) + offset
+	var staging_list = STAGING_AREAS.get(zone_id, [])
+
+	for staging in staging_list:
+		var staging_pos = zone_pos + staging.offset
+		var staging_size = staging.size
+		var staging_type = staging.type
+
+		match staging_type:
+			StagingType.MOON:
+				_draw_moon(staging_pos, staging_size, staging.name)
+			StagingType.ASTEROID_CLUSTER:
+				_draw_asteroid_cluster(staging_pos, staging_size, staging.name)
+			StagingType.STATION:
+				_draw_station(staging_pos, staging_size, staging.name)
+			StagingType.RING:
+				_draw_ring(zone_pos, staging_size)
+
+func _draw_moon(pos: Vector2, size: float, moon_name: String) -> void:
+	# Gray rocky moon with crater detail
+	var base_color = Color(0.5, 0.5, 0.55)
+
+	# Outer glow
+	draw_circle(pos, size + 2, Color(0.4, 0.4, 0.5, 0.2))
+
+	# Main body
+	draw_circle(pos, size, base_color)
+
+	# Crater shadows (darker spots)
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(moon_name)
+	for i in range(3):
+		var crater_offset = Vector2(rng.randf_range(-size * 0.5, size * 0.5),
+									 rng.randf_range(-size * 0.5, size * 0.5))
+		var crater_size = size * rng.randf_range(0.15, 0.3)
+		draw_circle(pos + crater_offset, crater_size, base_color.darkened(0.2))
+
+	# Highlight
+	draw_circle(pos + Vector2(-size * 0.3, -size * 0.3), size * 0.25, Color(0.7, 0.7, 0.75, 0.4))
+
+	# Name label
+	var font = ThemeDB.fallback_font
+	draw_string(font, pos + Vector2(-20, size + 10), moon_name, HORIZONTAL_ALIGNMENT_CENTER, 40, 8, Color(0.6, 0.6, 0.7, 0.8))
+
+func _draw_asteroid_cluster(pos: Vector2, size: float, cluster_name: String) -> void:
+	# Multiple small irregular rocks
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(cluster_name)
+
+	var asteroid_count = int(size / 2) + 3
+	for i in range(asteroid_count):
+		var asteroid_offset = Vector2(rng.randf_range(-size, size),
+									   rng.randf_range(-size, size))
+		var asteroid_size = rng.randf_range(1.5, 4)
+		var color = Color(rng.randf_range(0.35, 0.5),
+						  rng.randf_range(0.3, 0.45),
+						  rng.randf_range(0.25, 0.4))
+
+		# Slightly irregular shape via multiple circles
+		draw_circle(pos + asteroid_offset, asteroid_size, color)
+		if asteroid_size > 2.5:
+			var jitter = Vector2(rng.randf_range(-1, 1), rng.randf_range(-1, 1))
+			draw_circle(pos + asteroid_offset + jitter, asteroid_size * 0.7, color.lightened(0.1))
+
+	# Dashed boundary circle to show the area
+	var segment_count = 16
+	for i in range(segment_count):
+		if i % 2 == 0:
+			var angle_start = i * TAU / segment_count + _global_time * 0.1
+			var angle_end = angle_start + TAU / segment_count * 0.7
+			draw_arc(pos, size + 5, angle_start, angle_end, 4, Color(0.4, 0.4, 0.35, 0.3), 1.0)
+
+	# Label
+	var font = ThemeDB.fallback_font
+	draw_string(font, pos + Vector2(-30, size + 12), cluster_name, HORIZONTAL_ALIGNMENT_CENTER, 60, 8, Color(0.5, 0.5, 0.5, 0.8))
+
+func _draw_station(pos: Vector2, size: float, station_name: String) -> void:
+	# Rotating space station with arms
+	var rotation = _global_time * 0.5
+
+	# Central hub
+	draw_circle(pos, size * 0.6, Color(0.5, 0.55, 0.6))
+	draw_circle(pos, size * 0.4, Color(0.6, 0.65, 0.7))
+
+	# Rotating arms (4 of them)
+	for i in range(4):
+		var arm_angle = rotation + i * TAU / 4
+		var arm_end = pos + Vector2(cos(arm_angle), sin(arm_angle)) * size
+		draw_line(pos, arm_end, Color(0.5, 0.55, 0.6), 2.0)
+		# End modules
+		draw_circle(arm_end, size * 0.25, Color(0.55, 0.6, 0.65))
+
+	# Blinking lights
+	var blink = sin(_global_time * 3.0) * 0.5 + 0.5
+	draw_circle(pos, 2, Color(0.2, 1.0, 0.3, blink))
+
+	# Label
+	var font = ThemeDB.fallback_font
+	draw_string(font, pos + Vector2(-25, size + 8), station_name, HORIZONTAL_ALIGNMENT_CENTER, 50, 8, Color(0.5, 0.7, 0.6, 0.8))
+
+func _draw_ring(center_pos: Vector2, size: float) -> void:
+	# Saturn-style rings (elliptical)
+	var ring_colors = [
+		Color(0.8, 0.75, 0.6, 0.3),
+		Color(0.85, 0.8, 0.65, 0.25),
+		Color(0.75, 0.7, 0.55, 0.2),
+	]
+
+	for i in range(3):
+		var ring_radius = size - i * 8
+		if ring_radius > 0:
+			# Draw ellipse as scaled arc
+			var points = PackedVector2Array()
+			var point_count = 32
+			for j in range(point_count + 1):
+				var angle = j * TAU / point_count
+				var point = center_pos + Vector2(cos(angle) * ring_radius, sin(angle) * ring_radius * 0.3)
+				points.append(point)
+
+			# Draw only the far half (behind planet)
+			for j in range(point_count / 2):
+				var idx = j + point_count / 4
+				if idx < points.size() - 1:
+					draw_line(points[idx], points[idx + 1], ring_colors[i], 3.0)
+
+func _draw_skirmishes(offset: Vector2) -> void:
+	for skirmish in _skirmishes:
+		var pos = skirmish.pos + offset
+		var alpha = skirmish.intensity
+
+		# Combat zone indicator - pulsing danger circle
+		var pulse = sin(_global_time * 4.0) * 0.3 + 0.7
+		var radius = skirmish.radius * pulse
+
+		# Red combat zone ring
+		if skirmish.is_herald_attack:
+			draw_arc(pos, radius, 0, TAU, 24, Color(1.0, 0.2, 0.1, alpha * 0.6), 2.0)
+			draw_arc(pos, radius * 0.8, 0, TAU, 20, Color(1.0, 0.4, 0.2, alpha * 0.3), 1.5)
+		else:
+			# Defender skirmish (blue)
+			draw_arc(pos, radius, 0, TAU, 24, Color(0.3, 0.6, 1.0, alpha * 0.5), 2.0)
+
+		# Battle sparks
+		var spark_count = int(skirmish.ships_engaged * 0.5)
+		var rng = RandomNumberGenerator.new()
+		rng.seed = int(_global_time * 10) % 1000
+		for i in range(mini(spark_count, 8)):
+			var spark_pos = pos + Vector2(rng.randf_range(-radius, radius),
+										   rng.randf_range(-radius, radius))
+			var spark_alpha = rng.randf_range(0.3, 0.8) * alpha
+			draw_circle(spark_pos, rng.randf_range(1, 3), Color(1.0, 0.8, 0.3, spark_alpha))
+
+		# Label showing engagement
+		if skirmish.staging_name != "":
+			var font = ThemeDB.fallback_font
+			var label = "BATTLE: %s" % skirmish.staging_name
+			var label_color = Color(1.0, 0.4, 0.3, alpha) if skirmish.is_herald_attack else Color(0.5, 0.8, 1.0, alpha)
+			draw_string(font, pos + Vector2(-40, -radius - 5), label, HORIZONTAL_ALIGNMENT_CENTER, 80, 9, label_color)
+
+func _draw_herald_ships(offset: Vector2) -> void:
+	# Herald ships only visible after detection (week 3+)
+	if not _herald_visible:
+		return
+
+	for ship in _herald_ships:
+		var pos = ship.pos + offset
+
+		# Get direction from bezier tangent
+		var tangent = ship.get_bezier_tangent(ship.progress)
+		var dir = tangent.normalized() if tangent.length() > 0.1 else Vector2(1, 0)
+		var perp = Vector2(-dir.y, dir.x)
+
+		# Menacing red trail
+		if ship.trail.size() > 1:
+			for i in range(ship.trail.size() - 1):
+				var t1 = ship.trail[i] + offset
+				var t2 = ship.trail[i + 1] + offset
+				var alpha = float(i) / ship.trail.size()
+				var width = 1.5 + alpha * 2.5
+				# Red-orange trail
+				var trail_color = Color(1.0, 0.3, 0.1, alpha * 0.7)
+				draw_line(t1, t2, trail_color, width)
+
+		# Herald ship hull - angular, aggressive shape
+		var ship_size = ship.size
+		var hull_color = Color(0.5, 0.1, 0.4)  # Dark purple (alien)
+
+		# Aggressive pointed design
+		var points = PackedVector2Array([
+			pos + dir * ship_size * 1.5,  # Sharp front
+			pos + dir * ship_size * 0.2 + perp * ship_size * 0.6,
+			pos - dir * ship_size * 0.5 + perp * ship_size * 0.8,
+			pos - dir * ship_size * 1.0 + perp * ship_size * 0.4,
+			pos - dir * ship_size * 0.8,  # Notched back
+			pos - dir * ship_size * 1.0 - perp * ship_size * 0.4,
+			pos - dir * ship_size * 0.5 - perp * ship_size * 0.8,
+			pos + dir * ship_size * 0.2 - perp * ship_size * 0.6,
+		])
+		draw_colored_polygon(points, hull_color)
+
+		# Glowing alien purple/magenta core
+		draw_circle(pos, ship_size * 0.3, Color(0.9, 0.2, 0.7, 0.8))
+		draw_circle(pos, ship_size * 0.15, Color(1.0, 0.6, 0.9))
+
+		# Purple/magenta engine glow
+		var engine_pos = pos - dir * ship_size * 0.9
+		draw_circle(engine_pos, 4, Color(0.9, 0.1, 0.7, 0.9))
+		draw_circle(engine_pos, 7, Color(0.7, 0.0, 0.5, 0.4))
+
+func _draw_warp_flashes(offset: Vector2) -> void:
+	for flash in _warp_flashes:
+		var alpha = flash.life
+		var ring_size = (1.0 - flash.life) * 30 + 5
+		# Use custom color if provided, otherwise default cyan-blue
+		var ring_color = flash.get("color", Color(0.3, 0.7, 1.0))
+		draw_arc(flash.pos + offset, ring_size, 0, TAU, 16, Color(ring_color.r, ring_color.g, ring_color.b, alpha), 2.0)
+		draw_circle(flash.pos + offset, 5 * alpha, Color(ring_color.r * 1.2, ring_color.g * 1.1, ring_color.b, alpha))
+
+func _draw_ships(offset: Vector2) -> void:
+	for ship in _ships:
+		var pos = ship.pos + offset
+
+		# Get direction from bezier tangent
+		var tangent = ship.get_bezier_tangent(ship.progress)
+		var dir = tangent.normalized() if tangent.length() > 0.1 else Vector2(1, 0)
+		var perp = Vector2(-dir.y, dir.x)
+
+		# --- ENGINE TRAIL (Long, bright, fading) ---
+		if ship.trail.size() > 1:
+			for i in range(ship.trail.size() - 1):
+				var t1 = ship.trail[i] + offset
+				var t2 = ship.trail[i + 1] + offset
+				var alpha = float(i) / ship.trail.size()
+				var width = 1.0 + alpha * 2.0
+
+				# Core trail (bright)
+				var core_color = Color(ship.engine_color.r, ship.engine_color.g, ship.engine_color.b, alpha * 0.8)
+				draw_line(t1, t2, core_color, width)
+
+				# Outer glow
+				var glow_color = Color(ship.engine_color.r * 0.8, ship.engine_color.g * 0.8, ship.engine_color.b, alpha * 0.3)
+				draw_line(t1, t2, glow_color, width * 2.5)
+
+		# --- AFTERBURNER EFFECT ---
+		if ship.afterburner:
+			var afterburner_length = 15 + sin(ship.afterburner_timer * 20) * 5
+			var ab_start = pos - dir * (ship.size * 0.8)
+			var ab_end = ab_start - dir * afterburner_length
+
+			# Bright core
+			draw_line(ab_start, ab_end, Color(1.0, 0.9, 0.5, 0.9), 3)
+			# Orange outer
+			draw_line(ab_start, ab_end, Color(1.0, 0.5, 0.1, 0.6), 6)
+			# Wide glow
+			draw_line(ab_start, ab_end, Color(1.0, 0.3, 0.0, 0.2), 12)
+
+		# --- SHIP HULL ---
+		var ship_size = ship.size
+
+		# Apply banking rotation for visual effect
+		var bank_offset = perp * sin(ship.bank_angle) * 2
+
+		match ship.ship_class:
+			Ship.ShipClass.FRIGATE:
+				# Small, fast, arrow-shaped
+				var points = PackedVector2Array([
+					pos + dir * ship_size + bank_offset,
+					pos - dir * ship_size * 0.6 + perp * ship_size * 0.4,
+					pos - dir * ship_size * 0.3,
+					pos - dir * ship_size * 0.6 - perp * ship_size * 0.4
+				])
+				draw_colored_polygon(points, ship.color)
+
+			Ship.ShipClass.CRUISER:
+				# Medium, angular hull
+				var points = PackedVector2Array([
+					pos + dir * ship_size * 1.2 + bank_offset,
+					pos + dir * ship_size * 0.3 + perp * ship_size * 0.5,
+					pos - dir * ship_size * 0.8 + perp * ship_size * 0.6,
+					pos - dir * ship_size + perp * ship_size * 0.3,
+					pos - dir * ship_size - perp * ship_size * 0.3,
+					pos - dir * ship_size * 0.8 - perp * ship_size * 0.6,
+					pos + dir * ship_size * 0.3 - perp * ship_size * 0.5
+				])
+				draw_colored_polygon(points, ship.color)
+				# Bridge
+				draw_circle(pos + dir * ship_size * 0.4 + bank_offset, ship_size * 0.2, ship.color.lightened(0.3))
+
+			Ship.ShipClass.CARRIER:
+				# Large, flat carrier deck
+				var points = PackedVector2Array([
+					pos + dir * ship_size * 1.5 + bank_offset,
+					pos + dir * ship_size * 0.5 + perp * ship_size * 0.8,
+					pos - dir * ship_size * 1.2 + perp * ship_size * 0.8,
+					pos - dir * ship_size * 1.5,
+					pos - dir * ship_size * 1.2 - perp * ship_size * 0.8,
+					pos + dir * ship_size * 0.5 - perp * ship_size * 0.8
+				])
+				draw_colored_polygon(points, ship.color)
+				# Flight deck marking
+				draw_line(pos - dir * ship_size * 0.8 + perp * ship_size * 0.3,
+						  pos + dir * ship_size * 0.3 + perp * ship_size * 0.3,
+						  Color(0.2, 0.8, 0.2, 0.6), 2)
+				draw_line(pos - dir * ship_size * 0.8 - perp * ship_size * 0.3,
+						  pos + dir * ship_size * 0.3 - perp * ship_size * 0.3,
+						  Color(0.2, 0.8, 0.2, 0.6), 2)
+
+			Ship.ShipClass.DREADNOUGHT:
+				# Massive, imposing
+				var points = PackedVector2Array([
+					pos + dir * ship_size * 1.8 + bank_offset,
+					pos + dir * ship_size + perp * ship_size * 0.4,
+					pos + dir * ship_size * 0.5 + perp * ship_size * 0.7,
+					pos - dir * ship_size * 0.5 + perp * ship_size * 0.8,
+					pos - dir * ship_size * 1.5 + perp * ship_size * 0.5,
+					pos - dir * ship_size * 1.5 - perp * ship_size * 0.5,
+					pos - dir * ship_size * 0.5 - perp * ship_size * 0.8,
+					pos + dir * ship_size * 0.5 - perp * ship_size * 0.7,
+					pos + dir * ship_size - perp * ship_size * 0.4
+				])
+				draw_colored_polygon(points, ship.color)
+				# Command tower
+				var tower_points = PackedVector2Array([
+					pos + dir * ship_size * 0.6 + bank_offset * 1.5,
+					pos + dir * ship_size * 0.2 + perp * ship_size * 0.25 + bank_offset,
+					pos - dir * ship_size * 0.3 + perp * ship_size * 0.2 + bank_offset,
+					pos - dir * ship_size * 0.3 - perp * ship_size * 0.2 + bank_offset,
+					pos + dir * ship_size * 0.2 - perp * ship_size * 0.25 + bank_offset
+				])
+				draw_colored_polygon(tower_points, ship.color.lightened(0.2))
+
+			_:
+				# Default triangle
+				var points = PackedVector2Array([
+					pos + dir * ship_size + bank_offset,
+					pos - dir * ship_size * 0.6 + perp * ship_size * 0.5,
+					pos - dir * ship_size * 0.6 - perp * ship_size * 0.5
+				])
+				draw_colored_polygon(points, ship.color)
+
+		# --- ENGINE GLOW ---
+		var engine_pos = pos - dir * ship_size * 0.7
+		var glow_size = 3 + ship.engine_intensity * 2
+		var glow_alpha = 0.4 + ship.engine_intensity * 0.4
+
+		# Engine core (bright)
+		draw_circle(engine_pos, glow_size * 0.5, Color(1, 1, 1, glow_alpha))
+		# Inner glow
+		draw_circle(engine_pos, glow_size, Color(ship.engine_color.r, ship.engine_color.g, ship.engine_color.b, glow_alpha * 0.7))
+		# Outer glow
+		draw_circle(engine_pos, glow_size * 2, Color(ship.engine_color.r, ship.engine_color.g, ship.engine_color.b, glow_alpha * 0.3))
+
+		# Second engine for larger ships
+		if ship.ship_class in [Ship.ShipClass.CRUISER, Ship.ShipClass.CARRIER, Ship.ShipClass.DREADNOUGHT]:
+			var engine2_offset = perp * ship_size * 0.4
+			draw_circle(engine_pos + engine2_offset, glow_size * 0.7, Color(ship.engine_color.r, ship.engine_color.g, ship.engine_color.b, glow_alpha * 0.6))
+			draw_circle(engine_pos - engine2_offset, glow_size * 0.7, Color(ship.engine_color.r, ship.engine_color.g, ship.engine_color.b, glow_alpha * 0.6))
+
+func _draw_player_fleets(rect: Rect2, offset: Vector2) -> void:
+	# Draw fleet formations at each zone with assigned ships
+	for zone_id in _fleet_assignments:
+		var assignment = _fleet_assignments[zone_id]
+		var total_ships = 0
+		for ship_type in assignment:
+			total_ships += assignment[ship_type]
+
+		if total_ships <= 0:
+			continue
+
+		var pos = _get_zone_pixel_pos(zone_id) + offset
+		var zone_size = ZONE_SIZES.get(zone_id, 20.0)
+
+		# Draw multiple small ship icons in formation
+		var fleet_center = pos + Vector2(zone_size + 20, 0)
+		var ships_to_draw = mini(total_ships, 12)  # Cap visual ships
+
+		for i in range(ships_to_draw):
+			var angle = (float(i) / ships_to_draw) * TAU + _global_time * 0.5
+			var orbit_radius = 8 + (i % 3) * 4
+			var ship_pos = fleet_center + Vector2(cos(angle), sin(angle)) * orbit_radius
+
+			# Tiny ship triangle
+			var ship_dir = Vector2(cos(angle + PI/2), sin(angle + PI/2))
+			var ship_perp = Vector2(-ship_dir.y, ship_dir.x)
+			var points = PackedVector2Array([
+				ship_pos + ship_dir * 3,
+				ship_pos - ship_dir * 2 + ship_perp * 2,
+				ship_pos - ship_dir * 2 - ship_perp * 2
+			])
+			draw_colored_polygon(points, Color(0.4, 0.9, 0.4))
+
+		# Draw ship count
+		var font = ThemeDB.fallback_font
+		draw_string(font, fleet_center + Vector2(15, 4), "x%d" % total_ships, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 1.0, 0.5))
+
+func _draw_lasers(offset: Vector2) -> void:
+	for laser in _lasers:
+		var alpha = laser.life / 0.3
+		var glow_color = Color(laser.color.r, laser.color.g, laser.color.b, alpha * 0.3)
+		var core_color = Color(laser.color.r, laser.color.g, laser.color.b, alpha)
+
+		# Glow
+		draw_line(laser.start + offset, laser.end + offset, glow_color, laser.width * 3)
+		# Core
+		draw_line(laser.start + offset, laser.end + offset, core_color, laser.width)
+		# Bright center
+		draw_line(laser.start + offset, laser.end + offset, Color(1, 1, 1, alpha * 0.8), laser.width * 0.5)
+
+func _draw_explosions(offset: Vector2) -> void:
+	for exp in _explosions:
+		var progress = 1.0 - exp.life
+		var current_radius = exp.max_radius * progress
+
+		# Outer ring
+		var ring_alpha = exp.life * 0.8
+		draw_arc(exp.pos + offset, current_radius, 0, TAU, 24, Color(exp.color.r, exp.color.g * 0.5, 0, ring_alpha), 3.0)
+
+		# Inner flash
+		var flash_radius = current_radius * 0.6
+		var flash_alpha = exp.life
+		draw_circle(exp.pos + offset, flash_radius, Color(1, 1, 0.8, flash_alpha * 0.5))
+
+		# Core
+		var core_radius = current_radius * 0.3 * exp.life
+		draw_circle(exp.pos + offset, core_radius, Color(1, 1, 1, exp.life))
+
+func _draw_herald(rect: Rect2, offset: Vector2) -> void:
+	# Herald only visible after detection (week 3+)
+	if not _herald_visible:
+		return
+
+	var pos = _herald_position + offset
+
+	# === HERALD MOTHERSHIP FLEET ===
+	# Large imposing capital ship with escort vessels
+
+	# Ominous dark PURPLE void aura (massive)
+	var aura_pulse = sin(_global_time * 1.2) * 0.15 + 0.85
+	for i in range(6):
+		var aura_size = 55 - i * 8
+		var aura_alpha = 0.06 * aura_pulse * (6 - i) / 6.0
+		draw_circle(pos, aura_size, Color(0.35, 0.0, 0.3, aura_alpha))
+
+	# Void distortion rings (rotating)
+	var ring_rot = _global_time * 0.4
+	for ring in range(3):
+		var ring_size = 35 - ring * 8
+		var ring_alpha = 0.15 - ring * 0.04
+		draw_arc(pos, ring_size, ring_rot + ring * 0.5, ring_rot + ring * 0.5 + PI * 1.5, 20,
+			Color(0.7, 0.1, 0.5, ring_alpha * aura_pulse), 2)
+
+	# === ESCORT SHIPS (smaller vessels orbiting the mothership) ===
+	var escort_count = 4
+	for e in range(escort_count):
+		var escort_angle = _global_time * 0.8 + e * TAU / escort_count
+		var escort_dist = 28 + sin(_global_time * 2 + e) * 4
+		var escort_pos = pos + Vector2(cos(escort_angle), sin(escort_angle)) * escort_dist
+		var escort_dir = Vector2(cos(escort_angle + PI/2), sin(escort_angle + PI/2))
+		var escort_perp = Vector2(-escort_dir.y, escort_dir.x)
+
+		# Escort ship shape (small triangular)
+		var escort_points = PackedVector2Array([
+			escort_pos + escort_dir * 5,
+			escort_pos - escort_dir * 3 + escort_perp * 3,
+			escort_pos - escort_dir * 3 - escort_perp * 3,
+		])
+		draw_colored_polygon(escort_points, Color(0.45, 0.08, 0.35))
+		# Escort engine glow
+		draw_circle(escort_pos - escort_dir * 3, 2, Color(0.9, 0.2, 0.7, 0.8))
+
+	# === MOTHERSHIP (large central vessel) ===
+	var mothership_size = 18.0
+	var rot = _global_time * 0.15  # Slow rotation
+
+	# Mothership hull - elongated hexagonal shape
+	var hull_points = PackedVector2Array()
+	var hull_radii = [1.4, 0.9, 1.0, 1.4, 0.9, 1.0]  # Varied radii for asymmetric look
+	for i in range(6):
+		var angle = rot + i * TAU / 6
+		var radius = mothership_size * hull_radii[i]
+		hull_points.append(pos + Vector2(cos(angle), sin(angle)) * radius)
+	draw_colored_polygon(hull_points, Color(0.5, 0.06, 0.4))
+
+	# Hull detail lines
+	for i in range(6):
+		var angle1 = rot + i * TAU / 6
+		var angle2 = rot + (i + 1) * TAU / 6
+		var p1 = pos + Vector2(cos(angle1), sin(angle1)) * mothership_size * 0.5
+		var p2 = pos + Vector2(cos(angle2), sin(angle2)) * mothership_size * 0.5
+		draw_line(p1, p2, Color(0.7, 0.15, 0.55, 0.6), 1)
+
+	# Bridge/command section (raised center)
+	var bridge_points = PackedVector2Array()
+	for i in range(6):
+		var angle = rot + TAU / 12 + i * TAU / 6
+		bridge_points.append(pos + Vector2(cos(angle), sin(angle)) * mothership_size * 0.45)
+	draw_colored_polygon(bridge_points, Color(0.35, 0.02, 0.28))
+
+	# Central void core (pulsing bright)
+	var core_pulse = sin(_global_time * 3) * 0.3 + 0.7
+	draw_circle(pos, 6 * core_pulse, Color(0.8, 0.15, 0.6, 0.5))
+	draw_circle(pos, 4 * core_pulse, Color(0.95, 0.3, 0.8, 0.8))
+	draw_circle(pos, 2, Color(1.0, 0.7, 0.95))
+
+	# Engine glows (rear of mothership)
+	var engine_dir = Vector2(cos(rot + PI), sin(rot + PI))
+	for eng in range(3):
+		var eng_offset = Vector2(-engine_dir.y, engine_dir.x) * (eng - 1) * 6
+		var eng_pos = pos + engine_dir * mothership_size * 0.8 + eng_offset
+		draw_circle(eng_pos, 3, Color(0.9, 0.15, 0.65, 0.9))
+		draw_circle(eng_pos, 5, Color(0.7, 0.1, 0.5, 0.4))
+
+	# Draw herald strength label
+	var font = ThemeDB.fallback_font
+	draw_string(font, pos + Vector2(-30, -45), "HERALD FLEET", HORIZONTAL_ALIGNMENT_CENTER, 60, 8, Color(0.8, 0.35, 0.65, 0.9))
+	draw_string(font, pos + Vector2(-20, -32), "STR: %d" % _herald_strength, HORIZONTAL_ALIGNMENT_CENTER, 40, 11, Color(1.0, 0.4, 0.85))
+
+func _draw_attack_indicator(_rect: Rect2, offset: Vector2) -> void:
+	var target_pos = _get_zone_pixel_pos(_herald_target_zone) + offset
+	var herald_pos = _herald_position + offset
+
+	# Multiple PURPLE attack beams
+	var rng = RandomNumberGenerator.new()
+	for beam in range(5):
+		rng.seed = int(_attack_flash_timer * 20 + beam * 100) % 10000
+		var beam_offset = Vector2(rng.randf_range(-8, 8), rng.randf_range(-8, 8))
+		var flash = sin(_attack_flash_timer * 10.0 + beam) * 0.5 + 0.5
+
+		# PURPLE/magenta attack beam (alien void)
+		draw_line(herald_pos + beam_offset, target_pos + beam_offset * 0.3, Color(0.9, 0.1, 0.7, flash * 0.8), 2.0)
+		# Bright magenta core
+		draw_line(herald_pos + beam_offset, target_pos + beam_offset * 0.3, Color(1.0, 0.6, 0.95, flash * 0.5), 1.0)
+
+	# Impact flashes at target
+	for i in range(3):
+		rng.seed = int(_attack_flash_timer * 15 + i * 50) % 10000
+		var impact_offset = Vector2(rng.randf_range(-20, 20), rng.randf_range(-20, 20))
+		var impact_flash = sin(_attack_flash_timer * 12.0 + i * 2) * 0.5 + 0.5
+		draw_circle(target_pos + impact_offset, 5 * impact_flash, Color(1.0, 0.5, 0.0, impact_flash * 0.7))
+
+func _draw_danger_vignette(rect: Rect2) -> void:
+	# Red vignette around edges during danger
+	var center = rect.size / 2
+	var max_dist = center.length()
+
+	# Draw gradient rectangles on edges
+	var edge_color = Color(0.8, 0.0, 0.0, _danger_pulse * 0.4)
+	var edge_size = 60 * _danger_pulse
+
+	# Top
+	draw_rect(Rect2(0, 0, rect.size.x, edge_size), Color(edge_color.r, edge_color.g, edge_color.b, edge_color.a * 0.5))
+	# Bottom
+	draw_rect(Rect2(0, rect.size.y - edge_size, rect.size.x, edge_size), Color(edge_color.r, edge_color.g, edge_color.b, edge_color.a * 0.5))
+	# Left
+	draw_rect(Rect2(0, 0, edge_size, rect.size.y), Color(edge_color.r, edge_color.g, edge_color.b, edge_color.a * 0.3))
+	# Right
+	draw_rect(Rect2(rect.size.x - edge_size, 0, edge_size, rect.size.y), Color(edge_color.r, edge_color.g, edge_color.b, edge_color.a * 0.3))
+
+# ============================================================================
+# ZOOM VIEWS - Galaxy, System, Planet
+# ============================================================================
+
+func _draw_galaxy_view(rect: Rect2) -> void:
+	## Galaxy view - Sol as a tiny point among billions
+	## Emotional purpose: Scale, loneliness - "Humanity's last light"
+
+	# Pure black space
+	draw_rect(rect, Color(0.005, 0.005, 0.01))
+
+	# Generate galaxy stars (spiral arms pattern)
+	var rng = RandomNumberGenerator.new()
+	var center = rect.size / 2
+
+	# Distant galaxy background - thousands of dim stars
+	rng.seed = 99999
+	for i in range(800):
+		var angle = rng.randf() * TAU
+		var dist = rng.randf_range(30, maxf(rect.size.x, rect.size.y) * 0.8)
+		# Spiral arm distribution
+		var arm_offset = fmod(angle * 2 + dist * 0.005, TAU)
+		var arm_strength = sin(arm_offset) * 0.4 + 0.6
+		var pos = center + Vector2(cos(angle), sin(angle)) * dist * arm_strength
+
+		var brightness = rng.randf_range(0.05, 0.3)
+		var twinkle = sin(_global_time * rng.randf_range(0.5, 2.0) + i * 0.1) * 0.15 + 0.85
+		brightness *= twinkle
+
+		# Various star colors
+		var star_hue = rng.randf()
+		var star_color: Color
+		if star_hue < 0.5:
+			star_color = Color(brightness, brightness, brightness * 1.1)  # Blue-white
+		elif star_hue < 0.7:
+			star_color = Color(brightness * 1.1, brightness * 0.9, brightness * 0.7)  # Yellow
+		elif star_hue < 0.85:
+			star_color = Color(brightness * 1.2, brightness * 0.7, brightness * 0.5)  # Orange
+		else:
+			star_color = Color(brightness * 1.3, brightness * 0.5, brightness * 0.4)  # Red giant
+
+		draw_circle(pos, rng.randf_range(0.3, 1.2), star_color)
+
+	# Draw galaxy dust lanes (darker areas)
+	rng.seed = 88888
+	for i in range(15):
+		var angle = rng.randf() * TAU
+		var dist = rng.randf_range(100, 300)
+		var dust_pos = center + Vector2(cos(angle), sin(angle)) * dist
+		var dust_size = rng.randf_range(40, 100)
+		draw_circle(dust_pos, dust_size, Color(0.0, 0.0, 0.02, 0.15))
+
+	# Draw nebula clouds in galaxy
+	rng.seed = 77777
+	for i in range(6):
+		var angle = rng.randf() * TAU
+		var dist = rng.randf_range(150, 350)
+		var nebula_pos = center + Vector2(cos(angle), sin(angle)) * dist
+		var nebula_color = Color(
+			rng.randf_range(0.1, 0.4),
+			rng.randf_range(0.0, 0.2),
+			rng.randf_range(0.2, 0.5),
+			0.02
+		)
+		for j in range(4):
+			var jitter = Vector2(rng.randf_range(-30, 30), rng.randf_range(-30, 30))
+			draw_circle(nebula_pos + jitter, rng.randf_range(30, 70), nebula_color)
+
+	# *** SOL - Humanity's Last Light ***
+	# Sol is a tiny but distinct point
+	var sol_pos = center + Vector2(rect.size.x * 0.15, rect.size.y * 0.1)  # Off-center (not special in the galaxy)
+
+	# Pulsing marker - the hope of humanity
+	var pulse = sin(_galaxy_sol_pulse * 2.0) * 0.3 + 0.7
+	var danger_color = Color(1.0, 0.3, 0.2) if _narrative_state >= 2 else Color(0.3, 0.8, 1.0)
+
+	# Soft outer glow (larger when in danger)
+	var glow_size = 20 * pulse if _narrative_state >= 2 else 12 * pulse
+	draw_circle(sol_pos, glow_size, Color(danger_color.r, danger_color.g, danger_color.b, 0.1))
+	draw_circle(sol_pos, glow_size * 0.6, Color(danger_color.r, danger_color.g, danger_color.b, 0.2))
+
+	# Sol itself - bright yellow-white point
+	draw_circle(sol_pos, 4, Color(1.0, 0.95, 0.7))
+	draw_circle(sol_pos, 2, Color(1.0, 1.0, 1.0))
+
+	# Crosshair marker
+	var cross_len = 15 * pulse
+	var cross_color = Color(danger_color.r, danger_color.g, danger_color.b, 0.7 * pulse)
+	draw_line(sol_pos - Vector2(cross_len + 8, 0), sol_pos - Vector2(8, 0), cross_color, 1.0)
+	draw_line(sol_pos + Vector2(8, 0), sol_pos + Vector2(cross_len + 8, 0), cross_color, 1.0)
+	draw_line(sol_pos - Vector2(0, cross_len + 8), sol_pos - Vector2(0, 8), cross_color, 1.0)
+	draw_line(sol_pos + Vector2(0, 8), sol_pos + Vector2(0, cross_len + 8), cross_color, 1.0)
+
+	# "SOL" label
+	var font = ThemeDB.fallback_font
+	var label_text = "SOL"
+	draw_string(font, sol_pos + Vector2(-10, -25), label_text, HORIZONTAL_ALIGNMENT_CENTER, 20, 10, cross_color)
+
+	# Status text based on narrative state
+	var status_text: String
+	var status_color: Color
+	match _narrative_state:
+		0:
+			status_text = "ALL QUIET"
+			status_color = Color(0.3, 0.8, 0.3, 0.7 * pulse)
+		1:
+			status_text = "CONTACT DETECTED"
+			status_color = Color(1.0, 0.9, 0.3, 0.8 * pulse)
+		2:
+			status_text = "UNDER ATTACK"
+			status_color = Color(1.0, 0.4, 0.2, 0.9 * pulse)
+		3:
+			status_text = "CRITICAL - FINAL STAND"
+			status_color = Color(1.0, 0.2, 0.2, pulse)
+
+	draw_string(font, sol_pos + Vector2(-50, 30), status_text, HORIZONTAL_ALIGNMENT_CENTER, 100, 9, status_color)
+
+	# Draw herald origin (menacing PURPLE presence at edge)
+	if _narrative_state > 0:
+		var herald_galaxy_pos = Vector2(rect.size.x * 0.05, rect.size.y * 0.5)
+		var herald_pulse = sin(_global_time * 1.5) * 0.3 + 0.7
+
+		# Dark PURPLE void presence
+		for i in range(5):
+			draw_circle(herald_galaxy_pos, 30 - i * 5, Color(0.35, 0.0, 0.3, 0.05 * herald_pulse))
+		draw_circle(herald_galaxy_pos, 8, Color(0.6, 0.1, 0.5, 0.6 * herald_pulse))
+		draw_circle(herald_galaxy_pos, 3, Color(0.9, 0.3, 0.8))
+
+		# Threat indicator line pointing toward Sol (purple)
+		if _narrative_state >= 2:
+			var threat_dir = (sol_pos - herald_galaxy_pos).normalized()
+			var dash_count = 8
+			for i in range(dash_count):
+				var progress = float(i) / dash_count
+				var dash_start = herald_galaxy_pos + threat_dir * (40 + progress * 60)
+				var dash_end = dash_start + threat_dir * 6
+				var dash_alpha = (1.0 - progress) * 0.5 * herald_pulse
+				draw_line(dash_start, dash_end, Color(0.8, 0.15, 0.6, dash_alpha), 2.0)
+
+		draw_string(font, herald_galaxy_pos + Vector2(-20, -20), "HERALD", HORIZONTAL_ALIGNMENT_CENTER, 40, 8, Color(0.7, 0.2, 0.6, 0.8 * herald_pulse))
+
+	# Caption at bottom
+	var caption = "AMONG THE STARS, ONE LIGHT FLICKERS"
+	var caption_color = Color(0.5, 0.5, 0.6, 0.6)
+	draw_string(font, Vector2(rect.size.x / 2 - 100, rect.size.y - 30), caption, HORIZONTAL_ALIGNMENT_CENTER, 200, 11, caption_color)
+
+func _draw_planet_view(rect: Rect2) -> void:
+	## Planet view - Single zone enlarged with staging areas
+	## Emotional purpose: Intense focus during attacks
+
+	if _zoom_focus_zone < 0:
+		# No zone focused, fall back to system view
+		_draw_system_view(rect)
+		return
+
+	var offset = _screen_shake
+	var center = rect.size / 2
+	var zone_id = _zoom_focus_zone
+
+	# Dark space background
+	draw_rect(rect, Color(0.01, 0.01, 0.02))
+
+	# Localized starfield
+	var rng = RandomNumberGenerator.new()
+	rng.seed = zone_id * 1000 + 12345
+	for i in range(150):
+		var pos = Vector2(rng.randf() * rect.size.x, rng.randf() * rect.size.y)
+		var brightness = rng.randf_range(0.15, 0.6)
+		var twinkle = sin(_global_time * rng.randf_range(1.0, 3.0) + i) * 0.2 + 0.8
+		draw_circle(pos, rng.randf_range(0.5, 1.5), Color(brightness * twinkle, brightness * twinkle, brightness * twinkle * 1.1))
+
+	# Zone data
+	var zone_data = _zones.get(zone_id, {})
+	var status = zone_data.get("status", FCWTypes.ZoneStatus.CONTROLLED)
+	var zone_color = ZONE_COLORS.get(zone_id, Color.WHITE)
+	var zone_name = FCWTypes.get_zone_name(zone_id)
+
+	# Modify color based on status
+	if status == FCWTypes.ZoneStatus.FALLEN:
+		zone_color = zone_color.darkened(0.7)
+	elif status == FCWTypes.ZoneStatus.UNDER_ATTACK:
+		var pulse = sin(_attack_flash_timer * 4.0) * 0.4 + 0.6
+		zone_color = zone_color.lerp(Color.RED, 0.5 * pulse)
+
+	# Large planet in center
+	var planet_size = minf(rect.size.x, rect.size.y) * 0.25
+	var planet_pos = center + offset
+
+	# Atmospheric glow
+	if status != FCWTypes.ZoneStatus.FALLEN:
+		draw_circle(planet_pos, planet_size + 20, Color(zone_color.r, zone_color.g, zone_color.b, 0.1))
+		draw_circle(planet_pos, planet_size + 10, Color(zone_color.r, zone_color.g, zone_color.b, 0.15))
+
+	# The planet
+	draw_circle(planet_pos, planet_size, zone_color)
+
+	# Planet surface details
+	rng.seed = zone_id * 100
+	for i in range(8):
+		var detail_angle = rng.randf() * TAU
+		var detail_dist = rng.randf_range(planet_size * 0.2, planet_size * 0.7)
+		var detail_pos = planet_pos + Vector2(cos(detail_angle), sin(detail_angle)) * detail_dist
+		var detail_size = rng.randf_range(planet_size * 0.05, planet_size * 0.15)
+		var detail_color = zone_color.darkened(rng.randf_range(0.1, 0.3))
+		draw_circle(detail_pos, detail_size, detail_color)
+
+	# Planet shine
+	if status != FCWTypes.ZoneStatus.FALLEN:
+		var shine_pos = planet_pos + Vector2(-planet_size * 0.35, -planet_size * 0.35)
+		draw_circle(shine_pos, planet_size * 0.2, Color(1, 1, 1, 0.25))
+
+	# Zone rings if Saturn
+	if zone_id == FCWTypes.ZoneId.SATURN:
+		_draw_planet_view_rings(planet_pos, planet_size)
+
+	# Draw staging areas around the planet (enlarged)
+	var staging_list = STAGING_AREAS.get(zone_id, [])
+	for staging in staging_list:
+		var staging_pos = planet_pos + staging.offset * 2.5  # Enlarge offsets
+		var staging_size = staging.size * 2.0  # Bigger staging areas
+
+		match staging.type:
+			StagingType.MOON:
+				_draw_planet_view_moon(staging_pos, staging_size, staging.name)
+			StagingType.ASTEROID_CLUSTER:
+				_draw_planet_view_asteroid_cluster(staging_pos, staging_size, staging.name)
+			StagingType.STATION:
+				_draw_planet_view_station(staging_pos, staging_size, staging.name)
+
+	# Draw active skirmishes in this zone
+	for skirmish in _skirmishes:
+		if skirmish.zone_id == zone_id:
+			var skirmish_pos = planet_pos + (skirmish.pos - _get_zone_pixel_pos(zone_id)) * 2.5
+			_draw_planet_view_skirmish(skirmish, skirmish_pos)
+
+	# Draw herald attack ships if targeting this zone
+	if _herald_target_zone == zone_id:
+		for ship in _herald_ships:
+			var ship_world_pos = ship.pos
+			var zone_world_pos = _get_zone_pixel_pos(zone_id)
+			var relative_pos = ship_world_pos - zone_world_pos
+			var planet_view_pos = planet_pos + relative_pos * 2.0
+			_draw_planet_view_herald_ship(ship, planet_view_pos)
+
+	# Defense status UI
+	var font = ThemeDB.fallback_font
+	var defense = zone_data.get("defense", 0)
+
+	# Zone name (large)
+	draw_string(font, Vector2(rect.size.x / 2 - 60, 40), zone_name.to_upper(), HORIZONTAL_ALIGNMENT_CENTER, 120, 18, Color.WHITE)
+
+	# Status
+	var status_text: String
+	var status_color: Color
+	match status:
+		FCWTypes.ZoneStatus.CONTROLLED:
+			status_text = "CONTROLLED"
+			status_color = Color(0.3, 0.9, 0.3)
+		FCWTypes.ZoneStatus.UNDER_ATTACK:
+			status_text = "UNDER ATTACK"
+			status_color = Color(1.0, 0.3, 0.2)
+		FCWTypes.ZoneStatus.FALLEN:
+			status_text = "FALLEN"
+			status_color = Color(0.5, 0.3, 0.3)
+	draw_string(font, Vector2(rect.size.x / 2 - 40, 60), status_text, HORIZONTAL_ALIGNMENT_CENTER, 80, 12, status_color)
+
+	# Defense value
+	var def_text = "DEFENSE: %d" % defense
+	var def_color: Color
+	if defense >= _herald_strength * 1.3:
+		def_color = Color(0.3, 1.0, 0.3)
+	elif defense >= _herald_strength:
+		def_color = Color(1.0, 1.0, 0.3)
+	else:
+		def_color = Color(1.0, 0.3, 0.3)
+	draw_string(font, Vector2(20, rect.size.y - 60), def_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, def_color)
+
+	# Herald strength if attacking
+	if _herald_target_zone == zone_id:
+		var threat_text = "HERALD STRENGTH: %d" % _herald_strength
+		draw_string(font, Vector2(20, rect.size.y - 40), threat_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1.0, 0.3, 0.2))
+
+	# Danger vignette if under attack
+	if status == FCWTypes.ZoneStatus.UNDER_ATTACK or _danger_pulse > 0.01:
+		_draw_danger_vignette(rect)
+
+func _draw_planet_view_rings(center: Vector2, planet_size: float) -> void:
+	var ring_colors = [
+		Color(0.8, 0.75, 0.6, 0.3),
+		Color(0.85, 0.8, 0.65, 0.25),
+		Color(0.75, 0.7, 0.55, 0.2),
+	]
+	for i in range(3):
+		var ring_radius = planet_size * 1.5 - i * 15
+		if ring_radius > 0:
+			var points = PackedVector2Array()
+			var point_count = 48
+			for j in range(point_count + 1):
+				var angle = j * TAU / point_count
+				var point = center + Vector2(cos(angle) * ring_radius, sin(angle) * ring_radius * 0.3)
+				points.append(point)
+			for j in range(point_count / 2):
+				var idx = j + point_count / 4
+				if idx < points.size() - 1:
+					draw_line(points[idx], points[idx + 1], ring_colors[i], 4.0)
+
+func _draw_planet_view_moon(pos: Vector2, size: float, moon_name: String) -> void:
+	var base_color = Color(0.55, 0.55, 0.6)
+
+	# Glow
+	draw_circle(pos, size + 4, Color(0.4, 0.4, 0.5, 0.2))
+	draw_circle(pos, size, base_color)
+
+	# Craters
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(moon_name)
+	for i in range(5):
+		var crater_offset = Vector2(rng.randf_range(-size * 0.6, size * 0.6),
+									 rng.randf_range(-size * 0.6, size * 0.6))
+		var crater_size = size * rng.randf_range(0.1, 0.25)
+		draw_circle(pos + crater_offset, crater_size, base_color.darkened(0.2))
+
+	# Highlight
+	draw_circle(pos + Vector2(-size * 0.3, -size * 0.3), size * 0.25, Color(0.75, 0.75, 0.8, 0.5))
+
+	# Label
+	var font = ThemeDB.fallback_font
+	draw_string(font, pos + Vector2(-30, size + 15), moon_name, HORIZONTAL_ALIGNMENT_CENTER, 60, 10, Color(0.7, 0.7, 0.8))
+
+func _draw_planet_view_asteroid_cluster(pos: Vector2, size: float, cluster_name: String) -> void:
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(cluster_name)
+
+	var asteroid_count = int(size / 1.5) + 5
+	for i in range(asteroid_count):
+		var asteroid_offset = Vector2(rng.randf_range(-size * 1.2, size * 1.2),
+									   rng.randf_range(-size * 1.2, size * 1.2))
+		var asteroid_size = rng.randf_range(2, 6)
+		var color = Color(rng.randf_range(0.35, 0.55),
+						  rng.randf_range(0.3, 0.5),
+						  rng.randf_range(0.25, 0.45))
+		draw_circle(pos + asteroid_offset, asteroid_size, color)
+
+	# Dashed boundary
+	var segment_count = 24
+	for i in range(segment_count):
+		if i % 2 == 0:
+			var angle_start = i * TAU / segment_count + _global_time * 0.05
+			var angle_end = angle_start + TAU / segment_count * 0.6
+			draw_arc(pos, size * 1.5, angle_start, angle_end, 6, Color(0.4, 0.4, 0.35, 0.3), 1.5)
+
+	# Label
+	var font = ThemeDB.fallback_font
+	draw_string(font, pos + Vector2(-40, size * 1.5 + 15), cluster_name, HORIZONTAL_ALIGNMENT_CENTER, 80, 10, Color(0.6, 0.6, 0.5))
+
+func _draw_planet_view_station(pos: Vector2, size: float, station_name: String) -> void:
+	var rotation = _global_time * 0.3
+
+	# Central hub (larger)
+	draw_circle(pos, size * 0.8, Color(0.55, 0.6, 0.65))
+	draw_circle(pos, size * 0.5, Color(0.65, 0.7, 0.75))
+
+	# Rotating arms
+	for i in range(4):
+		var arm_angle = rotation + i * TAU / 4
+		var arm_end = pos + Vector2(cos(arm_angle), sin(arm_angle)) * size * 1.5
+		draw_line(pos, arm_end, Color(0.55, 0.6, 0.65), 3.0)
+		draw_circle(arm_end, size * 0.35, Color(0.6, 0.65, 0.7))
+
+	# Blinking lights
+	var blink = sin(_global_time * 3.0) * 0.5 + 0.5
+	draw_circle(pos, 4, Color(0.2, 1.0, 0.3, blink))
+
+	# Label
+	var font = ThemeDB.fallback_font
+	draw_string(font, pos + Vector2(-35, size * 1.5 + 12), station_name, HORIZONTAL_ALIGNMENT_CENTER, 70, 10, Color(0.6, 0.8, 0.7))
+
+func _draw_planet_view_skirmish(skirmish: Skirmish, pos: Vector2) -> void:
+	var alpha = skirmish.intensity
+	var pulse = sin(_global_time * 4.0) * 0.3 + 0.7
+	var radius = skirmish.radius * 1.5 * pulse
+
+	# Combat zone rings
+	if skirmish.is_herald_attack:
+		draw_arc(pos, radius, 0, TAU, 32, Color(1.0, 0.2, 0.1, alpha * 0.7), 3.0)
+		draw_arc(pos, radius * 0.7, 0, TAU, 28, Color(1.0, 0.4, 0.2, alpha * 0.4), 2.0)
+	else:
+		draw_arc(pos, radius, 0, TAU, 32, Color(0.3, 0.6, 1.0, alpha * 0.6), 2.5)
+
+	# Battle sparks
+	var rng = RandomNumberGenerator.new()
+	rng.seed = int(_global_time * 10) % 1000
+	for i in range(12):
+		var spark_pos = pos + Vector2(rng.randf_range(-radius, radius), rng.randf_range(-radius, radius))
+		var spark_alpha = rng.randf_range(0.4, 0.9) * alpha
+		draw_circle(spark_pos, rng.randf_range(2, 5), Color(1.0, 0.8, 0.3, spark_alpha))
+
+	# Label
+	if skirmish.staging_name != "":
+		var font = ThemeDB.fallback_font
+		var label = "BATTLE: %s" % skirmish.staging_name
+		var label_color = Color(1.0, 0.4, 0.3, alpha) if skirmish.is_herald_attack else Color(0.5, 0.8, 1.0, alpha)
+		draw_string(font, pos + Vector2(-50, -radius - 10), label, HORIZONTAL_ALIGNMENT_CENTER, 100, 11, label_color)
+
+func _draw_planet_view_herald_ship(ship: Ship, pos: Vector2) -> void:
+	# Simplified herald ship for planet view - PURPLE alien colors
+	var tangent = ship.get_bezier_tangent(ship.progress)
+	var dir = tangent.normalized() if tangent.length() > 0.1 else Vector2(1, 0)
+	var perp = Vector2(-dir.y, dir.x)
+	var ship_size = ship.size * 1.5
+
+	# PURPLE engine trail
+	var trail_end = pos - dir * ship_size * 2
+	draw_line(pos, trail_end, Color(0.9, 0.2, 0.7, 0.6), 3.0)
+	draw_line(pos, trail_end, Color(0.7, 0.3, 0.6, 0.3), 6.0)
+
+	# Hull (dark purple)
+	var points = PackedVector2Array([
+		pos + dir * ship_size * 1.5,
+		pos + perp * ship_size * 0.6,
+		pos - dir * ship_size,
+		pos - perp * ship_size * 0.6,
+	])
+	draw_colored_polygon(points, Color(0.5, 0.1, 0.4))
+
+	# Core glow (magenta)
+	draw_circle(pos, ship_size * 0.3, Color(0.9, 0.3, 0.8, 0.8))
+
+func _draw_zoom_transition(rect: Rect2) -> void:
+	## Draw transition overlay between zoom levels
+	var alpha = sin(_zoom_transition * PI) * 0.3  # Fade in/out during middle of transition
+
+	# Flash overlay
+	draw_rect(rect, Color(1.0, 1.0, 1.0, alpha))
+
+func _update_zoom(delta: float) -> void:
+	## Update zoom transition animation
+	if _zoom_level != _zoom_target:
+		_zoom_transition += delta * 2.0  # 0.5 second transition
+		if _zoom_transition >= 1.0:
+			_zoom_transition = 1.0
+			_zoom_level = _zoom_target
+
+	# Update galaxy Sol pulse
+	_galaxy_sol_pulse += delta
+
+# ============================================================================
+# POSITIONING
+# ============================================================================
+
+func _get_zone_pixel_pos(zone_id: int) -> Vector2:
+	var normalized_pos = ZONE_POSITIONS.get(zone_id, Vector2(0.5, 0.5))
+	return normalized_pos * size
+
+func get_zone_screen_position(zone_id: int) -> Vector2:
+	## Returns the global screen position of a zone (for positioning UI elements near it)
+	var local_pos = _get_zone_pixel_pos(zone_id)
+	return global_position + local_pos
+
+func get_zone_size(zone_id: int) -> float:
+	## Returns the display size of a zone
+	return ZONE_SIZES.get(zone_id, 25.0)
+
+# ============================================================================
+# EFFECTS - UPDATE FUNCTIONS
+# ============================================================================
+
+func _update_particles(delta: float) -> void:
+	var i = 0
+	while i < _particles.size():
+		var p = _particles[i]
+		p.pos += p.vel * delta
+		p.life -= delta
+		if p.life <= 0:
+			_particles.remove_at(i)
+		else:
+			i += 1
+
+func _update_ships(delta: float) -> void:
+	var i = 0
+	while i < _ships.size():
+		var ship = _ships[i]
+
+		# Handle delayed start (negative progress)
+		if ship.progress < 0:
+			ship.progress += delta * 2.0  # Tick up waiting ships
+			i += 1
+			continue
+
+		# Speed varies by ship class
+		var base_speed = 0.4
+		match ship.ship_class:
+			Ship.ShipClass.FRIGATE:
+				base_speed = 0.6  # Fast
+			Ship.ShipClass.CRUISER:
+				base_speed = 0.45
+			Ship.ShipClass.CARRIER:
+				base_speed = 0.3  # Slow
+			Ship.ShipClass.DREADNOUGHT:
+				base_speed = 0.35
+
+		# Acceleration curve: fast start, cruise, slow arrival
+		var accel_curve = 1.0
+		if ship.progress < 0.15:
+			# Accelerating (afterburner)
+			accel_curve = 0.5 + ship.progress * 3.3  # 0.5 -> 1.0
+			ship.afterburner = true
+			ship.engine_intensity = 1.5
+		elif ship.progress > 0.85:
+			# Decelerating
+			accel_curve = 1.0 - (ship.progress - 0.85) * 4  # 1.0 -> 0.4
+			ship.afterburner = false
+			ship.engine_intensity = 0.6
+		else:
+			# Cruising
+			ship.afterburner = false
+			ship.engine_intensity = 1.0 + sin(_global_time * 3 + float(i)) * 0.2
+
+		ship.progress += delta * base_speed * ship.speed * accel_curve
+
+		# Update afterburner timer
+		if ship.afterburner:
+			ship.afterburner_timer += delta
+
+		# Position along bezier curve
+		var old_pos = ship.pos
+		ship.pos = ship.get_bezier_pos(minf(ship.progress, 1.0)) + ship.formation_offset
+
+		# Calculate banking based on curve direction change
+		var tangent = ship.get_bezier_tangent(ship.progress)
+		var target_rotation = tangent.angle()
+		var rotation_delta = angle_difference(ship.rotation, target_rotation)
+		ship.bank_angle = clampf(rotation_delta * 3, -0.5, 0.5)  # Bank into turns
+		ship.rotation = target_rotation
+
+		# Add to trail (longer trails)
+		ship.trail.append(ship.pos)
+		var max_trail = 25 if ship.ship_class == Ship.ShipClass.FRIGATE else 20
+		if ship.afterburner:
+			max_trail += 10
+		while ship.trail.size() > max_trail:
+			ship.trail.pop_front()
+
+		# Spawn engine particles
+		if randf() < delta * 10 * ship.engine_intensity:
+			_spawn_engine_particle(ship, tangent.normalized())
+
+		if ship.progress >= 1.0:
+			# Ship arrived - spawn dramatic warp-in flash
+			_spawn_arrival_effect(ship.target + ship.formation_offset)
+			_ships.remove_at(i)
+		else:
+			i += 1
+
+func _spawn_engine_particle(ship: Ship, dir: Vector2) -> void:
+	var p = Particle.new()
+	p.pos = ship.pos - dir * ship.size * 0.7
+	p.pos += Vector2(randf_range(-3, 3), randf_range(-3, 3))
+	p.vel = -dir * randf_range(20, 50) + Vector2(randf_range(-10, 10), randf_range(-10, 10))
+	p.color = Color(ship.engine_color.r, ship.engine_color.g, ship.engine_color.b, 0.8)
+	p.life = randf_range(0.2, 0.4)
+	p.max_life = p.life
+	p.size = randf_range(1, 3)
+	_particles.append(p)
+
+func _spawn_arrival_effect(pos: Vector2) -> void:
+	# Warp flash
+	_warp_flashes.append({"pos": pos, "life": 1.0})
+
+	# Arrival particles burst
+	for j in range(15):
+		var p = Particle.new()
+		p.pos = pos
+		var angle = randf() * TAU
+		var speed = randf_range(30, 80)
+		p.vel = Vector2(cos(angle), sin(angle)) * speed
+		p.color = Color(0.5, 0.8, 1.0, 1.0)
+		p.life = randf_range(0.3, 0.6)
+		p.max_life = p.life
+		p.size = randf_range(2, 4)
+		_particles.append(p)
+
+func _update_lasers(delta: float) -> void:
+	var i = 0
+	while i < _lasers.size():
+		_lasers[i].life -= delta
+		if _lasers[i].life <= 0:
+			_lasers.remove_at(i)
+		else:
+			i += 1
+
+func _update_explosions(delta: float) -> void:
+	var i = 0
+	while i < _explosions.size():
+		_explosions[i].life -= delta
+		if _explosions[i].life <= 0:
+			_explosions.remove_at(i)
+		else:
+			i += 1
+
+func _update_warp_flashes(delta: float) -> void:
+	var i = 0
+	while i < _warp_flashes.size():
+		_warp_flashes[i].life -= delta * 2.0
+		if _warp_flashes[i].life <= 0:
+			_warp_flashes.remove_at(i)
+		else:
+			i += 1
+
+func _update_skirmishes(delta: float) -> void:
+	var i = 0
+	while i < _skirmishes.size():
+		var skirmish = _skirmishes[i]
+
+		# Spawn combat effects
+		skirmish.laser_timer -= delta
+		skirmish.explosion_timer -= delta
+
+		if skirmish.laser_timer <= 0 and skirmish.intensity > 0.2:
+			_spawn_skirmish_laser(skirmish)
+			skirmish.laser_timer = randf_range(0.05, 0.15) / skirmish.intensity
+
+		if skirmish.explosion_timer <= 0 and skirmish.intensity > 0.3:
+			_spawn_skirmish_explosion(skirmish)
+			skirmish.explosion_timer = randf_range(0.2, 0.5) / skirmish.intensity
+
+		# Fade intensity over time
+		skirmish.intensity -= delta * 0.1
+
+		if skirmish.intensity <= 0:
+			_skirmishes.remove_at(i)
+		else:
+			i += 1
+
+func _update_attack_waves(delta: float) -> void:
+	var i = 0
+	while i < _attack_waves.size():
+		var wave = _attack_waves[i]
+
+		wave.spawn_timer -= delta
+
+		# Spawn herald ships in waves
+		if wave.spawn_timer <= 0 and wave.ships_spawned < wave.wave_size:
+			_spawn_herald_attack_ship(wave)
+			wave.ships_spawned += 1
+			wave.spawn_timer = randf_range(0.1, 0.3)  # Staggered spawning
+
+		# Remove wave when all ships spawned
+		if wave.ships_spawned >= wave.wave_size:
+			_attack_waves.remove_at(i)
+		else:
+			i += 1
+
+func _update_herald_ships(delta: float) -> void:
+	var i = 0
+	while i < _herald_ships.size():
+		var ship = _herald_ships[i]
+
+		# Similar to regular ships but with different behavior
+		if ship.progress < 0:
+			ship.progress += delta * 2.0
+			i += 1
+			continue
+
+		# Herald ships are fast and aggressive
+		var speed = 0.5 * ship.speed
+		ship.progress += delta * speed
+
+		# Update position
+		ship.pos = ship.get_bezier_pos(minf(ship.progress, 1.0)) + ship.formation_offset
+
+		# Trail
+		ship.trail.append(ship.pos)
+		while ship.trail.size() > 15:
+			ship.trail.pop_front()
+
+		# Spawn ALIEN menacing particles - purple/magenta
+		if randf() < delta * 8:
+			var p = Particle.new()
+			var tangent = ship.get_bezier_tangent(ship.progress).normalized()
+			p.pos = ship.pos - tangent * ship.size
+			p.vel = -tangent * randf_range(30, 60) + Vector2(randf_range(-15, 15), randf_range(-15, 15))
+			# Purple/magenta alien engine trail
+			p.color = Color(0.9, randf_range(0.1, 0.3), randf_range(0.5, 0.8), 0.8)
+			p.life = randf_range(0.3, 0.5)
+			p.max_life = p.life
+			p.size = randf_range(2, 5)
+			_particles.append(p)
+
+		if ship.progress >= 1.0:
+			# Herald ship arrived - start skirmish at staging area
+			if not ship.formation_offset.is_zero_approx():
+				# This was part of a wave targeting a staging area
+				_spawn_herald_arrival_effect(ship.target + ship.formation_offset)
+			else:
+				_spawn_herald_arrival_effect(ship.target)
+			_herald_ships.remove_at(i)
+		else:
+			i += 1
+
+func _spawn_herald_arrival_effect(pos: Vector2) -> void:
+	# ALIEN purple/magenta warp flash (distinct from human blue)
+	_warp_flashes.append({"pos": pos, "life": 1.2, "color": Color(0.8, 0.1, 0.6)})
+
+	# Alien void burst - purple/magenta swirling particles
+	for j in range(15):
+		var p = Particle.new()
+		p.pos = pos
+		var angle = randf() * TAU
+		var speed = randf_range(30, 70)
+		p.vel = Vector2(cos(angle), sin(angle)) * speed
+		# Purple/magenta alien colors - distinctly NOT red
+		p.color = Color(0.8, randf_range(0.1, 0.3), randf_range(0.5, 0.9), 1.0)
+		p.life = randf_range(0.4, 0.8)
+		p.max_life = p.life
+		p.size = randf_range(3, 6)
+		_particles.append(p)
+
+	# Inner void core (bright purple)
+	for j in range(5):
+		var p = Particle.new()
+		p.pos = pos + Vector2(randf_range(-5, 5), randf_range(-5, 5))
+		p.vel = Vector2.ZERO
+		p.color = Color(1.0, 0.5, 1.0, 1.0)  # Bright magenta
+		p.life = 0.3
+		p.max_life = p.life
+		p.size = randf_range(4, 8)
+		_particles.append(p)
+
+	# Screen shake
+	_screen_shake_intensity = maxf(_screen_shake_intensity, 6.0)
+
+func _spawn_skirmish_laser(skirmish: Skirmish) -> void:
+	var laser = Laser.new()
+
+	# Random positions within skirmish zone
+	var angle1 = randf() * TAU
+	var angle2 = randf() * TAU
+	var dist1 = randf_range(5, skirmish.radius * 0.8)
+	var dist2 = randf_range(5, skirmish.radius * 0.8)
+
+	laser.start = skirmish.pos + Vector2(cos(angle1), sin(angle1)) * dist1
+	laser.end = skirmish.pos + Vector2(cos(angle2), sin(angle2)) * dist2
+
+	# Color based on who's shooting
+	if skirmish.is_herald_attack:
+		# Mixed - Herald purple vs Earth blue
+		if randf() > 0.5:
+			laser.color = Color(0.9, 0.2, 0.8)  # Alien purple/magenta
+		else:
+			laser.color = Color(0.3, 0.7, 1.0)  # Earth blue (defenders)
+	else:
+		laser.color = Color(0.3, 0.7, 1.0)  # Earth blue
+
+	laser.life = randf_range(0.1, 0.2)
+	laser.width = randf_range(1.0, 2.5)
+	_lasers.append(laser)
+
+func _spawn_skirmish_explosion(skirmish: Skirmish) -> void:
+	var exp = Explosion.new()
+
+	var angle = randf() * TAU
+	var dist = randf_range(0, skirmish.radius * 0.7)
+	exp.pos = skirmish.pos + Vector2(cos(angle), sin(angle)) * dist
+
+	exp.max_radius = randf_range(8, 20)
+	exp.life = randf_range(0.3, 0.5)
+	# Mixed colors for battle explosions - purple for alien, blue/orange for human
+	if skirmish.is_herald_attack and randf() > 0.4:
+		exp.color = Color(0.8, randf_range(0.2, 0.5), randf_range(0.6, 0.9))  # Purple/magenta
+	else:
+		exp.color = Color(0.3, randf_range(0.5, 0.8), 1.0)  # Blue human
+	_explosions.append(exp)
+
+	# Small debris
+	for j in range(3):
+		var p = Particle.new()
+		p.pos = exp.pos
+		p.vel = Vector2(randf_range(-60, 60), randf_range(-60, 60))
+		p.color = Color(1.0, 0.5, 0.2, 1.0)
+		p.life = randf_range(0.2, 0.4)
+		p.max_life = p.life
+		p.size = randf_range(1, 2)
+		_particles.append(p)
+
+func _spawn_herald_attack_ship(wave: AttackWave) -> void:
+	var ship = Ship.new()
+
+	# Start from where the wave originated (NOT current herald position)
+	# This prevents ships from spawning at wrong locations when herald has moved
+	var from_pos = wave.spawn_position if wave.spawn_position != Vector2.ZERO else _herald_position
+	var to_zone_pos = _get_zone_pixel_pos(wave.target_zone)
+
+	# Target the staging area if specified
+	var target_pos = to_zone_pos
+	if not wave.target_staging.is_empty():
+		target_pos = to_zone_pos + wave.target_staging.offset
+
+	ship.start_pos = from_pos + Vector2(randf_range(-20, 20), randf_range(-20, 20))
+	ship.target = target_pos
+	ship.pos = ship.start_pos
+
+	# Curved aggressive flight path
+	var midpoint = (ship.start_pos + ship.target) / 2
+	var direction = (ship.target - ship.start_pos).normalized()
+	var perpendicular = Vector2(-direction.y, direction.x)
+	var curve_strength = ship.start_pos.distance_to(ship.target) * randf_range(0.15, 0.35)
+	ship.control_point = midpoint + perpendicular * curve_strength * (1 if randf() > 0.5 else -1)
+
+	# Herald ship properties
+	ship.ship_class = Ship.ShipClass.FRIGATE  # Herald use frigate-like small attack craft
+	ship.size = randf_range(6, 10)
+	ship.speed = randf_range(1.2, 1.6)  # Fast and aggressive
+	# ALIEN purple/magenta colors - distinctly different from Earth blue
+	ship.color = Color(0.5, 0.1, 0.4)  # Dark purple hull
+	ship.engine_color = Color(0.9, 0.2, 0.7)  # Bright magenta engine
+
+	# Stagger spawning
+	ship.progress = -wave.ships_spawned * 0.08
+	ship.formation_offset = perpendicular * (wave.ships_spawned - wave.wave_size / 2.0) * 15
+
+	ship.trail = []
+	ship.rotation = direction.angle()
+	_herald_ships.append(ship)
+
+# ============================================================================
+# EFFECTS - SPAWN FUNCTIONS
+# ============================================================================
+
+func _spawn_herald_trail(from_pos: Vector2) -> void:
+	# Spawn menacing red particles behind herald
+	for j in range(2):
+		var p = Particle.new()
+		p.pos = from_pos + Vector2(randf_range(-5, 5), randf_range(-5, 5))
+		p.vel = Vector2(randf_range(-20, 20), randf_range(-20, 20))
+		p.color = Color(1.0, randf_range(0.0, 0.3), 0.0, 0.8)
+		p.life = randf_range(0.3, 0.8)
+		p.max_life = p.life
+		p.size = randf_range(2, 5)
+		_particles.append(p)
+
+func _spawn_combat_laser() -> void:
+	# Spawn laser between herald and target zone
+	var target_pos = _get_zone_pixel_pos(_herald_target_zone)
+	var zone_size = ZONE_SIZES.get(_herald_target_zone, 20.0)
+
+	var laser = Laser.new()
+	# From herald or from defenders
+	if randf() > 0.4:
+		# HERALD attacking - purple/magenta alien beams
+		laser.start = _herald_position + Vector2(randf_range(-10, 10), randf_range(-10, 10))
+		laser.end = target_pos + Vector2(randf_range(-zone_size, zone_size), randf_range(-zone_size, zone_size))
+		laser.color = Color(0.9, 0.2, 0.75)  # Purple/magenta (alien)
+	else:
+		# Defenders shooting back - BLUE (human)
+		laser.start = target_pos + Vector2(randf_range(-zone_size, zone_size), randf_range(-zone_size, zone_size))
+		laser.end = _herald_position + Vector2(randf_range(-15, 15), randf_range(-15, 15))
+		laser.color = Color(0.3, 0.8, 1.0)  # Blue (human)
+
+	laser.life = 0.15 + randf() * 0.15
+	laser.width = 1.0 + randf() * 2.0
+	_lasers.append(laser)
+
+func _spawn_combat_explosion() -> void:
+	var target_pos = _get_zone_pixel_pos(_herald_target_zone)
+	var zone_size = ZONE_SIZES.get(_herald_target_zone, 20.0)
+
+	var exp = Explosion.new()
+	# Explosions around the battle area
+	exp.pos = target_pos + Vector2(randf_range(-zone_size - 20, zone_size + 20), randf_range(-zone_size - 20, zone_size + 20))
+	exp.max_radius = randf_range(8, 25)
+	exp.life = 0.4 + randf() * 0.3
+	# Mixed combat colors - purple alien, blue human
+	if randf() > 0.5:
+		exp.color = Color(0.8, randf_range(0.2, 0.4), randf_range(0.6, 0.9))  # Purple/magenta alien
+	else:
+		exp.color = Color(0.3, randf_range(0.5, 0.8), 1.0)  # Blue human
+	_explosions.append(exp)
+
+	# Screen shake on bigger explosions
+	if exp.max_radius > 18:
+		_screen_shake_intensity = maxf(_screen_shake_intensity, exp.max_radius * 0.3)
+
+	# Spawn debris particles (mixed colors)
+	for j in range(5):
+		var p = Particle.new()
+		p.pos = exp.pos
+		p.vel = Vector2(randf_range(-80, 80), randf_range(-80, 80))
+		if randf() > 0.5:
+			p.color = Color(0.7, 0.4, 0.9, 1.0)  # Purple debris
+		else:
+			p.color = Color(0.4, 0.7, 1.0, 1.0)  # Blue debris
+		p.life = randf_range(0.3, 0.6)
+		p.max_life = p.life
+		p.size = randf_range(1, 3)
+		_particles.append(p)
+
+func _spawn_ambient_particles(delta: float) -> void:
+	# Engine glow particles near fleet formations
+	if randf() < delta * 3.0:
+		for zone_id in _fleet_assignments:
+			var assignment = _fleet_assignments[zone_id]
+			var total_ships = 0
+			for ship_type in assignment:
+				total_ships += assignment[ship_type]
+
+			if total_ships > 0 and randf() < 0.3:
+				var pos = _get_zone_pixel_pos(zone_id)
+				var zone_size = ZONE_SIZES.get(zone_id, 20.0)
+				var fleet_center = pos + Vector2(zone_size + 20, 0)
+
+				var p = Particle.new()
+				p.pos = fleet_center + Vector2(randf_range(-15, 15), randf_range(-15, 15))
+				p.vel = Vector2(randf_range(-10, 10), randf_range(-10, 10))
+				p.color = Color(0.3, 0.7, 1.0, 0.6)
+				p.life = randf_range(0.3, 0.6)
+				p.max_life = p.life
+				p.size = randf_range(1, 2)
+				_particles.append(p)
+
+# ============================================================================
+# CIVILIAN TRAFFIC SYSTEM
+# ============================================================================
+
+func _update_civilian_ships(delta: float) -> void:
+	var i = 0
+	while i < _civilian_ships.size():
+		var ship = _civilian_ships[i]
+		ship.progress += delta * ship.speed
+
+		# Update position
+		ship.pos = ship.get_bezier_pos(minf(ship.progress, 1.0))
+
+		# Trail (shorter for civilians)
+		ship.trail.append(ship.pos)
+		while ship.trail.size() > 8:
+			ship.trail.pop_front()
+
+		if ship.progress >= 1.0:
+			_civilian_ships.remove_at(i)
+		else:
+			i += 1
+
+func _maybe_spawn_civilian_ship(delta: float) -> void:
+	# Only spawn during peacetime (low narrative state)
+	if _narrative_state >= 2:  # Combat or desperate
+		return
+
+	_civilian_spawn_timer -= delta
+
+	# Spawn rate depends on how peaceful things are
+	var spawn_interval = 3.0 if _narrative_state == 0 else 6.0
+
+	if _civilian_spawn_timer <= 0:
+		_civilian_spawn_timer = spawn_interval + randf_range(-1, 2)
+
+		# Only spawn if we have controlled zones to travel between
+		var controlled: Array = []
+		for zone_id in _zones:
+			if _zones[zone_id].get("status", 0) == FCWTypes.ZoneStatus.CONTROLLED:
+				controlled.append(zone_id)
+
+		if controlled.size() >= 2:
+			_spawn_civilian_ship(controlled)
+
+func _spawn_civilian_ship(controlled_zones: Array) -> void:
+	var ship = CivilianShip.new()
+
+	# Pick random start and end from controlled zones
+	var from_idx = randi() % controlled_zones.size()
+	var to_idx = (from_idx + 1 + randi() % (controlled_zones.size() - 1)) % controlled_zones.size()
+
+	ship.from_zone = controlled_zones[from_idx]
+	ship.to_zone = controlled_zones[to_idx]
+
+	var from_pos = _get_zone_pixel_pos(ship.from_zone)
+	var to_pos = _get_zone_pixel_pos(ship.to_zone)
+
+	# Random offset from zone centers
+	ship.start_pos = from_pos + Vector2(randf_range(-30, 30), randf_range(-30, 30))
+	ship.target = to_pos + Vector2(randf_range(-30, 30), randf_range(-30, 30))
+	ship.pos = ship.start_pos
+
+	# Gentle curve
+	var midpoint = (ship.start_pos + ship.target) / 2
+	var perpendicular = (ship.target - ship.start_pos).normalized()
+	perpendicular = Vector2(-perpendicular.y, perpendicular.x)
+	ship.control_point = midpoint + perpendicular * randf_range(-50, 50)
+
+	# Randomize ship type
+	ship.civ_type = randi() % 5
+	match ship.civ_type:
+		CivilianShip.CivType.TRANSPORT:
+			ship.color = Color(0.6, 0.7, 0.9)  # Blue-white
+			ship.size = 3.0
+			ship.speed = 0.2
+		CivilianShip.CivType.MINER:
+			ship.color = Color(0.8, 0.6, 0.4)  # Orange-brown
+			ship.size = 4.0
+			ship.speed = 0.15
+		CivilianShip.CivType.FREIGHTER:
+			ship.color = Color(0.5, 0.6, 0.5)  # Gray-green
+			ship.size = 5.0
+			ship.speed = 0.12
+		CivilianShip.CivType.LINER:
+			ship.color = Color(0.9, 0.9, 1.0)  # Bright white
+			ship.size = 4.5
+			ship.speed = 0.25
+		CivilianShip.CivType.TANKER:
+			ship.color = Color(0.7, 0.5, 0.3)  # Brown
+			ship.size = 6.0
+			ship.speed = 0.1
+
+	ship.trail = []
+	_civilian_ships.append(ship)
+
+func _draw_civilian_ships(offset: Vector2) -> void:
+	for ship in _civilian_ships:
+		var pos = ship.pos + offset
+
+		# Get direction
+		var dir = Vector2(1, 0)
+		if ship.trail.size() > 1:
+			dir = (ship.pos - ship.trail[ship.trail.size() - 2]).normalized()
+		var perp = Vector2(-dir.y, dir.x)
+
+		# Faint trail
+		if ship.trail.size() > 1:
+			for i in range(ship.trail.size() - 1):
+				var t1 = ship.trail[i] + offset
+				var t2 = ship.trail[i + 1] + offset
+				var alpha = float(i) / ship.trail.size() * 0.3
+				draw_line(t1, t2, Color(ship.color.r, ship.color.g, ship.color.b, alpha), 1.0)
+
+		# Simple ship shape (smaller, less detailed than military)
+		match ship.civ_type:
+			CivilianShip.CivType.TRANSPORT, CivilianShip.CivType.LINER:
+				# Rounded passenger ship
+				draw_circle(pos, ship.size, ship.color)
+				draw_circle(pos + dir * ship.size * 0.5, ship.size * 0.4, ship.color.lightened(0.2))
+			CivilianShip.CivType.FREIGHTER, CivilianShip.CivType.TANKER:
+				# Boxy cargo ship
+				var points = PackedVector2Array([
+					pos + dir * ship.size,
+					pos + dir * ship.size * 0.3 + perp * ship.size * 0.6,
+					pos - dir * ship.size + perp * ship.size * 0.6,
+					pos - dir * ship.size - perp * ship.size * 0.6,
+					pos + dir * ship.size * 0.3 - perp * ship.size * 0.6,
+				])
+				draw_colored_polygon(points, ship.color)
+			CivilianShip.CivType.MINER:
+				# Industrial with arms
+				draw_circle(pos, ship.size * 0.7, ship.color)
+				draw_line(pos, pos + dir * ship.size * 1.2, ship.color, 2.0)
+				draw_line(pos, pos + perp * ship.size, ship.color.darkened(0.2), 1.5)
+				draw_line(pos, pos - perp * ship.size, ship.color.darkened(0.2), 1.5)
+
+		# Small engine glow
+		var engine_pos = pos - dir * ship.size * 0.8
+		draw_circle(engine_pos, 2, Color(0.5, 0.7, 1.0, 0.5))
+
+# ============================================================================
+# COLONY SHIP (EXODUS) SYSTEM
+# ============================================================================
+
+func _update_colony_ships(delta: float) -> void:
+	var i = 0
+	while i < _colony_ships.size():
+		var ship = _colony_ships[i]
+
+		# Update warp flash (fades quickly)
+		ship.warp_flash = maxf(ship.warp_flash - delta * 2.0, 0.0)
+
+		# Move toward target (edge of screen/stars)
+		ship.progress += delta * ship.speed
+		ship.pos = ship.start_pos.lerp(ship.target, ship.progress)
+
+		# Update trail
+		ship.trail.append(ship.pos)
+		if ship.trail.size() > 30:
+			ship.trail.pop_front()
+
+		# Ship has escaped! (reached edge)
+		if ship.progress >= 1.0:
+			_exodus_ships_escaped += 1
+			_exodus_souls_escaped += ship.souls_aboard
+			# Spawn a hopeful transmission
+			_spawn_exodus_transmission(ship)
+			_colony_ships.remove_at(i)
+		else:
+			i += 1
+
+func _draw_colony_ships(offset: Vector2) -> void:
+	for ship in _colony_ships:
+		var pos = ship.pos + offset
+
+		# Direction of travel
+		var dir = (ship.target - ship.start_pos).normalized()
+		var perp = Vector2(-dir.y, dir.x)
+
+		# Long, hopeful green trail
+		if ship.trail.size() > 1:
+			for j in range(ship.trail.size() - 1):
+				var t1 = ship.trail[j] + offset
+				var t2 = ship.trail[j + 1] + offset
+				var alpha = float(j) / ship.trail.size() * 0.6
+				draw_line(t1, t2, Color(0.3, 0.9, 0.4, alpha), 2.0)
+
+		# Warp flash effect (when departing)
+		if ship.warp_flash > 0:
+			var flash_size = 30 * ship.warp_flash
+			draw_circle(pos, flash_size, Color(0.5, 1.0, 0.6, ship.warp_flash * 0.5))
+			draw_circle(pos, flash_size * 0.5, Color(0.8, 1.0, 0.9, ship.warp_flash * 0.7))
+
+		# Large, majestic colony ship shape (green/white)
+		var ship_size = 12.0
+		var ship_color = Color(0.4, 0.9, 0.5)
+		var hull_color = Color(0.8, 0.9, 0.85)
+
+		# Main hull (elongated ellipse)
+		var hull_points = PackedVector2Array()
+		for angle_idx in range(12):
+			var angle = angle_idx * TAU / 12
+			var radius_x = ship_size * 2.0
+			var radius_y = ship_size * 0.6
+			var hull_offset = Vector2(cos(angle) * radius_x, sin(angle) * radius_y)
+			hull_points.append(pos + hull_offset.rotated(dir.angle()))
+		draw_colored_polygon(hull_points, hull_color)
+
+		# Central module
+		draw_circle(pos, ship_size * 0.5, ship_color)
+
+		# Engine pods (two large green glows at back)
+		var engine1 = pos - dir * ship_size * 1.8 + perp * ship_size * 0.4
+		var engine2 = pos - dir * ship_size * 1.8 - perp * ship_size * 0.4
+		draw_circle(engine1, 5, Color(0.3, 1.0, 0.5, 0.8))
+		draw_circle(engine2, 5, Color(0.3, 1.0, 0.5, 0.8))
+		draw_circle(engine1, 8, Color(0.3, 1.0, 0.5, 0.3))
+		draw_circle(engine2, 8, Color(0.3, 1.0, 0.5, 0.3))
+
+		# Ship name and souls aboard (if not too far)
+		if ship.progress < 0.7:
+			var font = ThemeDB.fallback_font
+			var label = "%s" % ship.name
+			var souls_label = "%s souls" % FCWTypes.format_population(ship.souls_aboard)
+			draw_string(font, pos + Vector2(-30, -ship_size - 8), label, HORIZONTAL_ALIGNMENT_CENTER, 60, 8, Color(0.5, 1.0, 0.6, 0.9))
+			draw_string(font, pos + Vector2(-30, -ship_size + 2), souls_label, HORIZONTAL_ALIGNMENT_CENTER, 60, 7, Color(0.4, 0.8, 0.5, 0.7))
+
+func _draw_fleets_in_transit(offset: Vector2) -> void:
+	## Draw military fleets traveling between zones
+	## Uses continuous time for smooth animation (not jerky week-by-week jumps)
+	if _fleets_in_transit.is_empty():
+		return
+
+	var font = ThemeDB.fallback_font
+
+	for transit in _fleets_in_transit:
+		# Calculate positions
+		var from_pos = _get_zone_pixel_pos(transit.from_zone) + offset
+		var to_pos = _get_zone_pixel_pos(transit.to_zone) + offset
+
+		# Calculate travel progress with CONTINUOUS time interpolation
+		# This makes ships move smoothly, not jump at week boundaries
+		var total_travel = FCWTypes.get_travel_time(transit.from_zone, transit.to_zone)
+		var weeks_elapsed = total_travel - transit.turns_remaining
+		# Add current week progress for smooth interpolation
+		var continuous_progress = (weeks_elapsed + _week_progress) / maxf(total_travel, 1)
+		var progress = clampf(continuous_progress, 0.0, 1.0)
+
+		# Position along path - smooth continuous movement
+		var current_pos = from_pos.lerp(to_pos, progress)
+
+		# Direction of travel
+		var dir = (to_pos - from_pos).normalized()
+		var perp = Vector2(-dir.y, dir.x)
+
+		# Draw travel path (dashed line)
+		var path_color = Color(0.3, 0.5, 0.8, 0.3)
+		var num_dashes = 8
+		for i in range(num_dashes):
+			var t1 = float(i) / num_dashes
+			var t2 = float(i + 0.5) / num_dashes
+			if t2 > progress:  # Only draw path ahead of fleet
+				var dash_start = from_pos.lerp(to_pos, maxf(t1, progress))
+				var dash_end = from_pos.lerp(to_pos, t2)
+				draw_line(dash_start, dash_end, path_color, 1.5)
+
+		# Draw fleet icon based on ship type
+		var ship_size = 8.0
+		var fleet_color = Color(0.4, 0.7, 1.0)  # Blue for friendly fleets
+
+		match transit.ship_type:
+			FCWTypes.ShipType.DREADNOUGHT:
+				ship_size = 12.0
+				fleet_color = Color(0.6, 0.4, 1.0)  # Purple for dreadnoughts
+			FCWTypes.ShipType.CARRIER:
+				ship_size = 10.0
+				fleet_color = Color(0.4, 1.0, 0.6)  # Green for carriers
+			FCWTypes.ShipType.CRUISER:
+				ship_size = 9.0
+				fleet_color = Color(0.5, 0.7, 1.0)
+
+		# Draw multiple ship icons based on count (up to 3 visible)
+		var visible_ships = mini(transit.count, 3)
+		for i in range(visible_ships):
+			var ship_offset = perp * (i - (visible_ships - 1) * 0.5) * 6
+			var ship_pos = current_pos + ship_offset
+
+			# Simple ship shape (chevron pointing forward)
+			var points = PackedVector2Array([
+				ship_pos + dir * ship_size,
+				ship_pos - dir * ship_size * 0.5 + perp * ship_size * 0.5,
+				ship_pos - dir * ship_size * 0.3,
+				ship_pos - dir * ship_size * 0.5 - perp * ship_size * 0.5
+			])
+			draw_colored_polygon(points, fleet_color)
+
+			# Engine glow
+			draw_circle(ship_pos - dir * ship_size * 0.4, 2, Color(0.5, 0.8, 1.0, 0.8))
+
+		# Fleet label (count, destination, ETA)
+		var ship_name = FCWTypes.get_ship_name(transit.ship_type)
+		var dest_name = FCWTypes.get_zone_name(transit.to_zone)
+		var label = "%dx %s" % [transit.count, ship_name.substr(0, 4)]
+		var eta_label = "→%s %dw" % [dest_name.substr(0, 4), transit.turns_remaining]
+
+		draw_string(font, current_pos + Vector2(-25, -ship_size - 6), label, HORIZONTAL_ALIGNMENT_CENTER, 50, 7, Color(0.6, 0.8, 1.0, 0.9))
+		draw_string(font, current_pos + Vector2(-25, ship_size + 10), eta_label, HORIZONTAL_ALIGNMENT_CENTER, 50, 6, Color(0.5, 0.7, 0.9, 0.7))
+
+func _draw_exodus_counter(rect: Rect2) -> void:
+	# Only show if we have ships in flight, escaped, or intercepted
+	var ships_in_flight = _colony_ships.size()
+	var souls_in_flight = 0
+	for ship in _colony_ships:
+		souls_in_flight += ship.souls_aboard
+
+	if ships_in_flight == 0 and _exodus_ships_escaped == 0 and _lives_intercepted == 0:
+		return
+
+	var font = ThemeDB.fallback_font
+
+	# Expand panel height if we have intercepted losses to show
+	var has_losses = _lives_intercepted > 0
+	var panel_h = 50 if has_losses else 40
+
+	# Background panel at top-right
+	var panel_w = 200
+	var panel_x = rect.size.x - panel_w - 10
+	var panel_y = 10
+
+	draw_rect(Rect2(panel_x, panel_y, panel_w, panel_h), Color(0.0, 0.1, 0.05, 0.8))
+	draw_rect(Rect2(panel_x, panel_y, panel_w, panel_h), Color(0.3, 0.8, 0.4, 0.6), false, 1.0)
+
+	# Title
+	draw_string(font, Vector2(panel_x + 5, panel_y + 12), "EXODUS FLEET", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 1.0, 0.5))
+
+	# Stats
+	if ships_in_flight > 0:
+		var line1 = "%d ships en route" % ships_in_flight
+		var line2 = "%s souls aboard" % FCWTypes.format_population(souls_in_flight)
+		draw_string(font, Vector2(panel_x + 5, panel_y + 24), line1, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.6, 0.9, 0.7))
+		draw_string(font, Vector2(panel_x + 5, panel_y + 34), line2, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 0.8, 0.6))
+	else:
+		var safe_text = "%d ships safe | %s souls" % [_exodus_ships_escaped, FCWTypes.format_population(_exodus_souls_escaped)]
+		draw_string(font, Vector2(panel_x + 5, panel_y + 24), safe_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 0.9, 0.6))
+
+	# Show intercepted losses (in red, at bottom of panel)
+	if has_losses:
+		var loss_text = "LOST: %s souls intercepted" % FCWTypes.format_population(_lives_intercepted)
+		var y_offset = panel_y + panel_h - 8
+		draw_string(font, Vector2(panel_x + 5, y_offset), loss_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(1.0, 0.4, 0.3, 0.9))
+
+func _spawn_exodus_transmission(ship: ColonyShip) -> void:
+	var trans = Transmission.new()
+	trans.sender = ship.name
+	trans.text = "We're clear! %s souls bound for the stars." % FCWTypes.format_population(ship.souls_aboard)
+	trans.pos = ship.pos
+	trans.life = 5.0
+	trans.max_life = 5.0
+	trans.priority = 1  # Important
+	_transmissions.append(trans)
+
+func spawn_colony_ship(evacuated_this_turn: int) -> void:
+	## Called from fcw_main when evacuation occurs - spawns colony ships
+	if evacuated_this_turn <= 0:
+		return
+
+	# Accumulate evacuation - spawn a ship per ~500K evacuated
+	_colony_ship_spawn_accumulator += evacuated_this_turn
+	const SOULS_PER_SHIP = 500_000
+
+	while _colony_ship_spawn_accumulator >= SOULS_PER_SHIP:
+		_colony_ship_spawn_accumulator -= SOULS_PER_SHIP
+
+		# Get Earth position as start
+		var earth_pos = _get_zone_pixel_pos(FCWTypes.ZoneId.EARTH)
+
+		# Target is top-right corner (toward the stars)
+		var target = Vector2(size.x + 100, -50)
+
+		var ship = ColonyShip.create(earth_pos, target, SOULS_PER_SHIP)
+		_colony_ships.append(ship)
+
+		# Spawn departure transmission
+		var trans = Transmission.new()
+		trans.sender = "Exodus Control"
+		trans.text = "Colony ship '%s' departing with %s souls." % [ship.name, FCWTypes.format_population(SOULS_PER_SHIP)]
+		trans.pos = earth_pos
+		trans.life = 4.0
+		trans.max_life = 4.0
+		trans.priority = 1
+		_transmissions.append(trans)
+
+func spawn_colony_ship_from_data(ship_data: Dictionary) -> void:
+	## Spawn a visual colony ship from game state data
+	## Called when reducer creates a new colony ship in transit
+	var souls = ship_data.get("souls_aboard", 500000)
+	var ship_name = ship_data.get("name", "Exodus")
+
+	# Get Earth position as start
+	var earth_pos = _get_zone_pixel_pos(FCWTypes.ZoneId.EARTH)
+
+	# Target is top-right corner (toward the stars)
+	var target = Vector2(size.x + 100, -50)
+
+	var ship = ColonyShip.create(earth_pos, target, souls)
+	ship.name = ship_name  # Use the name from game state
+	_colony_ships.append(ship)
+
+	# Spawn departure transmission
+	var trans = Transmission.new()
+	trans.sender = "Exodus Control"
+	trans.text = "Colony ship '%s' departing with %s souls." % [ship_name, FCWTypes.format_population(souls)]
+	trans.pos = earth_pos
+	trans.life = 4.0
+	trans.max_life = 4.0
+	trans.priority = 1
+	_transmissions.append(trans)
+
+func set_lives_intercepted(count: int) -> void:
+	## Update the intercepted lives count from game state
+	_lives_intercepted = count
+
+# ============================================================================
+# TRANSMISSION SYSTEM
+# ============================================================================
+
+func _update_transmissions(delta: float) -> void:
+	var i = 0
+	while i < _transmissions.size():
+		var trans = _transmissions[i]
+
+		# Fade in
+		trans.fade_in = minf(trans.fade_in + delta * 3.0, 1.0)
+
+		# Typewriter effect
+		trans.typing_progress = minf(trans.typing_progress + delta * 30.0, len(trans.text))
+
+		# Life countdown
+		trans.life -= delta
+
+		if trans.life <= 0:
+			_transmissions.remove_at(i)
+		else:
+			i += 1
+
+func _maybe_spawn_transmission(delta: float) -> void:
+	_transmission_cooldown -= delta
+
+	if _transmission_cooldown > 0:
+		return
+
+	# Cooldown varies by narrative state
+	var cooldown = 8.0
+	match _narrative_state:
+		0:  # Peace - occasional chatter
+			cooldown = randf_range(10.0, 18.0)
+		1:  # Tension - more frequent updates
+			cooldown = randf_range(6.0, 12.0)
+		2:  # Combat - rapid comms
+			cooldown = randf_range(3.0, 6.0)
+		3:  # Desperate - constant
+			cooldown = randf_range(2.0, 4.0)
+
+	_transmission_cooldown = cooldown
+
+	# Pick appropriate transmission
+	var templates: Array
+	match _narrative_state:
+		0:
+			templates = TRANSMISSIONS_PEACE
+		1:
+			templates = TRANSMISSIONS_TENSION
+		2:
+			templates = TRANSMISSIONS_COMBAT
+		3:
+			templates = TRANSMISSIONS_DESPERATE
+
+	if templates.size() > 0:
+		var template = templates[randi() % templates.size()]
+		spawn_transmission(template.sender, template.text, _narrative_state)
+
+func spawn_transmission(sender: String, text: String, priority: int = 0) -> void:
+	var trans = Transmission.new()
+	trans.sender = sender
+	trans.text = text
+	trans.priority = priority
+	trans.life = 5.0 + len(text) * 0.05  # Longer text stays longer
+	trans.max_life = trans.life
+	trans.fade_in = 0.0
+	trans.typing_progress = 0.0
+
+	# Position in bottom-left corner, stacked
+	var y_offset = _transmissions.size() * 45
+	trans.pos = Vector2(20, size.y - 80 - y_offset)
+
+	# Limit number of transmissions
+	if _transmissions.size() >= 4:
+		_transmissions.pop_front()
+
+	_transmissions.append(trans)
+
+func _draw_transmissions(rect: Rect2) -> void:
+	var font = ThemeDB.fallback_font
+	var y_pos = rect.size.y - 60
+
+	for trans in _transmissions:
+		var alpha = trans.fade_in * minf(trans.life / 1.0, 1.0)  # Fade out in last second
+
+		# Calculate box height based on text length (roughly 40 chars per line)
+		var box_width = 400
+		var chars_per_line = 45
+		var display_text = trans.text.substr(0, int(trans.typing_progress))
+		var num_lines = ceili(float(display_text.length()) / chars_per_line)
+		num_lines = maxi(num_lines, 1)
+		var box_height = 22 + num_lines * 14  # Header + lines
+		var box_pos = Vector2(15, y_pos - box_height)
+
+		# Priority colors
+		var bg_color: Color
+		var text_color: Color
+		var sender_color: Color
+		match trans.priority:
+			0:  # Routine - subtle blue
+				bg_color = Color(0.1, 0.15, 0.2, alpha * 0.85)
+				text_color = Color(0.7, 0.8, 0.9, alpha)
+				sender_color = Color(0.5, 0.7, 0.8, alpha)
+			1:  # Important - yellow
+				bg_color = Color(0.2, 0.18, 0.1, alpha * 0.9)
+				text_color = Color(1.0, 0.95, 0.7, alpha)
+				sender_color = Color(0.9, 0.8, 0.4, alpha)
+			2:  # Critical - orange/red pulse
+				var pulse = sin(_global_time * 4.0) * 0.1
+				bg_color = Color(0.3 + pulse, 0.1, 0.05, alpha * 0.95)
+				text_color = Color(1.0, 0.85, 0.6, alpha)
+				sender_color = Color(1.0, 0.5, 0.2, alpha)
+			3:  # Desperate - red with intense pulse
+				var pulse = sin(_global_time * 6.0) * 0.15
+				bg_color = Color(0.4 + pulse, 0.05, 0.05, alpha * 0.95)
+				text_color = Color(1.0, 0.8, 0.8, alpha)
+				sender_color = Color(1.0, 0.3, 0.3, alpha)
+
+		# Draw background with border
+		draw_rect(Rect2(box_pos, Vector2(box_width, box_height)), bg_color)
+		var border_color = sender_color
+		border_color.a = alpha * 0.6
+		draw_rect(Rect2(box_pos, Vector2(box_width, box_height)), border_color, false, 1.5)
+
+		# Draw sender
+		draw_string(font, box_pos + Vector2(8, 14), "[%s]" % trans.sender, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, sender_color)
+
+		# Draw text with word wrap - split into lines
+		var y_offset = 28
+		var remaining_text = display_text
+		while remaining_text.length() > 0:
+			var line_text = remaining_text.substr(0, chars_per_line)
+			# Try to break at word boundary
+			if remaining_text.length() > chars_per_line:
+				var last_space = line_text.rfind(" ")
+				if last_space > chars_per_line * 0.5:
+					line_text = remaining_text.substr(0, last_space)
+			draw_string(font, box_pos + Vector2(8, y_offset), line_text, HORIZONTAL_ALIGNMENT_LEFT, box_width - 16, 11, text_color)
+			remaining_text = remaining_text.substr(line_text.length()).strip_edges()
+			y_offset += 14
+
+		y_pos -= box_height + 8  # Stack upward with gap
+
+func spawn_warp_in(zone_id: int) -> void:
+	# Called when ships warp to a zone
+	var pos = _get_zone_pixel_pos(zone_id)
+	var zone_size = ZONE_SIZES.get(zone_id, 20.0)
+
+	_warp_flashes.append({"pos": pos + Vector2(zone_size + 20, 0), "life": 1.0})
+
+	# Spawn arrival particles
+	for i in range(10):
+		var p = Particle.new()
+		p.pos = pos + Vector2(zone_size + 20, 0)
+		p.vel = Vector2(randf_range(-50, 50), randf_range(-50, 50))
+		p.color = Color(0.5, 0.8, 1.0, 1.0)
+		p.life = randf_range(0.3, 0.6)
+		p.max_life = p.life
+		p.size = randf_range(2, 4)
+		_particles.append(p)
+
+func spawn_zone_destroyed(zone_id: int) -> void:
+	# MASSIVE explosion when zone falls
+	var pos = _get_zone_pixel_pos(zone_id)
+	var zone_size = ZONE_SIZES.get(zone_id, 20.0)
+
+	# Add to fallen zones for debris
+	if zone_id not in _fallen_zones:
+		_fallen_zones.append(zone_id)
+
+	# Multiple large explosions - PURPLE alien victory explosions
+	for i in range(8):
+		var exp = Explosion.new()
+		exp.pos = pos + Vector2(randf_range(-zone_size, zone_size), randf_range(-zone_size, zone_size))
+		exp.max_radius = randf_range(30, 60)
+		exp.life = 0.8 + randf() * 0.5
+		# Alien void consuming the zone - purple/magenta destruction
+		exp.color = Color(0.7, randf_range(0.1, 0.4), randf_range(0.5, 0.8))
+		_explosions.append(exp)
+
+	# Big screen shake
+	_screen_shake_intensity = 15.0
+
+	# Damage flash on zone
+	_zone_damage_flash[zone_id] = 1.0
+
+	# LOTS of debris particles
+	for i in range(40):
+		var p = Particle.new()
+		p.pos = pos + Vector2(randf_range(-zone_size, zone_size), randf_range(-zone_size, zone_size))
+		p.vel = Vector2(randf_range(-100, 100), randf_range(-100, 100))
+		p.color = Color(randf_range(0.8, 1.0), randf_range(0.3, 0.7), randf_range(0.0, 0.2), 1.0)
+		p.life = randf_range(0.5, 1.5)
+		p.max_life = p.life
+		p.size = randf_range(2, 6)
+		_particles.append(p)
+
+func spawn_ship_transit(from_zone: int, to_zone: int, ship_type: int = -1) -> void:
+	# Spawn a ship moving between zones with full visual effects
+	var from_pos = _get_zone_pixel_pos(from_zone)
+	var to_pos = _get_zone_pixel_pos(to_zone)
+	var from_size = ZONE_SIZES.get(from_zone, 20.0)
+	var to_size = ZONE_SIZES.get(to_zone, 20.0)
+
+	# Determine ship class
+	var ship_class = Ship.ShipClass.FRIGATE
+	if ship_type >= 0:
+		match ship_type:
+			FCWTypes.ShipType.FRIGATE:
+				ship_class = Ship.ShipClass.FRIGATE
+			FCWTypes.ShipType.CRUISER:
+				ship_class = Ship.ShipClass.CRUISER
+			FCWTypes.ShipType.CARRIER:
+				ship_class = Ship.ShipClass.CARRIER
+			FCWTypes.ShipType.DREADNOUGHT:
+				ship_class = Ship.ShipClass.DREADNOUGHT
+	else:
+		# Random ship type weighted toward frigates
+		var roll = randf()
+		if roll < 0.6:
+			ship_class = Ship.ShipClass.FRIGATE
+		elif roll < 0.85:
+			ship_class = Ship.ShipClass.CRUISER
+		elif roll < 0.95:
+			ship_class = Ship.ShipClass.CARRIER
+		else:
+			ship_class = Ship.ShipClass.DREADNOUGHT
+
+	var ship = Ship.new()
+
+	# Starting position with slight randomization
+	var start_offset = Vector2(from_size + 20 + randf_range(-10, 10), randf_range(-15, 15))
+	ship.start_pos = from_pos + start_offset
+	ship.pos = ship.start_pos
+
+	# Target position
+	var end_offset = Vector2(to_size + 20 + randf_range(-10, 10), randf_range(-15, 15))
+	ship.target = to_pos + end_offset
+
+	# Calculate curved flight path (bezier control point)
+	var midpoint = (ship.start_pos + ship.target) / 2
+	var perpendicular = (ship.target - ship.start_pos).normalized()
+	perpendicular = Vector2(-perpendicular.y, perpendicular.x)
+	# Curve away from center, more dramatic curve
+	var curve_strength = ship.start_pos.distance_to(ship.target) * randf_range(0.2, 0.4)
+	var curve_dir = 1 if randf() > 0.5 else -1
+	ship.control_point = midpoint + perpendicular * curve_strength * curve_dir
+
+	# Ship class properties - Earth Fleet colors (blue/cyan engines, cool hull colors)
+	ship.ship_class = ship_class
+	match ship_class:
+		Ship.ShipClass.FRIGATE:
+			ship.size = randf_range(5, 7)
+			ship.speed = randf_range(1.1, 1.3)
+			ship.color = Color(0.5, 0.7, 0.9)  # Light blue-gray
+			ship.engine_color = Color(0.3, 0.7, 1.0)  # Cyan blue
+		Ship.ShipClass.CRUISER:
+			ship.size = randf_range(8, 10)
+			ship.speed = randf_range(0.9, 1.0)
+			ship.color = Color(0.4, 0.55, 0.75)  # Navy blue
+			ship.engine_color = Color(0.2, 0.6, 1.0)  # Blue
+		Ship.ShipClass.CARRIER:
+			ship.size = randf_range(12, 15)
+			ship.speed = randf_range(0.7, 0.85)
+			ship.color = Color(0.5, 0.6, 0.7)  # Steel gray-blue
+			ship.engine_color = Color(0.3, 0.8, 1.0)  # Cyan
+		Ship.ShipClass.DREADNOUGHT:
+			ship.size = randf_range(14, 18)
+			ship.speed = randf_range(0.75, 0.9)
+			ship.color = Color(0.3, 0.45, 0.6)  # Dark steel blue
+			ship.engine_color = Color(0.4, 0.7, 1.0)  # Bright cyan
+
+	ship.progress = 0.0
+	ship.trail = []
+	ship.rotation = (ship.target - ship.pos).angle()
+	_ships.append(ship)
+
+	# Dramatic warp-out effect
+	_spawn_warp_out_effect(ship.start_pos, ship_class)
+
+func _spawn_warp_out_effect(pos: Vector2, ship_class: int) -> void:
+	# Blue warp ring for Earth Fleet departure
+	_warp_flashes.append({"pos": pos, "life": 0.8, "color": Color(0.3, 0.6, 1.0)})
+
+	# Intensity based on ship size
+	var booster_count = 4
+	var trail_length = 25
+	match ship_class:
+		Ship.ShipClass.CRUISER:
+			booster_count = 6
+			trail_length = 35
+		Ship.ShipClass.CARRIER:
+			booster_count = 8
+			trail_length = 40
+		Ship.ShipClass.DREADNOUGHT:
+			booster_count = 10
+			trail_length = 50
+
+	# BOOSTER IGNITION - bright cyan exhaust trails shooting backward
+	for j in range(booster_count):
+		var p = Particle.new()
+		# Stagger starting positions slightly
+		p.pos = pos + Vector2(randf_range(-5, 5), randf_range(-5, 5))
+		# Exhaust shoots away from departure direction (mostly backward)
+		var exhaust_angle = randf_range(-0.5, 0.5)  # Slight spread
+		p.vel = Vector2(cos(PI + exhaust_angle), sin(PI + exhaust_angle)) * randf_range(trail_length, trail_length * 1.5)
+		p.color = Color(0.5, 0.85, 1.0, 0.95)  # Bright cyan
+		p.life = randf_range(0.5, 0.8)
+		p.max_life = p.life
+		p.size = randf_range(3, 5)
+		_particles.append(p)
+
+	# Secondary exhaust glow (wider, dimmer)
+	for j in range(booster_count / 2):
+		var p = Particle.new()
+		p.pos = pos + Vector2(randf_range(-8, 8), randf_range(-8, 8))
+		var exhaust_angle = randf_range(-0.8, 0.8)
+		p.vel = Vector2(cos(PI + exhaust_angle), sin(PI + exhaust_angle)) * randf_range(15, 30)
+		p.color = Color(0.3, 0.6, 1.0, 0.6)  # Dimmer blue
+		p.life = randf_range(0.6, 0.9)
+		p.max_life = p.life
+		p.size = randf_range(4, 7)
+		_particles.append(p)
+
+	# Engine ignition flash (bright white-blue center)
+	var flash_p = Particle.new()
+	flash_p.pos = pos
+	flash_p.vel = Vector2.ZERO
+	flash_p.color = Color(0.8, 0.95, 1.0, 1.0)  # Bright white-blue
+	flash_p.life = 0.25
+	flash_p.max_life = 0.25
+	flash_p.size = 8
+	_particles.append(flash_p)
+
+func spawn_fleet_transit(from_zone: int, to_zone: int, ship_count: int, ship_type: int = -1) -> void:
+	## Spawn multiple ships in formation
+	var from_pos = _get_zone_pixel_pos(from_zone)
+	var to_pos = _get_zone_pixel_pos(to_zone)
+	var direction = (to_pos - from_pos).normalized()
+	var perpendicular = Vector2(-direction.y, direction.x)
+
+	# Formation patterns based on count
+	var offsets: Array = []
+	if ship_count <= 3:
+		# V formation
+		for i in range(ship_count):
+			var row = i
+			var col = i - ship_count / 2.0
+			offsets.append(Vector2(-row * 15, col * 20))
+	elif ship_count <= 6:
+		# Double V
+		for i in range(ship_count):
+			var row = i / 3
+			var col = (i % 3) - 1
+			offsets.append(Vector2(-row * 20, col * 25))
+	else:
+		# Staggered block
+		for i in range(ship_count):
+			var row = i / 4
+			var col = (i % 4) - 1.5
+			offsets.append(Vector2(-row * 18 + (row % 2) * 8, col * 22))
+
+	# Spawn ships with staggered timing using formation offsets
+	for i in range(mini(ship_count, len(offsets))):
+		# Slight delay between ships (handled by progress offset)
+		var ship = Ship.new()
+
+		var from_size = ZONE_SIZES.get(from_zone, 20.0)
+		var to_size = ZONE_SIZES.get(to_zone, 20.0)
+
+		ship.start_pos = from_pos + Vector2(from_size + 20, 0)
+		ship.target = to_pos + Vector2(to_size + 20, 0)
+		ship.pos = ship.start_pos
+
+		# Transform formation offset to world space
+		var world_offset = direction * offsets[i].x + perpendicular * offsets[i].y
+		ship.formation_offset = world_offset
+		ship.formation_index = i
+
+		# Bezier control point
+		var midpoint = (ship.start_pos + ship.target) / 2
+		var curve_perpendicular = Vector2(-direction.y, direction.x)
+		var curve_strength = ship.start_pos.distance_to(ship.target) * 0.25
+		ship.control_point = midpoint + curve_perpendicular * curve_strength * (1 if i % 2 == 0 else -1)
+
+		# Determine ship class
+		var ship_class = Ship.ShipClass.FRIGATE
+		if ship_type >= 0:
+			match ship_type:
+				FCWTypes.ShipType.FRIGATE: ship_class = Ship.ShipClass.FRIGATE
+				FCWTypes.ShipType.CRUISER: ship_class = Ship.ShipClass.CRUISER
+				FCWTypes.ShipType.CARRIER: ship_class = Ship.ShipClass.CARRIER
+				FCWTypes.ShipType.DREADNOUGHT: ship_class = Ship.ShipClass.DREADNOUGHT
+		else:
+			ship_class = Ship.ShipClass.FRIGATE if randf() < 0.7 else Ship.ShipClass.CRUISER
+
+		ship.ship_class = ship_class
+		# Earth Fleet colors (blue/cyan theme)
+		match ship_class:
+			Ship.ShipClass.FRIGATE:
+				ship.size = randf_range(5, 7)
+				ship.speed = randf_range(1.1, 1.3)
+				ship.color = Color(0.5, 0.7, 0.9)  # Light blue-gray
+				ship.engine_color = Color(0.3, 0.7, 1.0)  # Cyan
+			Ship.ShipClass.CRUISER:
+				ship.size = randf_range(8, 10)
+				ship.speed = randf_range(0.9, 1.0)
+				ship.color = Color(0.4, 0.55, 0.75)  # Navy blue
+				ship.engine_color = Color(0.2, 0.6, 1.0)  # Blue
+			_:
+				ship.size = randf_range(6, 8)
+				ship.speed = 1.0
+				ship.color = Color(0.45, 0.6, 0.8)  # Blue
+				ship.engine_color = Color(0.3, 0.7, 1.0)  # Cyan
+
+		# Stagger start times
+		ship.progress = -i * 0.05  # Negative progress = delayed start
+
+		ship.trail = []
+		ship.rotation = direction.angle()
+		_ships.append(ship)
+
+	# Single warp-out effect for the formation
+	_spawn_warp_out_effect(from_pos + Vector2(ZONE_SIZES.get(from_zone, 20.0) + 20, 0), Ship.ShipClass.CRUISER)
+
+# ============================================================================
+# INPUT
+# ============================================================================
+
+func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		var mouse_pos = event.position
+		var new_hovered = _get_zone_at_position(mouse_pos)
+		if new_hovered != _hovered_zone:
+			_hovered_zone = new_hovered
+			if _hovered_zone >= 0:
+				zone_hovered.emit(_hovered_zone)
+			queue_redraw()
+
+	elif event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			var clicked_zone = _get_zone_at_position(event.position)
+			if clicked_zone >= 0:
+				_selected_zone = clicked_zone
+				zone_clicked.emit(clicked_zone)
+				queue_redraw()
+
+func _get_zone_at_position(pos: Vector2) -> int:
+	for zone_id in FCWTypes.ZoneId.values():
+		var zone_pos = _get_zone_pixel_pos(zone_id)
+		var zone_size = ZONE_SIZES.get(zone_id, 20.0) + 10  # Some padding
+		if pos.distance_to(zone_pos) <= zone_size:
+			return zone_id
+	return -1
+
+# ============================================================================
+# PUBLIC API
+# ============================================================================
+
+func update_state(state: Dictionary, zone_defenses: Dictionary, fleets_in_transit: Array = []) -> void:
+	_zones = {}
+	for zone_id in state.zones:
+		var zone = state.zones[zone_id]
+		_zones[zone_id] = {
+			"status": zone.status,
+			"population": zone.population,
+			"defense": zone_defenses.get(zone_id, 0),
+			"assigned_fleet": zone.assigned_fleet.duplicate()
+		}
+
+	_fleet_assignments = {}
+	for zone_id in state.zones:
+		var zone = state.zones[zone_id]
+		if not zone.assigned_fleet.is_empty():
+			_fleet_assignments[zone_id] = zone.assigned_fleet.duplicate()
+
+	# Store fleets in transit for visualization
+	_fleets_in_transit = fleets_in_transit
+
+	# Update herald - now uses travel time system
+	var new_target = state.herald_attack_target
+	var new_current_zone = state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
+	var new_transit = state.get("herald_transit", {})
+
+	# Check if target changed (zone fell and Herald is moving to new target)
+	if new_target != _herald_target_zone:
+		_herald_target_zone = new_target
+
+		# Clear old attack waves targeting the fallen zone (prevent weird visuals)
+		var i = 0
+		while i < _attack_waves.size():
+			if _attack_waves[i].target_zone == _herald_current_zone:
+				_attack_waves.remove_at(i)
+			else:
+				i += 1
+
+		# Clear herald ships targeting old zone
+		_herald_ships.clear()
+
+	# Update current zone and transit state
+	_herald_current_zone = new_current_zone
+	_herald_transit = new_transit.duplicate()
+
+	# Update positions based on transit state
+	if _initialized:
+		if not _herald_transit.is_empty():
+			# Herald is in transit - set up interpolation positions
+			_herald_start_position = _get_zone_pixel_pos(_herald_transit.from_zone)
+			_herald_target_position = _get_zone_pixel_pos(_herald_transit.to_zone)
+			# Position will be interpolated in set_time_progress()
+		else:
+			# Herald is stationary at current zone
+			var current_pos = _get_zone_pixel_pos(_herald_current_zone)
+			_herald_position = current_pos
+			_herald_start_position = current_pos
+			_herald_target_position = current_pos
+			_herald_travel_progress = 1.0
+
+	_herald_strength = state.herald_strength
+
+	# Track turn and herald visibility
+	_current_turn = state.turn
+	# Herald becomes visible on week 3 ("Unidentified objects approaching")
+	_herald_visible = _current_turn >= 3
+
+	queue_redraw()
+
+func set_selected_zone(zone_id: int) -> void:
+	_selected_zone = zone_id
+	queue_redraw()
+
+func set_time_progress(progress: float, fleets_in_transit: Array, herald_transit: Dictionary = {}) -> void:
+	## Called continuously to update time-based animations
+	## progress: 0.0 to 1.0 representing progress through current week
+	## fleets_in_transit: current fleet transit data for smooth animation
+	## herald_transit: current Herald transit data
+	_week_progress = progress
+	_fleets_in_transit = fleets_in_transit
+
+	# Update Herald position based on transit progress
+	if not herald_transit.is_empty() and herald_transit.has("total_turns"):
+		# Herald is in transit - interpolate position smoothly
+		var total_travel = herald_transit.total_turns
+		var weeks_remaining = herald_transit.turns_remaining
+		var weeks_elapsed = total_travel - weeks_remaining
+
+		# Calculate continuous progress: (completed weeks + current week progress) / total weeks
+		var continuous_progress = (float(weeks_elapsed) + progress) / maxf(float(total_travel), 1.0)
+		continuous_progress = clampf(continuous_progress, 0.0, 1.0)
+
+		# Store old position for trail spawning
+		var old_pos = _herald_position
+
+		# Interpolate Herald position
+		_herald_position = _herald_start_position.lerp(_herald_target_position, continuous_progress)
+		_herald_travel_progress = continuous_progress
+
+		# Spawn trail particles during movement
+		if continuous_progress < 1.0 and old_pos.distance_to(_herald_position) > 0.5:
+			_spawn_herald_trail(old_pos)
+	elif _herald_transit.is_empty():
+		# Herald is stationary - ensure position is at current zone
+		_herald_travel_progress = 1.0
+
+	queue_redraw()
+
+func set_attacking(is_attacking: bool) -> void:
+	_is_attacking = is_attacking
+	if is_attacking:
+		_attack_flash_timer = 0.0
+	queue_redraw()
+
+func get_selected_zone() -> int:
+	return _selected_zone
+
+func spawn_herald_attack_wave(target_zone: int, wave_size: int = 5, target_staging_index: int = -1) -> void:
+	## Spawn a wave of Herald attack ships targeting a zone
+	## If target_staging_index >= 0, targets a specific staging area
+	var wave = AttackWave.new()
+	wave.target_zone = target_zone
+	wave.wave_size = wave_size
+	wave.spawn_timer = 0.0
+	wave.ships_spawned = 0
+	wave.spawn_position = _herald_position  # Store where herald is NOW
+
+	# Optionally target a staging area
+	var staging_list = STAGING_AREAS.get(target_zone, [])
+	if target_staging_index >= 0 and target_staging_index < staging_list.size():
+		wave.target_staging = staging_list[target_staging_index]
+	elif staging_list.size() > 0 and randf() > 0.3:
+		# Random chance to target a staging area
+		wave.target_staging = staging_list[randi() % staging_list.size()]
+
+	_attack_waves.append(wave)
+
+	# Red warp flash at herald
+	_warp_flashes.append({"pos": _herald_position, "life": 1.0})
+
+func spawn_skirmish(zone_id: int, staging_index: int = -1, is_herald_attack: bool = true, ship_count: int = 10) -> void:
+	## Start a skirmish battle at a zone or staging area
+	var skirmish = Skirmish.new()
+	skirmish.zone_id = zone_id
+	skirmish.is_herald_attack = is_herald_attack
+	skirmish.ships_engaged = ship_count
+	skirmish.intensity = 1.0
+
+	var zone_pos = _get_zone_pixel_pos(zone_id)
+
+	# Position at staging area if specified
+	var staging_list = STAGING_AREAS.get(zone_id, [])
+	if staging_index >= 0 and staging_index < staging_list.size():
+		var staging = staging_list[staging_index]
+		skirmish.pos = zone_pos + staging.offset
+		skirmish.staging_name = staging.name
+		skirmish.radius = staging.size + 20
+	elif staging_list.size() > 0:
+		# Random staging area
+		var staging = staging_list[randi() % staging_list.size()]
+		skirmish.pos = zone_pos + staging.offset
+		skirmish.staging_name = staging.name
+		skirmish.radius = staging.size + 20
+	else:
+		# Near the zone
+		skirmish.pos = zone_pos + Vector2(ZONE_SIZES.get(zone_id, 20.0) + 30, 0)
+		skirmish.radius = 35
+
+	_skirmishes.append(skirmish)
+
+func spawn_mass_attack(target_zone: int, total_ships: int = 20) -> void:
+	## Spawn a massive Herald assault with multiple waves
+	var waves = ceili(total_ships / 6.0)
+	for i in range(waves):
+		var wave_size = mini(6, total_ships - i * 6)
+		if wave_size > 0:
+			# Stagger wave spawns
+			var wave = AttackWave.new()
+			wave.target_zone = target_zone
+			wave.wave_size = wave_size
+			wave.spawn_timer = i * 0.8  # Delay between waves
+			wave.ships_spawned = 0
+			wave.spawn_position = _herald_position  # Store where herald is NOW
+
+			# Distribute among staging areas
+			var staging_list = STAGING_AREAS.get(target_zone, [])
+			if staging_list.size() > 0:
+				wave.target_staging = staging_list[i % staging_list.size()]
+
+			_attack_waves.append(wave)
+
+	# Big warp flash
+	_warp_flashes.append({"pos": _herald_position, "life": 1.0})
+	_screen_shake_intensity = maxf(_screen_shake_intensity, 8.0)
+	_danger_pulse = 0.8
+
+func get_staging_area_position(zone_id: int, staging_index: int) -> Vector2:
+	## Get world position of a staging area
+	var zone_pos = _get_zone_pixel_pos(zone_id)
+	var staging_list = STAGING_AREAS.get(zone_id, [])
+	if staging_index >= 0 and staging_index < staging_list.size():
+		return zone_pos + staging_list[staging_index].offset
+	return zone_pos
+
+func get_staging_areas_for_zone(zone_id: int) -> Array:
+	## Return list of staging areas for a zone
+	return STAGING_AREAS.get(zone_id, [])
+
+# ============================================================================
+# NARRATIVE STATE MANAGEMENT
+# ============================================================================
+
+func set_narrative_state(state: int) -> void:
+	## Set the current narrative mood: 0=peace, 1=tension, 2=combat, 3=desperate
+	_last_narrative_state = _narrative_state
+	_narrative_state = state
+
+	# Trigger transmissions on state changes
+	if state != _last_narrative_state:
+		_mood_transition_timer = 1.0  # Brief transition effect
+
+		match state:
+			0:  # Peace
+				if _last_narrative_state > 0:
+					var victory = TRANSMISSIONS_VICTORY[randi() % TRANSMISSIONS_VICTORY.size()]
+					spawn_transmission(victory.sender, victory.text, 1)
+			1:  # Tension
+				var tension = TRANSMISSIONS_TENSION[randi() % TRANSMISSIONS_TENSION.size()]
+				spawn_transmission(tension.sender, tension.text, 1)
+			2:  # Combat
+				var combat = TRANSMISSIONS_COMBAT[randi() % TRANSMISSIONS_COMBAT.size()]
+				spawn_transmission(combat.sender, combat.text, 2)
+			3:  # Desperate
+				var desperate = TRANSMISSIONS_DESPERATE[randi() % TRANSMISSIONS_DESPERATE.size()]
+				spawn_transmission(desperate.sender, desperate.text, 3)
+
+func get_narrative_state() -> int:
+	return _narrative_state
+
+func trigger_zone_loss_narrative(zone_id: int, lives_lost: int) -> void:
+	## Called when a zone falls - triggers DEFIANT narrative
+	## Key tone: Focus on courage and sacrifice, not horror. What did they BUY us?
+	_zones_lost_this_session += 1
+
+	var zone_name = FCWTypes.get_zone_name(zone_id)
+	var pop_str = FCWTypes.format_population(lives_lost)
+
+	# Defiant zone-specific messages - honor the sacrifice, emphasize what it achieved
+	match zone_id:
+		FCWTypes.ZoneId.KUIPER:
+			spawn_transmission(
+				"Kuiper Command",
+				"Kuiper Station has fallen. They held for three days. Three days of evacuation ships escaping. Their sacrifice was not in vain.",
+				2
+			)
+		FCWTypes.ZoneId.SATURN:
+			spawn_transmission(
+				"Titan Defense",
+				"Saturn sector lost. %s souls. The Titan garrison's last transmission: 'We bought you time. Use it.' We will." % pop_str,
+				2
+			)
+		FCWTypes.ZoneId.JUPITER:
+			spawn_transmission(
+				"Admiral Chen",
+				"Jupiter has fallen. The fleet held until the last evac transport cleared Ganymede. Every soul on those ships owes their lives to Jupiter's stand.",
+				2
+			)
+		FCWTypes.ZoneId.ASTEROID_BELT:
+			spawn_transmission(
+				"Belt Command",
+				"The Belt has fallen. Miners aren't soldiers, but they fought like legends. Ceres bought us another week. That's a million more lives saved.",
+				2
+			)
+		FCWTypes.ZoneId.MARS:
+			spawn_transmission(
+				"Mars Final",
+				"Mars... the red planet bleeds. %s defending their homes. Their last stand gave Earth one more day. One more day of hope." % pop_str,
+				3
+			)
+		FCWTypes.ZoneId.EARTH:
+			# Earth falling is handled by endgame sequence - but have a defiant message anyway
+			spawn_transmission(
+				"Earth Final",
+				"This is Earth's last broadcast. Not a surrender. A testament. Humanity fought. Humanity ENDURED. Find us among the stars.",
+				3
+			)
+
+	# Follow-up defiant message after delay
+	await get_tree().create_timer(2.5).timeout
+	if is_inside_tree():
+		# Defiant follow-up that focuses on hope, not despair
+		var defiant_followups = [
+			{"sender": "Fleet Command", "text": "All stations: The sacrifice of %s will be remembered. The evacuation continues." % zone_name},
+			{"sender": "Admiral", "text": "%s held longer than anyone expected. That's who we are. That's why we'll survive." % zone_name},
+			{"sender": "Evac Fleet", "text": "Dedicating Colony Ship '%s Memorial' in honor of those who stood." % zone_name},
+		]
+		var followup = defiant_followups[randi() % defiant_followups.size()]
+		spawn_transmission(followup.sender, followup.text, 1)
+
+func trigger_defense_success_narrative(zone_id: int) -> void:
+	## Called when a zone successfully defends
+	var zone_name = FCWTypes.get_zone_name(zone_id)
+
+	var victory = TRANSMISSIONS_VICTORY[randi() % TRANSMISSIONS_VICTORY.size()]
+	spawn_transmission(victory.sender, "%s holds! %s" % [zone_name, victory.text], 1)
+
+func trigger_evacuation_milestone(total_evacuated: int) -> void:
+	## Called when evacuation reaches a milestone - humanizing the numbers
+	## Each milestone tells a story about WHO we're saving, not just how many
+	_total_evacuated = total_evacuated
+
+	# Milestone story beats - ordered from lowest to highest so we trigger each once
+	# These are designed to create emotional connection to the evacuation effort
+
+	# 1M - The first milestone. The pioneers.
+	if total_evacuated >= 1_000_000 and not _milestone_flags.get("1M", false):
+		_milestone_flags["1M"] = true
+		spawn_transmission(
+			"CS Svalbard",
+			"The first million. The Vault team is aboard. Seeds of every crop humanity ever grew. We carry tomorrow.",
+			0  # High priority - important milestone
+		)
+
+	# 5M - Artists and culture bearers
+	if total_evacuated >= 5_000_000 and not _milestone_flags.get("5M", false):
+		_milestone_flags["5M"] = true
+		spawn_transmission(
+			"CS Hope",
+			"Colony Ship Hope departing with the world's artists, musicians, poets. Humanity's soul sails with us.",
+			1
+		)
+
+	# 10M - The children
+	if total_evacuated >= 10_000_000 and not _milestone_flags.get("10M", false):
+		_milestone_flags["10M"] = true
+		spawn_transmission(
+			"CS Little Star",
+			"Ten million. The children. We prioritized the children. They'll grow up among the stars.",
+			0
+		)
+
+	# 25M - Scientists and dreamers
+	if total_evacuated >= 25_000_000 and not _milestone_flags.get("25M", false):
+		_milestone_flags["25M"] = true
+		spawn_transmission(
+			"CS Discovery",
+			"25 million souls. Enough scientists to understand the universe. Enough dreamers to try.",
+			1
+		)
+
+	# 40M - HEROIC threshold
+	if total_evacuated >= 40_000_000 and not _milestone_flags.get("40M", false):
+		_milestone_flags["40M"] = true
+		spawn_transmission(
+			"Fleet Command",
+			"HEROIC THRESHOLD REACHED. 40 million evacuated. History will remember this as victory. Don't stop.",
+			0
+		)
+
+	# 60M - Beyond hope
+	if total_evacuated >= 60_000_000 and not _milestone_flags.get("60M", false):
+		_milestone_flags["60M"] = true
+		spawn_transmission(
+			"Admiral Chen",
+			"60 million. More than we dared hope. More than we deserved. Every soul is a miracle.",
+			1
+		)
+
+	# 80M - LEGENDARY
+	if total_evacuated >= 80_000_000 and not _milestone_flags.get("80M", false):
+		_milestone_flags["80M"] = true
+		spawn_transmission(
+			"All Channels",
+			"LEGENDARY. 80 million humans will survive. Against all odds, against the void itself, humanity endures.",
+			0
+		)
+
+func spawn_custom_transmission(sender: String, text: String, priority: int = 1) -> void:
+	## Public API to spawn custom transmissions from game logic
+	spawn_transmission(sender, text, priority)
+
+# ============================================================================
+# ZOOM CONTROL - Multi-Level View System
+# ============================================================================
+
+func set_zoom_level(level: int, focus_zone: int = -1) -> void:
+	## Set the zoom level: ZoomLevel.GALAXY, ZoomLevel.SYSTEM, or ZoomLevel.PLANET
+	## For PLANET view, focus_zone specifies which zone to focus on
+	if level == _zoom_level and (level != ZoomLevel.PLANET or focus_zone == _zoom_focus_zone):
+		return  # No change
+
+	_zoom_target = level
+	_zoom_transition = 0.0
+
+	if level == ZoomLevel.PLANET:
+		_zoom_focus_zone = focus_zone if focus_zone >= 0 else _herald_target_zone
+
+func get_zoom_level() -> int:
+	return _zoom_level
+
+func get_zoom_focus_zone() -> int:
+	return _zoom_focus_zone
+
+func zoom_to_galaxy() -> void:
+	## Zoom out to galaxy view - "Among the stars, one light flickers"
+	set_zoom_level(ZoomLevel.GALAXY)
+	spawn_transmission("Perspective", "Among the billions of stars... one light flickers.", 0)
+
+func zoom_to_system() -> void:
+	## Return to system view - strategic overview
+	set_zoom_level(ZoomLevel.SYSTEM)
+
+func zoom_to_planet(zone_id: int) -> void:
+	## Zoom into a specific planet/zone for intense focus
+	set_zoom_level(ZoomLevel.PLANET, zone_id)
+	var zone_name = FCWTypes.get_zone_name(zone_id)
+	spawn_transmission("Focus", "Attention: %s sector." % zone_name, 1)
+
+func zoom_to_battle(zone_id: int = -1) -> void:
+	## Zoom to where combat is happening
+	var target = zone_id if zone_id >= 0 else _herald_target_zone
+	zoom_to_planet(target)
+
+func is_zooming() -> bool:
+	## Returns true if currently transitioning between zoom levels
+	return _zoom_transition < 1.0
+
+# ============================================================================
+# CINEMATIC PACING - AI-Driven Camera Control
+# ============================================================================
+
+func cinematic_update(delta: float) -> void:
+	## Called by fcw_main to let the camera make cinematic decisions
+	## This implements AI-driven dramatic pacing
+	## NOTE: Planet-level zoom is handled by the FCWPlanetView picture-in-picture window
+
+	# Don't make changes during a zoom transition
+	if is_zooming():
+		return
+
+	# Pacing rules based on narrative state:
+	# Solar map stays at SYSTEM level most of the time
+	# Planet closeups are shown via FCWPlanetView window (handled by fcw_main)
+	match _narrative_state:
+		0:  # Peace - occasionally pull to galaxy for scale
+			if _zoom_level == ZoomLevel.SYSTEM and randf() < delta * 0.005:  # ~1 in 200 frames
+				zoom_to_galaxy()
+			elif _zoom_level == ZoomLevel.GALAXY and randf() < delta * 0.02:  # Return faster
+				zoom_to_system()
+
+		1:  # Tension - stay at system level, drift toward threatened zone
+			if _zoom_level != ZoomLevel.SYSTEM:
+				zoom_to_system()
+
+		2:  # Combat - stay at system to see the whole battle
+			# Planet closeup is shown via FCWPlanetView window
+			if _zoom_level != ZoomLevel.SYSTEM:
+				zoom_to_system()
+
+		3:  # Desperate - stay at system for strategic overview
+			# Rapid cuts between zones could be disorienting, stay steady
+			if _zoom_level != ZoomLevel.SYSTEM:
+				zoom_to_system()
+
+func cinematic_zone_fallen(zone_id: int) -> void:
+	## Called when a zone falls - dramatic camera response
+	# Stay at system level, the FCWPlanetView handles the closeup
+	# The zone destruction effects will be visible on the main map
+	if _zoom_level != ZoomLevel.SYSTEM:
+		zoom_to_system()
+
+func cinematic_victory_moment() -> void:
+	## Called when a defense succeeds - celebratory camera
+	zoom_to_system()
+
+func cinematic_game_over() -> void:
+	## Called when the game ends - pull back to galaxy
+	zoom_to_galaxy()

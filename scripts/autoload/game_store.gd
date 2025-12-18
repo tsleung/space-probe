@@ -43,7 +43,7 @@ func _ready() -> void:
 	_load_balance_data()
 
 func _load_balance_data() -> void:
-	var balance_path = "res://data/games/mars_mission/balance.json"
+	var balance_path = "res://data/games/mars_odyssey_trek/balance.json"
 	if FileAccess.file_exists(balance_path):
 		var file = FileAccess.open(balance_path, FileAccess.READ)
 		if file:
@@ -187,7 +187,7 @@ func _emit_state_change_signals(old_state: Dictionary, new_state: Dictionary) ->
 # ============================================================================
 
 func _reduce_new_game(action: Dictionary) -> Dictionary:
-	var game_id = action.get("game_id", "mars_mission")
+	var game_id = action.get("game_id", "mot")
 	var difficulty = action.get("difficulty", "normal")
 	var difficulty_config = _balance.get("difficulties", {}).get(difficulty, {})
 	var base_budget = _balance.get("starting_budget", 650000000)
@@ -392,7 +392,7 @@ func start_new_game() -> void:
 	_rng.seed = int(Time.get_unix_time_from_system())
 	var result = dispatch({
 		"type": "NEW_GAME",
-		"game_id": "mars_mission",
+		"game_id": "mot",
 		"difficulty": "normal",
 		"seed": _rng.seed
 	})
