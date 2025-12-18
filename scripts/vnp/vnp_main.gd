@@ -1,654 +1,258 @@
-extends Control
+extends Node2D
 
-## VNP Main UI Controller
-## Thin layer that reads from VNPStore and dispatches commands
+const VnpTypes = preload("res://scripts/vnp/vnp_types.gd")
+const ShipScene = preload("res://scenes/vnp/ship.tscn")
+const DeathExplosionFxScene = preload("res://scenes/vnp/death_explosion_fx.tscn")
+const AiController = preload("res://scripts/vnp/vnp_ai_controller.gd")
 
-# ============================================================================
-# NODE REFERENCES
-# ============================================================================
+@onready var store = $VnpStore
+@onready var vnp_ui = $VnpUI
 
-# Top bar
-@onready var year_label: Label = $TopBar/HBoxContainer/YearLabel
-@onready var iron_label: Label = $TopBar/HBoxContainer/IronLabel
-@onready var energy_label: Label = $TopBar/HBoxContainer/EnergyLabel
-@onready var rare_label: Label = $TopBar/HBoxContainer/RareLabel
-@onready var probes_label: Label = $TopBar/HBoxContainer/ProbesLabel
+var screen_size = Vector2.ZERO
+const PLANET_COUNT = 10
+const WORLD_PADDING = 100
 
-# Galaxy view
-@onready var galaxy_view: Control = $MainContent/GalaxyPanel/GalaxyView
-@onready var galaxy_camera: Camera2D = $MainContent/GalaxyPanel/GalaxyView/Camera2D
+# Balance constants
+const ENERGY_REGEN_RATE = 10
+const NEMESIS_ENERGY_MULTIPLIER = 1.5
+const VICTORY_DISPLAY_TIME = 3.0
 
-# Right sidebar
-@onready var probe_list: ItemList = $MainContent/RightSidebar/SidebarContent/ProbeSection/ProbeList
-@onready var system_info: RichTextLabel = $MainContent/RightSidebar/SidebarContent/SystemSection/SystemInfo
-@onready var action_buttons: VBoxContainer = $MainContent/RightSidebar/SidebarContent/ActionSection/ActionButtons
+var ship_nodes = {}
+var planet_nodes = {}
+var base_nodes = {}
 
-# Action buttons
-@onready var mine_button: Button = $MainContent/RightSidebar/SidebarContent/ActionSection/ActionButtons/MineButton
-@onready var replicate_button: Button = $MainContent/RightSidebar/SidebarContent/ActionSection/ActionButtons/ReplicateButton
-@onready var idle_button: Button = $MainContent/RightSidebar/SidebarContent/ActionSection/ActionButtons/IdleButton
+# AI Controller
+var ai_controller = null
 
-# Bottom bar (real-time controls)
-@onready var pause_button: Button = $BottomBar/HBoxContainer/PauseButton
-@onready var speed_slider: HSlider = $BottomBar/HBoxContainer/SpeedSlider
-@onready var speed_label: Label = $BottomBar/HBoxContainer/SpeedValueLabel
+# Timers
+var energy_regen_timer: Timer
+var victory_check_timer: Timer
 
-# Event log
-@onready var event_log: RichTextLabel = $MainContent/RightSidebar/SidebarContent/LogSection/EventLog
+# Screen shake
+var shake_intensity: float = 0.0
+var shake_decay: float = 8.0
+var camera: Camera2D
 
-# Event dialog
-@onready var event_dialog: Panel = $EventDialog
-@onready var event_title: Label = $EventDialog/VBoxContainer/EventTitle
-@onready var event_description: RichTextLabel = $EventDialog/VBoxContainer/EventDescription
-@onready var event_choices: VBoxContainer = $EventDialog/VBoxContainer/EventChoices
-
-# Game over screen
-@onready var game_over_panel: Panel = $GameOverPanel
-@onready var game_over_title: Label = $GameOverPanel/VBoxContainer/Title
-@onready var game_over_reason: Label = $GameOverPanel/VBoxContainer/Reason
-@onready var game_over_score: Label = $GameOverPanel/VBoxContainer/Score
-@onready var game_over_stats: RichTextLabel = $GameOverPanel/VBoxContainer/Stats
-
-# ============================================================================
-# LOCAL STATE
-# ============================================================================
-
-var _selected_probe_id: String = ""
-var _selected_system_id: String = ""
-var _hovered_system_id: String = ""
-
-var _camera_drag: bool = false
-var _camera_drag_start: Vector2 = Vector2.ZERO
-
-# Resource rate tracking for display
-var _last_iron: float = 0.0
-var _last_rare: float = 0.0
-var _iron_rate: float = 0.0
-var _rare_rate: float = 0.0
-var _rate_update_timer: float = 0.0
-
-# ============================================================================
-# INITIALIZATION
-# ============================================================================
+# Victory state
+var showing_victory = false
 
 func _ready():
-	_connect_signals()
-	VNPStore.start_new_run()
+	screen_size = get_viewport_rect().size
+	store.subscribe(self)
+	set_process(true)
 
-	# Select first probe and center on home system
-	_selected_probe_id = "probe_1"
-	var state = VNPStore.get_state()
-	_selected_system_id = state.home_system
-	var home_sys = VNPStore.get_system(state.home_system)
-	if not home_sys.is_empty():
-		galaxy_camera.position = home_sys.position
+	_setup_camera()
+	_setup_timers()
+	_initialize_game_world()
+	_setup_ai()
 
-	_sync_ui()
-	event_dialog.visible = false
-	game_over_panel.visible = false
+	vnp_ui.init(store, base_nodes)
 
-func _connect_signals():
-	# Store signals
-	VNPStore.state_changed.connect(_on_state_changed)
-	VNPStore.tick_processed.connect(_on_tick_processed)
-	VNPStore.event_triggered.connect(_on_event_triggered)
-	VNPStore.game_over.connect(_on_game_over)
-	VNPStore.probe_created.connect(_on_probe_created)
+	var initial_state = store.get_state()
+	on_state_changed(initial_state)
 
-	# UI signals
-	pause_button.pressed.connect(_on_pause_pressed)
-	speed_slider.value_changed.connect(_on_speed_changed)
-	mine_button.pressed.connect(_on_mine_pressed)
-	replicate_button.pressed.connect(_on_replicate_pressed)
-	idle_button.pressed.connect(_on_idle_pressed)
-	probe_list.item_selected.connect(_on_probe_selected)
+func _process(delta):
+	# Screen shake
+	if shake_intensity > 0:
+		camera.offset = Vector2(
+			randf_range(-shake_intensity, shake_intensity),
+			randf_range(-shake_intensity, shake_intensity)
+		)
+		shake_intensity = lerp(shake_intensity, 0.0, shake_decay * delta)
+		if shake_intensity < 0.1:
+			shake_intensity = 0.0
+			camera.offset = Vector2.ZERO
 
-	# Game over buttons
-	var new_game_btn = $GameOverPanel/VBoxContainer/ButtonsContainer/NewGameButton
-	var main_menu_btn = $GameOverPanel/VBoxContainer/ButtonsContainer/MainMenuButton
-	new_game_btn.pressed.connect(_on_new_game_pressed)
-	main_menu_btn.pressed.connect(_on_main_menu_pressed)
+func _setup_camera():
+	camera = Camera2D.new()
+	camera.name = "Camera2D"
+	camera.position = Vector2.ZERO
+	camera.anchor_mode = Camera2D.ANCHOR_MODE_FIXED_TOP_LEFT
+	add_child(camera)
+	camera.make_current()
 
-func _process(delta: float):
-	# Camera drag
-	if _camera_drag:
-		var mouse_pos = get_global_mouse_position()
-		galaxy_camera.position -= (mouse_pos - _camera_drag_start) / galaxy_camera.zoom.x
-		_camera_drag_start = mouse_pos
+func _setup_timers():
+	# Energy regeneration timer
+	energy_regen_timer = Timer.new()
+	energy_regen_timer.name = "EnergyRegenTimer"
+	energy_regen_timer.wait_time = 1.0
+	energy_regen_timer.timeout.connect(_on_energy_regen)
+	add_child(energy_regen_timer)
+	energy_regen_timer.start()
 
-	# Update resource rates display periodically
-	_rate_update_timer += delta
-	if _rate_update_timer >= 0.5:
-		_update_resource_rates()
-		_rate_update_timer = 0.0
+	# Victory check timer
+	victory_check_timer = Timer.new()
+	victory_check_timer.name = "VictoryCheckTimer"
+	victory_check_timer.wait_time = 0.5
+	victory_check_timer.timeout.connect(_on_victory_check)
+	add_child(victory_check_timer)
+	victory_check_timer.start()
 
-	galaxy_view.queue_redraw()
+func _setup_ai():
+	ai_controller = AiController.new()
+	ai_controller.name = "AiController"
+	add_child(ai_controller)
+	ai_controller.init(store, _get_base_positions())
 
-func _update_resource_rates():
-	var resources = VNPStore.get_resources()
-	var current_iron = resources.get("iron", 0)
-	var current_rare = resources.get("rare", 0)
+func _get_base_positions() -> Dictionary:
+	var positions = {}
+	for team in base_nodes:
+		positions[team] = base_nodes[team].position
+	return positions
 
-	# Calculate rate per second (smoothed)
-	_iron_rate = (current_iron - _last_iron) * 2.0  # x2 because we update every 0.5s
-	_rare_rate = (current_rare - _last_rare) * 2.0
-
-	_last_iron = current_iron
-	_last_rare = current_rare
-
-func _input(event: InputEvent):
-	# Handle keyboard controls anywhere
-	if event is InputEventKey and event.pressed:
-		var move_speed = 20.0 / galaxy_camera.zoom.x
-		match event.keycode:
-			KEY_W, KEY_UP:
-				galaxy_camera.position.y -= move_speed
-			KEY_S, KEY_DOWN:
-				galaxy_camera.position.y += move_speed
-			KEY_A, KEY_LEFT:
-				galaxy_camera.position.x -= move_speed
-			KEY_D, KEY_RIGHT:
-				galaxy_camera.position.x += move_speed
-			KEY_SPACE:
-				# Toggle pause with space
-				_toggle_pause()
-			KEY_1:
-				VNPStore.set_game_speed(1.0)
-				_update_speed_ui()
-			KEY_2:
-				VNPStore.set_game_speed(2.0)
-				_update_speed_ui()
-			KEY_3:
-				VNPStore.set_game_speed(5.0)
-				_update_speed_ui()
-			KEY_4:
-				VNPStore.set_game_speed(10.0)
-				_update_speed_ui()
-
-	if not galaxy_view.get_global_rect().has_point(get_global_mouse_position()):
+func _on_energy_regen():
+	if showing_victory:
 		return
 
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			if event.pressed:
-				_handle_galaxy_click(get_global_mouse_position())
-		elif event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT:
-			_camera_drag = event.pressed
-			if event.pressed:
-				_camera_drag_start = get_global_mouse_position()
-		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			galaxy_camera.zoom *= 1.1
-			galaxy_camera.zoom = galaxy_camera.zoom.clamp(Vector2(0.3, 0.3), Vector2(3.0, 3.0))
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			galaxy_camera.zoom /= 1.1
-			galaxy_camera.zoom = galaxy_camera.zoom.clamp(Vector2(0.3, 0.3), Vector2(3.0, 3.0))
+	for team in VnpTypes.Team.values():
+		var amount = ENERGY_REGEN_RATE
+		if team == VnpTypes.Team.NEMESIS:
+			amount = int(amount * NEMESIS_ENERGY_MULTIPLIER)
+		store.dispatch({
+			"type": "ADD_ENERGY",
+			"team": team,
+			"amount": amount
+		})
 
-	if event is InputEventMouseMotion:
-		_update_hover_system(get_global_mouse_position())
+func _on_victory_check():
+	if showing_victory:
+		return
+	store.dispatch({"type": "CHECK_VICTORY"})
 
-# ============================================================================
-# UI SYNC
-# ============================================================================
+func shake_screen(intensity: float):
+	shake_intensity = max(shake_intensity, intensity)
 
-func _sync_ui():
-	_sync_resources()
-	_sync_probes()
-	_sync_system_info()
-	_sync_action_buttons()
-	_sync_event_log()
-
-func _sync_resources():
-	var resources = VNPStore.get_resources()
-	var state = VNPStore.get_state()
-
-	# Year with fractional part for smooth feeling
-	year_label.text = "Year: %d" % int(state.year)
-
-	# Resources with rate display
-	var iron = resources.get("iron", 0)
-	var rare = resources.get("rare", 0)
-	var energy = resources.get("energy", 0)
-
-	# Show rates inline if positive
-	if _iron_rate > 0.1:
-		iron_label.text = "Iron: %.0f (+%.0f/s)" % [iron, _iron_rate]
-	else:
-		iron_label.text = "Iron: %.0f" % iron
-
-	energy_label.text = "Energy: %.0f" % energy
-
-	if _rare_rate > 0.1:
-		rare_label.text = "Rare: %.0f (+%.0f/s)" % [rare, _rare_rate]
-	else:
-		rare_label.text = "Rare: %.0f" % rare
-
-	probes_label.text = "Probes: %d" % VNPStore.get_active_probe_count()
-
-func _sync_probes():
-	probe_list.clear()
-	var probes = VNPStore.get_probes()
-
-	for probe_id in probes.keys():
-		var probe = probes[probe_id]
-		var status = VNPTypes.get_status_name(probe.status)
-		var text = "%s [%s]" % [probe.name, status]
-		probe_list.add_item(text)
-		probe_list.set_item_metadata(probe_list.item_count - 1, probe_id)
-
-		# Highlight selected
-		if probe_id == _selected_probe_id:
-			probe_list.select(probe_list.item_count - 1)
-
-func _sync_system_info():
-	if _selected_system_id.is_empty():
-		system_info.text = "Select a system on the map"
+func on_state_changed(state):
+	# Handle victory
+	if state.get("game_over", false) and not showing_victory:
+		_handle_victory(state.winner)
 		return
 
-	var system = VNPStore.get_system(_selected_system_id)
-	if system.is_empty():
-		system_info.text = "Unknown system"
-		return
+	var current_ship_ids = state.ships.keys()
+	var nodes_to_remove = []
+	for ship_id in ship_nodes:
+		if not ship_id in current_ship_ids:
+			nodes_to_remove.append(ship_id)
 
-	var star_type_names = ["Red Dwarf", "Yellow", "Orange", "Blue Giant", "White Dwarf", "Neutron"]
-	var type_name = star_type_names[system.star_type] if system.star_type < star_type_names.size() else "Unknown"
+	for ship_id in nodes_to_remove:
+		var ship_node = ship_nodes[ship_id]
+		if is_instance_valid(ship_node):
+			# Spawn explosion and shake screen based on ship size
+			var ship_size = VnpTypes.get_ship_size(ship_node.ship_data.type)
+			_spawn_death_explosion(ship_node.global_position, ship_size, ship_node.ship_data.team)
 
-	var text = "[b]%s[/b]\n" % system.name
-	text += "Type: %s\n" % type_name
-	text += "Iron: %d / %d\n" % [system.resources.iron, system.max_resources.iron]
-	text += "Rare: %d / %d\n" % [system.resources.rare, system.max_resources.rare]
-	text += "Danger: %.0f%%\n" % (system.danger_level * 100)
+			ship_node.queue_free()
+		ship_nodes.erase(ship_id)
 
-	if system.is_explored:
-		text += "[color=green]Explored[/color]\n"
+	for ship_id in current_ship_ids:
+		if not ship_nodes.has(ship_id):
+			_spawn_ship(ship_id, state.ships[ship_id])
+
+func _spawn_death_explosion(pos: Vector2, size: int, team: int):
+	var explosion = DeathExplosionFxScene.instantiate()
+	add_child(explosion)
+	explosion.global_position = pos
+	explosion.emitting = true
+
+	# Scale explosion and shake based on ship size
+	var shake_amounts = {
+		VnpTypes.ShipSize.SMALL: 5.0,
+		VnpTypes.ShipSize.MEDIUM: 12.0,
+		VnpTypes.ShipSize.LARGE: 25.0,
+	}
+	var scale_amounts = {
+		VnpTypes.ShipSize.SMALL: 1.0,
+		VnpTypes.ShipSize.MEDIUM: 1.8,
+		VnpTypes.ShipSize.LARGE: 3.0,
+	}
+
+	explosion.scale = Vector2.ONE * scale_amounts.get(size, 1.0)
+	shake_screen(shake_amounts.get(size, 5.0))
+
+func _handle_victory(winner: int):
+	showing_victory = true
+	ai_controller.stop_all()
+
+	var winner_name = VnpTypes.get_team_name(winner) if winner >= 0 else "No one"
+	vnp_ui.show_victory(winner_name)
+
+	# Wait then restart
+	await get_tree().create_timer(VICTORY_DISPLAY_TIME).timeout
+	_restart_game()
+
+func _restart_game():
+	showing_victory = false
+
+	# Clear all ships
+	for ship_id in ship_nodes:
+		if is_instance_valid(ship_nodes[ship_id]):
+			ship_nodes[ship_id].queue_free()
+	ship_nodes.clear()
+
+	# Reset state
+	store.dispatch({"type": "RESET_GAME"})
+
+	# Reinitialize planets
+	_create_planets()
+
+	# Restart AI
+	ai_controller.start_all()
+
+	vnp_ui.hide_victory()
+
+func _initialize_game_world():
+	_create_bases()
+	_create_planets()
+
+func _create_bases():
+	var player_base_pos = Vector2(WORLD_PADDING, screen_size.y - WORLD_PADDING)
+	base_nodes[VnpTypes.Team.PLAYER] = _create_world_object("Base", player_base_pos, Color.BLUE)
+	
+	var enemy1_base_pos = Vector2(screen_size.x - WORLD_PADDING, screen_size.y - WORLD_PADDING)
+	base_nodes[VnpTypes.Team.ENEMY_1] = _create_world_object("Base", enemy1_base_pos, Color.ORANGE)
+
+	var nemesis_base_pos = Vector2(screen_size.x / 2, WORLD_PADDING)
+	base_nodes[VnpTypes.Team.NEMESIS] = _create_world_object("Base", nemesis_base_pos, Color.RED)
+
+func _create_planets():
+	var planets_data = {}
+	var central_area = Rect2(WORLD_PADDING * 2, WORLD_PADDING * 2, screen_size.x - WORLD_PADDING * 4, screen_size.y - WORLD_PADDING * 4)
+	
+	for i in range(PLANET_COUNT):
+		var planet_id = "planet_%s" % i
+		var position = Vector2(
+			randf_range(central_area.position.x, central_area.end.x),
+			randf_range(central_area.position.y, central_area.end.y)
+		)
+		var resource_amount = randi_range(500, 2000)
+		
+		planets_data[planet_id] = { "id": planet_id, "position": position, "resource_amount": resource_amount, "owner": null }
+		planet_nodes[planet_id] = _create_world_object("Planet", position, Color.GRAY)
+	
+	store.dispatch({"type": "INITIALIZE_PLANETS", "planets": planets_data})
+
+func _spawn_ship(ship_id, ship_data):
+	var ship_instance = ShipScene.instantiate()
+	add_child(ship_instance)
+	ship_instance.init(store, ship_data)
+	ship_nodes[ship_id] = ship_instance
+
+func _create_world_object(name, pos, color):
+	var node = Node2D.new()
+	node.name = name
+	node.position = pos
+	
+	var polygon = Polygon2D.new()
+	if name == "Base":
+		polygon.polygon = PackedVector2Array([Vector2(-20, 20), Vector2(20, 20), Vector2(20, -20), Vector2(-20, -20)])
 	else:
-		text += "[color=gray]Unexplored[/color]\n"
-
-	if system.has_anomaly:
-		if system.anomaly_investigated:
-			text += "[color=gray]Anomaly: Investigated[/color]\n"
-		else:
-			text += "[color=yellow]Anomaly: Present![/color]\n"
-
-	# Show probes in this system
-	var probes = VNPStore.get_probes()
-	var probes_here = []
-	for probe in probes.values():
-		if probe.current_system == _selected_system_id:
-			probes_here.append(probe.name)
-
-	if not probes_here.is_empty():
-		text += "\nProbes: %s" % ", ".join(probes_here)
-
-	system_info.text = text
-
-func _sync_action_buttons():
-	var probe = VNPStore.get_probe(_selected_probe_id)
-	var system = VNPStore.get_system(_selected_system_id)
-
-	var can_act = not probe.is_empty() and probe.status == VNPTypes.ProbeStatus.IDLE
-	var has_resources = not system.is_empty() and (system.resources.iron > 0 or system.resources.rare > 0)
-	var can_afford_replicate = VNPStore.can_replicate()
-
-	mine_button.disabled = not (can_act and has_resources and probe.current_system == _selected_system_id)
-	replicate_button.disabled = not (can_act and can_afford_replicate)
-	idle_button.disabled = probe.is_empty() or probe.status == VNPTypes.ProbeStatus.IDLE or probe.status == VNPTypes.ProbeStatus.TRAVELING
-
-	# Update replicate button text with cost
-	var cost = VNPTypes.REPLICATION_COST
-	replicate_button.text = "Replicate (%d iron, %d energy)" % [cost.iron, cost.energy]
-
-func _sync_event_log():
-	var log_entries = VNPStore.get_event_log()
-	event_log.clear()
-
-	# Show last 20 entries
-	var start = maxi(0, log_entries.size() - 20)
-	for i in range(start, log_entries.size()):
-		var entry = log_entries[i]
-		var color = "white"
-		match entry.category:
-			"success": color = "green"
-			"warning": color = "yellow"
-			"error": color = "red"
-			"info": color = "gray"
-
-		event_log.append_text("[color=%s][T%d] %s[/color]\n" % [color, entry.turn, entry.message])
-
-	# Scroll to bottom
-	event_log.scroll_to_line(event_log.get_line_count())
-
-# ============================================================================
-# GALAXY DRAWING
-# ============================================================================
-
-func _draw_galaxy():
-	# This is called from galaxy_view's _draw
-	pass
-
-# Transform world position to screen position (accounts for camera position and zoom)
-func _world_to_screen(world_pos: Vector2) -> Vector2:
-	var center = galaxy_view.size / 2.0
-	return center + (world_pos - galaxy_camera.position) * galaxy_camera.zoom.x
-
-# Called from GalaxyView node
-func draw_galaxy_on(canvas: CanvasItem):
-	var systems = VNPStore.get_systems()
-	var probes = VNPStore.get_probes()
-	var state = VNPStore.get_state()
-	var zoom = galaxy_camera.zoom.x
-
-	# Get reachable systems if we have an idle or mining probe selected (can redirect)
-	var reachable_systems: Array = []
-	var selected_probe = VNPStore.get_probe(_selected_probe_id)
-	var probe_can_travel = not selected_probe.is_empty() and (selected_probe.status == VNPTypes.ProbeStatus.IDLE or selected_probe.status == VNPTypes.ProbeStatus.MINING)
-	if probe_can_travel:
-		var probe_sys = systems.get(selected_probe.current_system, {})
-		if not probe_sys.is_empty():
-			reachable_systems = probe_sys.get("connections", [])
-
-	# Draw connections first
-	for sys_id in systems.keys():
-		var sys = systems[sys_id]
-		var from_pos = _world_to_screen(sys.position)
-
-		for conn_id in sys.connections:
-			var conn_sys = systems.get(conn_id, {})
-			if conn_sys.is_empty():
-				continue
-
-			var to_pos = _world_to_screen(conn_sys.position)
-
-			# Only draw if at least one end is explored
-			var color = Color(0.2, 0.25, 0.3, 0.3)
-			if sys.is_explored and conn_sys.is_explored:
-				color = Color(0.4, 0.5, 0.6, 0.5)
-			elif sys.is_explored or conn_sys.is_explored:
-				color = Color(0.3, 0.35, 0.4, 0.4)
-
-			canvas.draw_line(from_pos, to_pos, color, 1.0)
-
-	# Draw systems
-	for sys_id in systems.keys():
-		var sys = systems[sys_id]
-		var pos = _world_to_screen(sys.position)
-
-		# Star size based on type (scaled by zoom)
-		var base_sizes = [6, 8, 10, 14, 5, 4]
-		var base_size = base_sizes[sys.star_type] if sys.star_type < base_sizes.size() else 8
-		var size = base_size * zoom
-
-		var color = VNPTypes.get_star_color(sys.star_type)
-
-		# Dim unexplored systems
-		if not sys.is_explored:
-			color = Color(0.4, 0.4, 0.5, 0.5)
-			size = 4 * zoom
-
-		# Glow effect
-		canvas.draw_circle(pos, size * 1.5, Color(color.r, color.g, color.b, 0.2))
-
-		# Main star
-		canvas.draw_circle(pos, size, color)
-
-		# Anomaly indicator
-		if sys.is_explored and sys.has_anomaly and not sys.anomaly_investigated:
-			canvas.draw_arc(pos, size + 4 * zoom, 0, TAU, 16, Color.YELLOW, 2.0)
-
-		# Selection indicator
-		if sys_id == _selected_system_id:
-			canvas.draw_arc(pos, size + 6 * zoom, 0, TAU, 16, Color.WHITE, 2.0)
-
-		# Hover indicator
-		if sys_id == _hovered_system_id and sys_id != _selected_system_id:
-			canvas.draw_arc(pos, size + 4 * zoom, 0, TAU, 16, Color(1, 1, 1, 0.5), 1.0)
-
-		# Home system indicator
-		if sys_id == state.home_system:
-			canvas.draw_arc(pos, size + 8 * zoom, 0, TAU, 16, Color.CYAN, 1.0)
-
-		# Reachable system indicator (green dashed)
-		if sys_id in reachable_systems:
-			canvas.draw_arc(pos, size + 10 * zoom, 0, TAU, 16, Color(0.3, 1.0, 0.3, 0.6), 2.0)
-
-	# Draw probes
-	for probe in probes.values():
-		var world_pos: Vector2
-
-		if probe.status == VNPTypes.ProbeStatus.TRAVELING:
-			# Interpolate position based on distance traveled
-			var from_sys = systems.get(probe.current_system, {})
-			var to_sys = systems.get(probe.target_system, {})
-			if not from_sys.is_empty() and not to_sys.is_empty():
-				var total_distance = from_sys.position.distance_to(to_sys.position)
-				var progress = clampf(probe.travel_progress / total_distance, 0.0, 1.0)
-				world_pos = from_sys.position.lerp(to_sys.position, progress)
-			else:
-				continue
-		else:
-			var sys = systems.get(probe.current_system, {})
-			if sys.is_empty():
-				continue
-			world_pos = sys.position + Vector2(12, 0)  # Offset from star
-
-		var pos = _world_to_screen(world_pos)
-
-		# Draw probe triangle (scaled by zoom)
-		var probe_size = 5.0 * zoom
-		var points = PackedVector2Array([
-			pos + Vector2(0, -probe_size),
-			pos + Vector2(-probe_size * 0.7, probe_size * 0.5),
-			pos + Vector2(probe_size * 0.7, probe_size * 0.5)
-		])
-
-		var probe_color = Color.GOLD
-		match probe.status:
-			VNPTypes.ProbeStatus.MINING:
-				probe_color = Color.GREEN
-			VNPTypes.ProbeStatus.REPLICATING:
-				probe_color = Color.CYAN
-			VNPTypes.ProbeStatus.TRAVELING:
-				probe_color = Color.ORANGE
-			VNPTypes.ProbeStatus.DAMAGED:
-				probe_color = Color.RED
-
-		canvas.draw_colored_polygon(points, probe_color)
-
-		# Draw replication progress ring
-		if probe.status == VNPTypes.ProbeStatus.REPLICATING:
-			var progress = probe.task_progress / VNPStore.REPLICATION_YEARS
-			var arc_end = progress * TAU
-			canvas.draw_arc(pos, probe_size + 4 * zoom, -PI/2, -PI/2 + arc_end, 16, Color.CYAN, 2.0)
-
-		# Highlight selected probe
-		if probe.id == _selected_probe_id:
-			canvas.draw_arc(pos, probe_size + 6 * zoom, 0, TAU, 16, Color.WHITE, 1.5)
-
-# ============================================================================
-# INPUT HANDLERS
-# ============================================================================
-
-# Transform screen position to world position (inverse of _world_to_screen)
-func _screen_to_world(screen_pos: Vector2) -> Vector2:
-	var local_pos = screen_pos - galaxy_view.global_position
-	var center = galaxy_view.size / 2.0
-	return (local_pos - center) / galaxy_camera.zoom.x + galaxy_camera.position
-
-func _handle_galaxy_click(screen_pos: Vector2):
-	var world_pos = _screen_to_world(screen_pos)
-
-	# Find clicked system
-	var systems = VNPStore.get_systems()
-	var closest_id = ""
-	var closest_dist = 30.0 / galaxy_camera.zoom.x  # Click radius (adjusted for zoom)
-
-	for sys_id in systems.keys():
-		var sys = systems[sys_id]
-		var dist = world_pos.distance_to(sys.position)
-		if dist < closest_dist:
-			closest_dist = dist
-			closest_id = sys_id
-
-	if not closest_id.is_empty():
-		# Check if we have a selected probe that can travel (idle or mining)
-		var probe = VNPStore.get_probe(_selected_probe_id)
-		var can_travel = not probe.is_empty() and (probe.status == VNPTypes.ProbeStatus.IDLE or probe.status == VNPTypes.ProbeStatus.MINING)
-		if can_travel:
-			var from_sys = VNPStore.get_system(probe.current_system)
-			if closest_id != probe.current_system and VNPGalaxyLogic.are_connected(from_sys, closest_id):
-				# Travel to this system
-				VNPStore.move_probe(_selected_probe_id, closest_id)
-				return
-
-		# Otherwise, select this system
-		_selected_system_id = closest_id
-		_sync_system_info()
-		_sync_action_buttons()
-
-func _update_hover_system(screen_pos: Vector2):
-	var world_pos = _screen_to_world(screen_pos)
-
-	var systems = VNPStore.get_systems()
-	var closest_id = ""
-	var closest_dist = 30.0 / galaxy_camera.zoom.x  # Adjusted for zoom
-
-	for sys_id in systems.keys():
-		var sys = systems[sys_id]
-		var dist = world_pos.distance_to(sys.position)
-		if dist < closest_dist:
-			closest_dist = dist
-			closest_id = sys_id
-
-	_hovered_system_id = closest_id
-
-# ============================================================================
-# BUTTON HANDLERS
-# ============================================================================
-
-func _toggle_pause():
-	VNPStore.set_paused(not VNPStore.is_paused())
-	_update_pause_ui()
-
-func _update_pause_ui():
-	if VNPStore.is_paused():
-		pause_button.text = "▶ Play"
-	else:
-		pause_button.text = "⏸ Pause"
-
-func _update_speed_ui():
-	var speed = VNPStore.get_game_speed()
-	speed_label.text = "%.1fx" % speed
-	# Map speed 0.1-10 to slider 0-100
-	speed_slider.value = (log(speed) / log(10) + 1) * 50  # Logarithmic mapping
-
-func _on_pause_pressed():
-	_toggle_pause()
-
-func _on_speed_changed(value: float):
-	# Slider is 0-100, convert to speed multiplier (0.1x to 10x) logarithmically
-	var speed = pow(10, (value / 50.0) - 1)  # 0->0.1, 50->1, 100->10
-	VNPStore.set_game_speed(speed)
-	speed_label.text = "%.1fx" % speed
-
-func _on_mine_pressed():
-	if not _selected_probe_id.is_empty():
-		VNPStore.start_mining(_selected_probe_id)
-
-func _on_replicate_pressed():
-	if not _selected_probe_id.is_empty():
-		VNPStore.start_replication(_selected_probe_id)
-
-func _on_idle_pressed():
-	if not _selected_probe_id.is_empty():
-		VNPStore.set_probe_idle(_selected_probe_id)
-
-func _on_probe_selected(index: int):
-	_selected_probe_id = probe_list.get_item_metadata(index)
-	var probe = VNPStore.get_probe(_selected_probe_id)
-	if not probe.is_empty():
-		_selected_system_id = probe.current_system
-		# Center camera on probe's system
-		var system = VNPStore.get_system(probe.current_system)
-		if not system.is_empty():
-			galaxy_camera.position = system.position
-	_sync_system_info()
-	_sync_action_buttons()
-
-# ============================================================================
-# STORE SIGNAL HANDLERS
-# ============================================================================
-
-func _on_state_changed(_new_state: Dictionary):
-	_sync_ui()
-
-func _on_tick_processed(_year: float):
-	pass  # UI already synced via state_changed
-
-func _on_event_triggered(event: Dictionary):
-	_show_event_dialog(event)
-
-func _on_game_over(victory: bool, reason: String, score: int):
-	VNPStore.set_paused(true)
-	_update_pause_ui()
-	_show_game_over(victory, reason, score)
-
-func _on_probe_created(_probe: Dictionary):
-	# Select the new probe
-	_selected_probe_id = _probe.id
-
-# ============================================================================
-# EVENT DIALOG
-# ============================================================================
-
-func _show_event_dialog(event: Dictionary):
-	event_title.text = event.title
-	event_description.text = event.description
-
-	# Clear old choices
-	for child in event_choices.get_children():
-		child.queue_free()
-
-	# Add choice buttons
-	for choice in event.choices:
-		var btn = Button.new()
-		btn.text = choice.text
-		btn.pressed.connect(_on_event_choice.bind(choice.id))
-		event_choices.add_child(btn)
-
-	event_dialog.visible = true
-
-func _on_event_choice(choice_id: String):
-	VNPStore.resolve_event(choice_id)
-	event_dialog.visible = false
-
-# ============================================================================
-# GAME OVER
-# ============================================================================
-
-func _show_game_over(victory: bool, reason: String, score: int):
-	game_over_title.text = "VICTORY!" if victory else "GAME OVER"
-	game_over_title.add_theme_color_override("font_color", Color.GREEN if victory else Color.RED)
-	game_over_reason.text = reason
-	game_over_score.text = "Score: %d" % score
-
-	var state = VNPStore.get_state()
-	var stats_text = "[b]Statistics[/b]\n"
-	stats_text += "Turns survived: %d\n" % state.current_turn
-	stats_text += "Systems explored: %d / %d\n" % [state.systems_explored, state.total_systems]
-	stats_text += "Peak probes: %d\n" % state.peak_probes
-	stats_text += "Total probes built: %d\n" % state.total_probes_built
-	stats_text += "Probes lost: %d\n" % state.probes_lost
-	stats_text += "Iron mined: %d\n" % state.total_iron_mined
-	stats_text += "Rare mined: %d\n" % state.total_rare_mined
-
-	game_over_stats.text = stats_text
-	game_over_panel.visible = true
-
-func _on_new_game_pressed():
-	game_over_panel.visible = false
-	VNPStore.start_new_run()
-	_selected_probe_id = "probe_1"
-	_selected_system_id = ""
-	_sync_ui()
-
-func _on_main_menu_pressed():
-	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")
+		var points = []
+		for i in range(12):
+			var angle = i * (PI * 2 / 12)
+			points.append(Vector2(cos(angle), sin(angle)) * 15)
+		polygon.polygon = PackedVector2Array(points)
+
+	polygon.color = color
+	node.add_child(polygon)
+	add_child(node)
+	return node

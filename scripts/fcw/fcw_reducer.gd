@@ -289,21 +289,22 @@ static func _process_herald_advance(state: Dictionary) -> Dictionary:
 static func _process_evacuation(state: Dictionary) -> Dictionary:
 	var new_state = state.duplicate(true)
 
-	# Evacuation capacity based on escort fleet (ships on ESCORT order)
-	var escort_capacity = 0
-
-	for zone_id in new_state.fleet_orders:
-		if new_state.fleet_orders[zone_id] == FCWTypes.FleetOrder.ESCORT:
-			var zone = new_state.zones[zone_id]
-			for ship_type in zone.assigned_fleet:
-				var count = zone.assigned_fleet[ship_type]
-				# Each ship can escort 100K people per turn
-				escort_capacity += count * 100_000
-
-	# Evacuate from Earth if possible
+	# Ships assigned to Earth automatically help with evacuation
+	# Each ship evacuates people based on its size (combat power / 10 * 100K)
 	var earth = new_state.zones[FCWTypes.ZoneId.EARTH]
-	if earth.status != FCWTypes.ZoneStatus.FALLEN and escort_capacity > 0:
-		var evacuated = mini(escort_capacity, earth.population)
+	if earth.status == FCWTypes.ZoneStatus.FALLEN:
+		return new_state
+
+	var evacuation_capacity = 0
+	for ship_type in earth.assigned_fleet:
+		var count = earth.assigned_fleet[ship_type]
+		var ship_power = FCWTypes.get_ship_combat_power(ship_type)
+		# Carriers are best at evacuation (civilian transports)
+		var multiplier = 3.0 if ship_type == FCWTypes.ShipType.CARRIER else 1.0
+		evacuation_capacity += int(count * (ship_power / 10.0) * 100_000 * multiplier)
+
+	if evacuation_capacity > 0:
+		var evacuated = mini(evacuation_capacity, earth.population)
 		earth.population -= evacuated
 		new_state.lives_evacuated += evacuated
 		new_state.zones[FCWTypes.ZoneId.EARTH] = earth

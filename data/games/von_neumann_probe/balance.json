@@ -1,4 +1,21 @@
 {
+  "battle": {
+    "energy_regen_per_second": 10,
+    "nemesis_energy_multiplier": 1.5,
+    "ai_build_interval": 0.5,
+    "victory_display_seconds": 3.0,
+    "starting_energy": {
+      "player": 500,
+      "enemy": 500,
+      "nemesis": 1000
+    },
+    "screen_shake": {
+      "small": 5,
+      "medium": 12,
+      "large": 25
+    }
+  },
+
   "probe": {
     "starting_health": 100,
     "starting_efficiency": 1.0,

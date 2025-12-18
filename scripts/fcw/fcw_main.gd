@@ -3,6 +3,10 @@ extends Control
 ## First Contact War - Main UI Controller
 ## Real-time strategy with adjustable speed
 
+# Preload battle system scripts
+const FCWBattleSystem = preload("res://scripts/fcw/fcw_battle_system.gd")
+const FCWBattleView = preload("res://scripts/fcw/fcw_battle_view.gd")
+
 # ============================================================================
 # CONSTANTS
 # ============================================================================
@@ -53,6 +57,8 @@ var solar_map: FCWSolarMap
 @onready var speed_label: Label = $MainContainer/Footer/SpeedLabel
 @onready var speed_slider: HSlider = $MainContainer/Footer/SpeedSlider
 @onready var pause_btn: Button = $MainContainer/Footer/PauseBtn
+@onready var main_menu_btn: Button = $MainContainer/Footer/MainMenuBtn
+var auto_play_btn: Button  # Created dynamically
 
 # Game over panel
 @onready var game_over_panel: PanelContainer = $GameOverPanel
@@ -69,7 +75,14 @@ var _turn_timer: float = 0.0
 var _is_paused: bool = false
 var _attack_phase_timer: float = 0.0
 var _is_in_attack_phase: bool = false
+var _auto_play: bool = false  # AI plays autonomously
 const ATTACK_PHASE_DURATION = 1.5  # Show attack animation for 1.5 seconds
+
+# Battle System
+var _battle_system: FCWBattleSystem
+var _battle_view: FCWBattleView
+var _battle_reports: Array = []
+var _show_battle_view: bool = true  # Toggle for cinematic battles
 
 # ============================================================================
 # LIFECYCLE
@@ -77,13 +90,38 @@ const ATTACK_PHASE_DURATION = 1.5  # Show attack animation for 1.5 seconds
 
 func _ready() -> void:
 	_setup_ui()
+	_setup_battle_system()
 	_connect_signals()
-	store.start_new_game()
+	_start_new_game()
 	_sync_ui()
 	_update_guidance()
 
+func _setup_battle_system() -> void:
+	# Initialize battle system with named ships
+	_battle_system = FCWBattleSystem.new()
+
+	# Create battle view overlay
+	_battle_view = FCWBattleView.new()
+	_battle_view.name = "BattleView"
+	_battle_view.visible = false
+	_battle_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_battle_view)
+	_battle_view.battle_complete.connect(_on_battle_complete)
+	_battle_view.ship_destroyed.connect(_on_ship_destroyed)
+
+func _start_new_game() -> void:
+	store.start_new_game()
+	# Generate named ships for starting fleet
+	_battle_system = FCWBattleSystem.new()
+	_battle_system.generate_starting_fleet(store.get_fleet(), FCWTypes.ZoneId.EARTH)
+	_battle_reports.clear()
+
 func _process(delta: float) -> void:
 	if store.is_game_over():
+		return
+
+	# Pause during battle view
+	if _battle_view and _battle_view.is_active():
 		return
 
 	# Handle attack animation phase
@@ -121,6 +159,15 @@ func _setup_ui() -> void:
 	speed_slider.max_value = SPEED_SETTINGS.size() - 1
 	speed_slider.step = 1
 	speed_slider.value = _speed_index
+
+	# Create auto-play button
+	auto_play_btn = Button.new()
+	auto_play_btn.text = "🤖 AUTO"
+	auto_play_btn.toggle_mode = true
+	auto_play_btn.custom_minimum_size = Vector2(80, 30)
+	var footer = $MainContainer/Footer
+	footer.add_child(auto_play_btn)
+	footer.move_child(auto_play_btn, 0)  # Put at start
 
 func _create_solar_map() -> void:
 	# Remove the old MapContainer if it exists
@@ -180,6 +227,8 @@ func _connect_signals() -> void:
 
 	speed_slider.value_changed.connect(_on_speed_changed)
 	pause_btn.pressed.connect(_on_pause_pressed)
+	auto_play_btn.toggled.connect(_on_auto_play_toggled)
+	main_menu_btn.pressed.connect(_on_main_menu)
 
 	new_game_btn.pressed.connect(_on_new_game)
 	menu_btn.pressed.connect(_on_main_menu)
@@ -378,7 +427,7 @@ func _update_guidance() -> void:
 	# Evacuation reminder
 	var lives = store.get_lives_evacuated()
 	if lives < 50_000_000:
-		text += "\n[color=gray]Tip: Assign ships to ESCORT order to evacuate civilians.[/color]"
+		text += "\n[color=gray]Tip: Ships at Earth automatically evacuate civilians. Carriers are 3x better![/color]"
 
 	# Turn info
 	text += "\n\n[i]Week %d | Herald strength: %d[/i]" % [state.turn, herald_strength]
@@ -390,18 +439,105 @@ func _update_guidance() -> void:
 # ============================================================================
 
 func _process_turn() -> void:
+	# Run AI decisions if auto-play is enabled
+	if _auto_play:
+		_run_ai_turn()
+
 	# Check if combat will occur this turn
 	var target = store.get_herald_target()
 	var target_defense = store.get_zone_defense(target)
 	var herald_strength = store.get_herald_strength()
+	var zone_status = store.get_zone(target).get("status", 0)
 
-	# Start attack animation if Herald is at target and attacking
-	if target_defense < herald_strength * 2:  # Close enough to attack
+	# Trigger battle view for significant combat (every few turns or when close)
+	var should_show_battle = _show_battle_view and zone_status != FCWTypes.ZoneStatus.FALLEN
+	should_show_battle = should_show_battle and (store.get_turn() % 3 == 0 or target_defense < herald_strength * 1.5)
+
+	if should_show_battle and target_defense > 0:
+		# Get ships at target zone for battle view
+		var defending_ships = _battle_system.get_ships_at_zone(target)
+		var herald_count = int(herald_strength / 20)  # Approximate herald ships
+
+		if defending_ships.size() > 0 or herald_count > 3:
+			var will_hold = target_defense >= herald_strength
+			_battle_view.start_battle(
+				FCWTypes.get_zone_name(target),
+				defending_ships,
+				herald_count,
+				will_hold
+			)
+
+	# Start attack animation on galaxy map
+	if target_defense < herald_strength * 2:
 		_is_in_attack_phase = true
 		_attack_phase_timer = 0.0
 		solar_map.set_attacking(true)
 
 	store.dispatch_end_turn()
+
+func _run_ai_turn() -> void:
+	# Simple but effective AI strategy:
+	# 1. Build ships when affordable (prioritize frigates for efficiency)
+	# 2. Defend the Herald's target zone
+	# 3. Keep some ships at Earth for evacuation
+
+	var herald_target = store.get_herald_target()
+	var herald_strength = store.get_herald_strength()
+	var available = store.get_available_ships()
+
+	# --- SHIP BUILDING ---
+	# Build ships while we have capacity and resources
+	var capacity = store.get_production_capacity()
+	while capacity > 0:
+		# Prioritize by cost-efficiency: Frigates > Cruisers > Dreadnoughts
+		# But build Carriers sometimes for evacuation bonus
+		var built = false
+		var turn = store.get_turn()
+
+		# Every 5th turn, try to build a carrier for evacuation
+		if turn % 5 == 0 and store.can_afford_ship(FCWTypes.ShipType.CARRIER):
+			store.dispatch_build_ship(FCWTypes.ShipType.CARRIER)
+			built = true
+		elif store.can_afford_ship(FCWTypes.ShipType.FRIGATE):
+			store.dispatch_build_ship(FCWTypes.ShipType.FRIGATE)
+			built = true
+		elif store.can_afford_ship(FCWTypes.ShipType.CRUISER):
+			store.dispatch_build_ship(FCWTypes.ShipType.CRUISER)
+			built = true
+
+		if not built:
+			break
+		capacity = store.get_production_capacity()
+
+	# --- FLEET ASSIGNMENT ---
+	# Refresh available ships after building
+	available = store.get_available_ships()
+
+	# Calculate how many ships we need at the target to defend
+	var target_defense = store.get_zone_defense(herald_target)
+	var defense_needed = int(herald_strength * 1.3) - target_defense  # Want 30% buffer
+
+	# First priority: defend Herald's target
+	if defense_needed > 0 and herald_target != FCWTypes.ZoneId.EARTH:
+		for ship_type in [FCWTypes.ShipType.FRIGATE, FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.DREADNOUGHT]:
+			var avail_count = available.get(ship_type, 0)
+			if avail_count > 0:
+				var ship_power = FCWTypes.get_ship_combat_power(ship_type)
+				var ships_to_send = mini(avail_count, ceili(float(defense_needed) / ship_power))
+				if ships_to_send > 0:
+					store.dispatch_assign_fleet(herald_target, ship_type, ships_to_send)
+					defense_needed -= ships_to_send * ship_power
+					available[ship_type] = avail_count - ships_to_send
+
+	# Second priority: keep carriers and some ships at Earth for evacuation
+	available = store.get_available_ships()
+	for ship_type in [FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.FRIGATE]:
+		var avail_count = available.get(ship_type, 0)
+		if avail_count > 0:
+			# Send half of available to Earth for evacuation
+			var to_earth = avail_count / 2 if ship_type == FCWTypes.ShipType.FRIGATE else avail_count
+			if to_earth > 0:
+				store.dispatch_assign_fleet(FCWTypes.ZoneId.EARTH, ship_type, to_earth)
 
 func _on_zone_clicked(zone_id: int) -> void:
 	_select_zone(zone_id)
@@ -420,6 +556,8 @@ func _build_ship(ship_type: int) -> void:
 func _assign_ship_to_zone(ship_type: int) -> void:
 	if _selected_zone < 0:
 		return
+	# Visual warp effect
+	solar_map.spawn_warp_in(_selected_zone)
 	store.dispatch_assign_fleet(_selected_zone, ship_type, 1)
 
 func _on_speed_changed(value: float) -> void:
@@ -440,10 +578,43 @@ func _on_pause_pressed() -> void:
 		speed_slider.value = _speed_index
 	_sync_speed_display()
 
+func _on_auto_play_toggled(pressed: bool) -> void:
+	_auto_play = pressed
+	auto_play_btn.text = "🤖 AUTO ON" if _auto_play else "🤖 AUTO"
+	# When enabling auto-play, also unpause and set to fast speed
+	if _auto_play:
+		_is_paused = false
+		_speed_index = 3  # Fast
+		speed_slider.value = _speed_index
+		_sync_speed_display()
+		# Log AI takeover
+		_add_to_event_log("=== AI COMMAND ACTIVATED ===", true)
+	else:
+		_add_to_event_log("=== MANUAL CONTROL RESUMED ===", false)
+
+func _on_battle_complete() -> void:
+	# Resume normal game flow after battle view
+	_sync_ui()
+
+func _on_ship_destroyed(ship_name: String) -> void:
+	# Log ship destruction
+	_add_to_event_log("SHIP LOST: %s" % ship_name, true)
+
+func _add_to_event_log(message: String, is_critical: bool) -> void:
+	# Add a custom message to the event log display
+	var turn = store.get_turn()
+	var prefix = "[color=red]▶[/color] " if is_critical else "  "
+	var current_text = event_log.text
+	current_text += "%sW%d: %s\n" % [prefix, turn, message]
+	event_log.text = current_text
+
 func _on_turn_ended(_turn: int) -> void:
 	_update_guidance()
 
 func _on_zone_fallen(zone_id: int) -> void:
+	# DRAMATIC zone destruction effects
+	solar_map.spawn_zone_destroyed(zone_id)
+
 	# Brief pause on zone fall for drama
 	_is_paused = true
 	_sync_speed_display()
@@ -467,6 +638,9 @@ func _on_new_game() -> void:
 	_is_paused = false
 	_speed_index = 2
 	speed_slider.value = 2
+	_auto_play = false
+	auto_play_btn.button_pressed = false
+	auto_play_btn.text = "🤖 AUTO"
 	store.start_new_game()
 
 func _on_main_menu() -> void:

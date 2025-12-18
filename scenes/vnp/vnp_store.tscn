@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cgrj6q2e37fjc"]
+
+[ext_resource type="Script" path="res://scripts/vnp/vnp_store.gd" id="1_abcde"]
+
+[node name="VnpStore" type="Node"]
+script = ExtResource("1_abcde")

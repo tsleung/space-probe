@@ -1,309 +1,44 @@
-[gd_scene load_steps=3 format=3 uid="uid://dtnj8c2gfsdvs"]
+[gd_scene load_steps=7 format=3 uid="uid://b5w5d5f4y3v2x"]
 
-[ext_resource type="Script" path="res://scripts/vnp/vnp_main.gd" id="1_vnp_main"]
-[ext_resource type="Script" path="res://scripts/vnp/vnp_galaxy_view.gd" id="2_galaxy_view"]
+[ext_resource type="Script" path="res://scripts/vnp/vnp_main.gd" id="1_jgj2s"]
+[ext_resource type="PackedScene" uid="uid://cgrj6q2e37fjc" path="res://scenes/vnp/vnp_store.tscn" id="2_abcde"]
+[ext_resource type="PackedScene" uid="uid://cwsy7hr6b7e5c" path="res://scenes/vnp/vnp_ui.tscn" id="3_defgh"]
 
-[node name="VNP_Main" type="Control"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-script = ExtResource("1_vnp_main")
+[sub_resource type="Environment" id="Environment_abcde"]
+background_mode = 1
+background_color = Color(0.05, 0.05, 0.07, 1)
+glow_enabled = true
+glow_intensity = 0.5
+glow_strength = 1.2
+glow_blend_mode = 0
+glow_hdr_threshold = 0.8
 
-[node name="Background" type="ColorRect" parent="."]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-color = Color(0.02, 0.02, 0.06, 1)
+[sub_resource type="NavigationPolygon" id="NavigationPolygon_xyt82"]
+vertices = PackedVector2Array(0, 0, 1920, 0, 1920, 1080, 0, 1080)
+polygons = [PackedInt32Array(0, 1, 2, 3)]
+outlines = [PackedVector2Array(0, 0, 1920, 0, 1920, 1080, 0, 1080)]
+source_geometry_group_name = &"navigation_polygon_source_group"
 
-[node name="TopBar" type="PanelContainer" parent="."]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_bottom = 50.0
-grow_horizontal = 2
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_5mfvy"]
+size = Vector2(1920, 1080)
 
-[node name="HBoxContainer" type="HBoxContainer" parent="TopBar"]
-layout_mode = 2
-theme_override_constants/separation = 30
-alignment = 1
+[node name="VnpMain" type="Node2D"]
+script = ExtResource("1_jgj2s")
 
-[node name="YearLabel" type="Label" parent="TopBar/HBoxContainer"]
-layout_mode = 2
-text = "Year: 2200"
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_abcde")
 
-[node name="Sep1" type="VSeparator" parent="TopBar/HBoxContainer"]
-layout_mode = 2
+[node name="VnpStore" parent="." instance=ExtResource("2_abcde")]
 
-[node name="IronLabel" type="Label" parent="TopBar/HBoxContainer"]
-layout_mode = 2
-text = "Iron: 100"
+[node name="VnpUI" parent="." instance=ExtResource("3_defgh")]
 
-[node name="EnergyLabel" type="Label" parent="TopBar/HBoxContainer"]
-layout_mode = 2
-text = "Energy: 500"
+[node name="NavigationRegion2D" type="NavigationRegion2D" parent="."]
+navigation_polygon = SubResource("NavigationPolygon_xyt82")
 
-[node name="RareLabel" type="Label" parent="TopBar/HBoxContainer"]
-layout_mode = 2
-text = "Rare: 0"
+[node name="StaticBody2D" type="StaticBody2D" parent="NavigationRegion2D"]
+collision_layer = 4
+collision_mask = 0
 
-[node name="Sep2" type="VSeparator" parent="TopBar/HBoxContainer"]
-layout_mode = 2
-
-[node name="ProbesLabel" type="Label" parent="TopBar/HBoxContainer"]
-layout_mode = 2
-text = "Probes: 1"
-
-[node name="MainContent" type="HBoxContainer" parent="."]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = 50.0
-offset_bottom = -60.0
-grow_horizontal = 2
-grow_vertical = 2
-
-[node name="GalaxyPanel" type="Panel" parent="MainContent"]
-layout_mode = 2
-size_flags_horizontal = 3
-size_flags_stretch_ratio = 3.0
-
-[node name="GalaxyView" type="Control" parent="MainContent/GalaxyPanel"]
-clip_contents = true
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-script = ExtResource("2_galaxy_view")
-
-[node name="Camera2D" type="Camera2D" parent="MainContent/GalaxyPanel/GalaxyView"]
-position = Vector2(200, 200)
-
-[node name="RightSidebar" type="PanelContainer" parent="MainContent"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="SidebarContent" type="VBoxContainer" parent="MainContent/RightSidebar"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="ProbeSection" type="VBoxContainer" parent="MainContent/RightSidebar/SidebarContent"]
-layout_mode = 2
-
-[node name="ProbesHeader" type="Label" parent="MainContent/RightSidebar/SidebarContent/ProbeSection"]
-layout_mode = 2
-text = "PROBES"
-horizontal_alignment = 1
-
-[node name="ProbeList" type="ItemList" parent="MainContent/RightSidebar/SidebarContent/ProbeSection"]
-custom_minimum_size = Vector2(0, 100)
-layout_mode = 2
-size_flags_vertical = 3
-auto_height = true
-max_columns = 1
-
-[node name="SystemSection" type="VBoxContainer" parent="MainContent/RightSidebar/SidebarContent"]
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="SystemHeader" type="Label" parent="MainContent/RightSidebar/SidebarContent/SystemSection"]
-layout_mode = 2
-text = "SYSTEM INFO"
-horizontal_alignment = 1
-
-[node name="SystemInfo" type="RichTextLabel" parent="MainContent/RightSidebar/SidebarContent/SystemSection"]
-layout_mode = 2
-size_flags_vertical = 3
-bbcode_enabled = true
-text = "Select a system on the map"
-
-[node name="ActionSection" type="VBoxContainer" parent="MainContent/RightSidebar/SidebarContent"]
-layout_mode = 2
-
-[node name="ActionHeader" type="Label" parent="MainContent/RightSidebar/SidebarContent/ActionSection"]
-layout_mode = 2
-text = "ACTIONS"
-horizontal_alignment = 1
-
-[node name="ActionButtons" type="VBoxContainer" parent="MainContent/RightSidebar/SidebarContent/ActionSection"]
-layout_mode = 2
-
-[node name="MineButton" type="Button" parent="MainContent/RightSidebar/SidebarContent/ActionSection/ActionButtons"]
-layout_mode = 2
-disabled = true
-text = "Mine Resources"
-
-[node name="ReplicateButton" type="Button" parent="MainContent/RightSidebar/SidebarContent/ActionSection/ActionButtons"]
-layout_mode = 2
-disabled = true
-text = "Replicate (80 iron, 200 energy)"
-
-[node name="IdleButton" type="Button" parent="MainContent/RightSidebar/SidebarContent/ActionSection/ActionButtons"]
-layout_mode = 2
-disabled = true
-text = "Set Idle"
-
-[node name="LogSection" type="VBoxContainer" parent="MainContent/RightSidebar/SidebarContent"]
-layout_mode = 2
-size_flags_vertical = 3
-size_flags_stretch_ratio = 2.0
-
-[node name="LogHeader" type="Label" parent="MainContent/RightSidebar/SidebarContent/LogSection"]
-layout_mode = 2
-text = "EVENT LOG"
-horizontal_alignment = 1
-
-[node name="EventLog" type="RichTextLabel" parent="MainContent/RightSidebar/SidebarContent/LogSection"]
-layout_mode = 2
-size_flags_vertical = 3
-bbcode_enabled = true
-scroll_following = true
-
-[node name="BottomBar" type="PanelContainer" parent="."]
-layout_mode = 1
-anchors_preset = 12
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_top = -60.0
-grow_horizontal = 2
-grow_vertical = 0
-
-[node name="HBoxContainer" type="HBoxContainer" parent="BottomBar"]
-layout_mode = 2
-theme_override_constants/separation = 20
-alignment = 1
-
-[node name="PauseButton" type="Button" parent="BottomBar/HBoxContainer"]
-layout_mode = 2
-text = "⏸ Pause"
-
-[node name="SpeedLabel" type="Label" parent="BottomBar/HBoxContainer"]
-layout_mode = 2
-text = "Speed:"
-
-[node name="SpeedSlider" type="HSlider" parent="BottomBar/HBoxContainer"]
-custom_minimum_size = Vector2(150, 0)
-layout_mode = 2
-value = 50.0
-
-[node name="SpeedValueLabel" type="Label" parent="BottomBar/HBoxContainer"]
-layout_mode = 2
-text = "1.0x"
-
-[node name="HelpLabel" type="Label" parent="BottomBar/HBoxContainer"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0.6, 0.6, 0.6, 1)
-text = "[Space=Pause] [1-4=Speed] [WASD=Pan] [Scroll=Zoom]"
-
-[node name="EventDialog" type="Panel" parent="."]
-visible = false
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -200.0
-offset_top = -150.0
-offset_right = 200.0
-offset_bottom = 150.0
-grow_horizontal = 2
-grow_vertical = 2
-
-[node name="VBoxContainer" type="VBoxContainer" parent="EventDialog"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 10.0
-offset_top = 10.0
-offset_right = -10.0
-offset_bottom = -10.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/separation = 10
-
-[node name="EventTitle" type="Label" parent="EventDialog/VBoxContainer"]
-layout_mode = 2
-text = "Event Title"
-horizontal_alignment = 1
-
-[node name="EventDescription" type="RichTextLabel" parent="EventDialog/VBoxContainer"]
-layout_mode = 2
-size_flags_vertical = 3
-bbcode_enabled = true
-text = "Event description text goes here."
-
-[node name="EventChoices" type="VBoxContainer" parent="EventDialog/VBoxContainer"]
-layout_mode = 2
-
-[node name="GameOverPanel" type="Panel" parent="."]
-visible = false
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -250.0
-offset_top = -200.0
-offset_right = 250.0
-offset_bottom = 200.0
-grow_horizontal = 2
-grow_vertical = 2
-
-[node name="VBoxContainer" type="VBoxContainer" parent="GameOverPanel"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 20.0
-offset_top = 20.0
-offset_right = -20.0
-offset_bottom = -20.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/separation = 15
-alignment = 1
-
-[node name="Title" type="Label" parent="GameOverPanel/VBoxContainer"]
-layout_mode = 2
-text = "GAME OVER"
-horizontal_alignment = 1
-
-[node name="Reason" type="Label" parent="GameOverPanel/VBoxContainer"]
-layout_mode = 2
-text = "All probes were lost."
-horizontal_alignment = 1
-
-[node name="Score" type="Label" parent="GameOverPanel/VBoxContainer"]
-layout_mode = 2
-text = "Score: 0"
-horizontal_alignment = 1
-
-[node name="Stats" type="RichTextLabel" parent="GameOverPanel/VBoxContainer"]
-layout_mode = 2
-size_flags_vertical = 3
-bbcode_enabled = true
-text = "Statistics"
-
-[node name="ButtonsContainer" type="HBoxContainer" parent="GameOverPanel/VBoxContainer"]
-layout_mode = 2
-alignment = 1
-
-[node name="NewGameButton" type="Button" parent="GameOverPanel/VBoxContainer/ButtonsContainer"]
-layout_mode = 2
-text = "New Game"
-
-[node name="MainMenuButton" type="Button" parent="GameOverPanel/VBoxContainer/ButtonsContainer"]
-layout_mode = 2
-text = "Main Menu"
+[node name="CollisionShape2D" type="CollisionShape2D" parent="NavigationRegion2D/StaticBody2D"]
+position = Vector2(960, 540)
+shape = SubResource("RectangleShape2D_5mfvy")

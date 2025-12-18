@@ -1,0 +1,45 @@
+[gd_scene load_steps=4 format=3 uid="uid://dpsk0j8wo3w3w"]
+
+[ext_resource type="Script" path="res://scripts/vnp/ship.gd" id="1_vkm1x"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_wveav"]
+radius = 20.0
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_abcde"]
+radius = 20.0
+
+[node name="Ship" type="CharacterBody2D" groups=["ships"]]
+script = ExtResource("1_vkm1x")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_wveav")
+
+[node name="Polygon2D" type="Polygon2D" parent="."]
+color = Color(0.8, 0.8, 0.8, 1)
+
+[node name="NavigationAgent2D" type="NavigationAgent2D" parent="."]
+path_desired_distance = 4.0
+target_desired_distance = 4.0
+# Set a large navigation map to avoid issues if we don't have one baked yet
+navigation_map = RID()
+
+[node name="FireRateTimer" type="Timer" parent="."]
+one_shot = true
+
+[node name="LaserBeam" type="Line2D" parent="."]
+width = 3.0
+default_color = Color(0.2, 1, 1, 1)
+
+[node name="Hurtbox" type="Area2D" parent="."]
+collision_layer = 32
+collision_mask = 16
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Hurtbox"]
+shape = SubResource("CircleShape2D_abcde")
+
+[node name="SelectionIndicator" type="Polygon2D" parent="."]
+visible = false
+color = Color(1, 1, 1, 0.5)
+invert_enabled = true
+invert_border = 5.0
+polygon = PackedVector2Array(-25, -25, 25, -25, 25, 25, -25, 25)

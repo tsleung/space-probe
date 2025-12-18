@@ -1,0 +1,31 @@
+[gd_scene load_steps=5 format=3 uid="uid://bwojkbj100xay"]
+
+[ext_resource type="Script" path="res://scripts/vnp/projectile.gd" id="1_qweas"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_asdfg"]
+size = Vector2(8, 4)
+
+[sub_resource type="Gradient" id="Gradient_abcde"]
+colors = PackedColorArray(1, 1, 0, 1, 1, 1, 0, 0)
+
+[sub_resource type="GradientTexture1D" id="GradientTexture1D_fghij"]
+gradient = SubResource("Gradient_abcde")
+
+[node name="Projectile" type="Area2D"]
+collision_layer = 16
+collision_mask = 32
+script = ExtResource("1_qweas")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_asdfg")
+
+[node name="Polygon2D" type="Polygon2D" parent="."]
+polygon = PackedVector2Array(-4, -2, 4, -2, 4, 2, -4, 2)
+color = Color(1, 1, 0, 1)
+
+[node name="ProjectileLifetime" type="Timer" parent="."]
+one_shot = true
+
+[node name="Trail2D" type="Trail2D" parent="."]
+width = 4.0
+gradient = SubResource("GradientTexture1D_fghij")
