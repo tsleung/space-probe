@@ -30,7 +30,10 @@ environment = SubResource("Environment_abcde")
 
 [node name="VnpStore" parent="." instance=ExtResource("2_abcde")]
 
-[node name="VnpUI" parent="." instance=ExtResource("3_defgh")]
+[node name="UILayer" type="CanvasLayer" parent="."]
+layer = 10
+
+[node name="VnpUI" parent="UILayer" instance=ExtResource("3_defgh")]
 
 [node name="NavigationRegion2D" type="NavigationRegion2D" parent="."]
 navigation_polygon = SubResource("NavigationPolygon_xyt82")

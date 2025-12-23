@@ -5,6 +5,54 @@ enum ShipType { FRIGATE, DESTROYER, CRUISER, HARVESTER, DEFENDER, SHIELDER, GRAV
 enum WeaponType { GUN, LASER, MISSILE, PDC, SHIELD, GRAVITY, TURBOLASER }
 enum ShipSize { SMALL, MEDIUM, LARGE, MASSIVE }
 
+# The Cycle - Convergence phases
+enum ConvergencePhase {
+	DORMANT,       # Normal gameplay - no threat
+	WHISPERS,      # Edge anomalies, subtle warnings
+	CONTACT,       # First ship absorbed, "???" revealed
+	EMERGENCE,     # Convergence manifests, gravitational pull begins
+	CRITICAL,      # Near fragmentation, intense pull
+	FRAGMENTATION  # Progenitor shatters - victory/cycle continues
+}
+
+const CONVERGENCE_PHASE_NAMES = {
+	ConvergencePhase.DORMANT: "Dormant",
+	ConvergencePhase.WHISPERS: "Whispers",
+	ConvergencePhase.CONTACT: "Contact",
+	ConvergencePhase.EMERGENCE: "Emergence",
+	ConvergencePhase.CRITICAL: "Critical",
+	ConvergencePhase.FRAGMENTATION: "Fragmentation",
+}
+
+# The Progenitor - not a faction, a phenomenon
+const PROGENITOR_COLOR = Color(0.15, 0.0, 0.2)  # Deep void purple
+const PROGENITOR_ACCENT = Color(0.4, 0.1, 0.5)  # Lighter purple for effects
+
+# Convergence timing (in seconds)
+const CONVERGENCE_TIMING = {
+	"whispers_trigger_time": 20.0,       # 20 seconds for fast debugging
+	"whispers_duration": 30.0,           # 30 seconds of warnings
+	"contact_duration": 5.0,             # 5 seconds for ??? reveal
+	"shrink_rate_base": 15.0,            # Pixels per second base shrink
+	"shrink_rate_critical": 40.0,        # Faster shrink in critical phase
+	"pull_strength_base": 50.0,          # Base gravitational pull
+	"pull_strength_critical": 150.0,     # Critical phase pull
+	"instability_per_sacrifice": 8.0,    # Instability from sacrificing ships
+	"instability_threshold": 100.0,      # Triggers fragmentation
+	"critical_radius_percent": 0.3,      # 30% of original = critical phase
+}
+
+static func get_convergence_phase_name(phase: int) -> String:
+	return CONVERGENCE_PHASE_NAMES.get(phase, "Unknown")
+
+# Outpost system - Harvesters build mini-factories at strategic points
+const OUTPOST_CONFIG = {
+	"build_time": 12.0,              # Seconds harvester must stay at point
+	"production_interval": 30.0,     # Seconds between Frigate spawns
+	"build_radius": 80.0,            # How close harvester must be to point
+	"visual_scale": 0.8,             # Size relative to base
+}
+
 # Strategic capture point types
 enum PointType { CENTER, ASTEROID_FIELD, RELAY }
 
@@ -75,13 +123,13 @@ const WEAPON_COLORS = {
 	},
 }
 
-# Base weapon types per faction
-enum BaseWeapon { ION_CANNON, MISSILE_BARRAGE, SINGULARITY }
+# Base weapon types per faction - each visually unique
+enum BaseWeapon { ARC_STORM, HELLSTORM, VOID_TEAR }
 
 const BASE_WEAPONS = {
-	Team.PLAYER: BaseWeapon.ION_CANNON,
-	Team.ENEMY_1: BaseWeapon.MISSILE_BARRAGE,
-	Team.NEMESIS: BaseWeapon.SINGULARITY,
+	Team.PLAYER: BaseWeapon.ARC_STORM,      # Chain lightning web
+	Team.ENEMY_1: BaseWeapon.HELLSTORM,     # Orbital bombardment
+	Team.NEMESIS: BaseWeapon.VOID_TEAR,     # Reality rift
 }
 
 const BASE_WEAPON_COOLDOWN = 15.0  # seconds

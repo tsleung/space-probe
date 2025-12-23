@@ -5,6 +5,13 @@ extends RefCounted
 ## All functions are pure: (state, action) -> new_state
 ## No side effects, fully deterministic with provided random values
 
+# Preload dependencies
+const _MCSTypes = preload("res://scripts/mars_colony_sim/mcs_types.gd")
+const _MCSPopulation = preload("res://scripts/mars_colony_sim/mcs_population.gd")
+const _MCSEconomy = preload("res://scripts/mars_colony_sim/mcs_economy.gd")
+const _MCSPolitics = preload("res://scripts/mars_colony_sim/mcs_politics.gd")
+const _MCSEvents = preload("res://scripts/mars_colony_sim/mcs_events.gd")
+
 # ============================================================================
 # ACTION TYPES
 # ============================================================================
@@ -13,6 +20,7 @@ enum ActionType {
 	# Game flow
 	START_NEW_COLONY,
 	ADVANCE_YEAR,
+	ADVANCE_WEEK,  # New: granular weekly tick
 
 	# Population
 	ADD_COLONIST,
@@ -64,6 +72,8 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_start_new_colony(state, action)
 		ActionType.ADVANCE_YEAR:
 			return _reduce_advance_year(state, action)
+		ActionType.ADVANCE_WEEK:
+			return _reduce_advance_week(state, action)
 		ActionType.ADD_COLONIST:
 			return _reduce_add_colonist(state, action)
 		ActionType.REMOVE_COLONIST:
@@ -125,6 +135,12 @@ static func action_start_new_colony(founders: Array, seed_value: int = 0) -> Dic
 static func action_advance_year(random_values: Array) -> Dictionary:
 	return {
 		"type": ActionType.ADVANCE_YEAR,
+		"random_values": random_values
+	}
+
+static func action_advance_week(random_values: Array) -> Dictionary:
+	return {
+		"type": ActionType.ADVANCE_WEEK,
 		"random_values": random_values
 	}
 
@@ -271,76 +287,97 @@ static func action_end_colony(reason: String, is_victory: bool) -> Dictionary:
 # ============================================================================
 
 static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> Dictionary:
-	var new_state = MCSTypes.create_colony_state()
+	var new_state = _MCSTypes.create_colony_state()
 	new_state.random_seed = action.seed
-	new_state.colony_phase = MCSTypes.ColonyPhase.ACT_1_FOUNDERS
+	new_state.colony_phase = _MCSTypes.ColonyPhase.ACT_1_FOUNDERS
 	new_state.current_year = 1
 
 	# Add founders
 	for founder in action.founders:
 		new_state.colonists.append(founder)
 
-	# Create starting buildings
-	var hab = MCSTypes.create_building({
-		"type": MCSTypes.BuildingType.HAB_POD,
-		"id": "hab_001",
-		"is_operational": true,
-		"construction_progress": 1.0,
-		"housing_capacity": 16
-	})
-	new_state.buildings.append(hab)
+	# =========================================================================
+	# EPIC STARTING BUILDINGS - More for faster visual progression!
+	# =========================================================================
 
-	var farm = MCSTypes.create_building({
-		"type": MCSTypes.BuildingType.GREENHOUSE,
-		"id": "farm_001",
+	# 4 Hab Pods for housing
+	for i in range(4):
+		var hab = _MCSTypes.create_building({
+			"type": _MCSTypes.BuildingType.HAB_POD,
+			"id": "hab_%03d" % (i + 1),
+			"is_operational": true,
+			"construction_progress": 1.0,
+			"housing_capacity": 16
+		})
+		new_state.buildings.append(hab)
+
+	# 3 Greenhouses for food
+	for i in range(3):
+		var farm = _MCSTypes.create_building({
+			"type": _MCSTypes.BuildingType.GREENHOUSE,
+			"id": "farm_%03d" % (i + 1),
+			"is_operational": true,
+			"construction_progress": 1.0
+		})
+		new_state.buildings.append(farm)
+
+	# 4 Solar Arrays for power
+	for i in range(4):
+		var power = _MCSTypes.create_building({
+			"type": _MCSTypes.BuildingType.SOLAR_ARRAY,
+			"id": "solar_%03d" % (i + 1),
+			"is_operational": true,
+			"construction_progress": 1.0
+		})
+		new_state.buildings.append(power)
+
+	# 2 Water Extractors
+	for i in range(2):
+		var water = _MCSTypes.create_building({
+			"type": _MCSTypes.BuildingType.WATER_EXTRACTOR,
+			"id": "water_%03d" % (i + 1),
+			"is_operational": true,
+			"construction_progress": 1.0
+		})
+		new_state.buildings.append(water)
+
+	# 1 Oxygenator for life support
+	var oxygenator = _MCSTypes.create_building({
+		"type": _MCSTypes.BuildingType.OXYGENATOR,
+		"id": "oxy_001",
 		"is_operational": true,
 		"construction_progress": 1.0
 	})
-	new_state.buildings.append(farm)
+	new_state.buildings.append(oxygenator)
 
-	var power = MCSTypes.create_building({
-		"type": MCSTypes.BuildingType.SOLAR_ARRAY,
-		"id": "solar_001",
+	# 1 Workshop for production
+	var workshop = _MCSTypes.create_building({
+		"type": _MCSTypes.BuildingType.WORKSHOP,
+		"id": "workshop_001",
 		"is_operational": true,
 		"construction_progress": 1.0
 	})
-	new_state.buildings.append(power)
+	new_state.buildings.append(workshop)
 
-	var power2 = MCSTypes.create_building({
-		"type": MCSTypes.BuildingType.SOLAR_ARRAY,
-		"id": "solar_002",
+	# 1 Medical Bay
+	var medical = _MCSTypes.create_building({
+		"type": _MCSTypes.BuildingType.MEDICAL_BAY,
+		"id": "medical_001",
 		"is_operational": true,
 		"construction_progress": 1.0
 	})
-	new_state.buildings.append(power2)
+	new_state.buildings.append(medical)
 
-	# Second hab for population growth
-	var hab2 = MCSTypes.create_building({
-		"type": MCSTypes.BuildingType.HAB_POD,
-		"id": "hab_002",
-		"is_operational": true,
-		"construction_progress": 1.0,
-		"housing_capacity": 16
-	})
-	new_state.buildings.append(hab2)
-
-	# Second greenhouse for food security
-	var farm2 = MCSTypes.create_building({
-		"type": MCSTypes.BuildingType.GREENHOUSE,
-		"id": "farm_002",
-		"is_operational": true,
-		"construction_progress": 1.0
-	})
-	new_state.buildings.append(farm2)
-
-	# Starting resources (generous for AI spectate mode)
-	new_state.resources.food = 2000.0  # 2-3 years supply
-	new_state.resources.water = 1000.0
-	new_state.resources.oxygen = 500.0
-	new_state.resources.fuel = 200.0
-	new_state.resources.building_materials = 300.0
-	new_state.resources.machine_parts = 100.0
-	new_state.resources.medicine = 50.0
+	# =========================================================================
+	# EPIC STARTING RESOURCES - Generous for rapid expansion!
+	# =========================================================================
+	new_state.resources.food = 10000.0          # 5+ years supply
+	new_state.resources.water = 5000.0
+	new_state.resources.oxygen = 2500.0
+	new_state.resources.fuel = 800.0
+	new_state.resources.building_materials = 3000.0  # Lots for building!
+	new_state.resources.machine_parts = 800.0
+	new_state.resources.medicine = 200.0
 
 	# Initialize log
 	new_state.mission_log = [{
@@ -364,7 +401,7 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 	var random_values = action.get("random_values", [])
 
 	# === POPULATION PHASE ===
-	var pop_result = MCSPopulation.advance_year(
+	var pop_result = _MCSPopulation.advance_year(
 		colonists,
 		new_year,
 		resources,
@@ -400,17 +437,17 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 		})
 
 	# === ECONOMY PHASE ===
-	var production = MCSEconomy.calc_yearly_production(
+	var production = _MCSEconomy.calc_yearly_production(
 		buildings,
 		updates["colonists"],
 		resources
 	)
-	var consumption = MCSEconomy.calc_yearly_consumption(
+	var consumption = _MCSEconomy.calc_yearly_consumption(
 		updates["colonists"],
 		buildings
 	)
 
-	var resource_result = MCSEconomy.apply_yearly_resources(
+	var resource_result = _MCSEconomy.apply_yearly_resources(
 		resources,
 		production,
 		consumption
@@ -429,7 +466,7 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 	var maint_rand_count = buildings.size() + 5
 	var maint_rand_values = random_values.slice(rand_idx, rand_idx + maint_rand_count)
 	rand_idx += maint_rand_count
-	var maint_result = MCSEconomy.apply_building_maintenance(
+	var maint_result = _MCSEconomy.apply_building_maintenance(
 		buildings,
 		updates["resources"],
 		new_year,
@@ -447,7 +484,7 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 
 	# === POLITICS PHASE ===
 	var politics = state.get("politics", {})
-	var pol_result = MCSPolitics.update_faction_standings(
+	var pol_result = _MCSPolitics.update_faction_standings(
 		politics,
 		updates["colonists"],
 		updates["resources"]
@@ -458,7 +495,7 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 	if new_year >= 5 and (new_year - 5) % 4 == 0:
 		var election_rand = random_values.slice(rand_idx, rand_idx + 10)
 		rand_idx += 10
-		var election_result = MCSPolitics.hold_election(
+		var election_result = _MCSPolitics.hold_election(
 			updates["politics"],
 			updates["colonists"],
 			election_rand
@@ -472,7 +509,7 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 		})
 
 	# Update stability
-	updates["politics"] = MCSPolitics.update_stability(
+	updates["politics"] = _MCSPolitics.update_stability(
 		updates["politics"],
 		updates["colonists"],
 		updates["resources"],
@@ -485,12 +522,229 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 	if updates["colony_phase"] != colony_phase:
 		new_log.append({
 			"year": new_year,
-			"message": "Colony has entered a new era: %s" % MCSTypes.get_phase_name(updates["colony_phase"]),
+			"message": "Colony has entered a new era: %s" % _MCSTypes.get_phase_name(updates["colony_phase"]),
 			"log_type": "milestone"
 		})
 
 	updates["mission_log"] = new_log
 
+	return _with_fields(state, updates)
+
+# ============================================================================
+# WEEKLY TICK - More granular simulation
+# ============================================================================
+
+static func _reduce_advance_week(state: Dictionary, action: Dictionary) -> Dictionary:
+	var current_week = state.get("current_week", 1)
+	var current_year = state.get("current_year", 1)
+	var new_week = current_week + 1
+	var random_values = action.get("random_values", [])
+	var rand_idx = 0
+
+	var updates: Dictionary = {}
+	var new_log = state.get("mission_log", []).duplicate()
+
+	var colonists = state.get("colonists", [])
+	var resources = state.get("resources", {}).duplicate(true)
+	var buildings = state.get("buildings", []).duplicate(true)
+
+	# === WEEKLY RESOURCE TICK (1/52 of yearly rates) ===
+	var weekly_production = _MCSEconomy.calc_yearly_production(buildings, colonists, resources)
+	var weekly_consumption = _MCSEconomy.calc_yearly_consumption(colonists, buildings)
+
+	# Apply 1/52 of production and consumption
+	for key in weekly_production.keys():
+		var amount = weekly_production[key] / 52.0
+		resources[key] = resources.get(key, 0) + amount
+
+	for key in weekly_consumption.keys():
+		var amount = weekly_consumption[key] / 52.0
+		var current = resources.get(key, 0)
+		resources[key] = maxf(0, current - amount)
+
+		# Check for critical shortage this week
+		if current > 10 and resources[key] <= 10:
+			new_log.append({
+				"year": current_year,
+				"week": new_week,
+				"message": "WARNING: %s supplies running low!" % key.to_upper(),
+				"log_type": "crisis"
+			})
+
+	updates["resources"] = resources
+
+	# === CONSTRUCTION PROGRESS (1/52 per week = ~1 year to build) ===
+	for i in range(buildings.size()):
+		var building = buildings[i]
+		if building.get("construction_progress", 1.0) < 1.0:
+			var new_progress = minf(1.0, building.construction_progress + (1.0 / 52.0))
+			buildings[i] = building.duplicate()
+			buildings[i]["construction_progress"] = new_progress
+
+			# Completed this week!
+			if new_progress >= 1.0 and building.construction_progress < 1.0:
+				buildings[i]["is_operational"] = true
+				new_log.append({
+					"year": current_year,
+					"week": new_week,
+					"message": "Construction complete: %s is now operational!" % _MCSTypes.get_building_name(building.type),
+					"log_type": "success"
+				})
+
+	updates["buildings"] = buildings
+
+	# === MINOR WEEKLY EVENTS (5% chance per week) ===
+	if random_values.size() > rand_idx and random_values[rand_idx] < 0.05:
+		rand_idx += 1
+		var event_roll = random_values[rand_idx] if random_values.size() > rand_idx else 0.5
+		rand_idx += 1
+
+		if event_roll < 0.3:
+			# Small morale event
+			new_log.append({
+				"year": current_year,
+				"week": new_week,
+				"message": "A community gathering lifts spirits.",
+				"log_type": "info"
+			})
+		elif event_roll < 0.6:
+			# Minor maintenance
+			new_log.append({
+				"year": current_year,
+				"week": new_week,
+				"message": "Routine maintenance completed successfully.",
+				"log_type": "info"
+			})
+
+	# === CHECK FOR YEAR END ===
+	if new_week > 52:
+		# Reset week, advance year
+		updates["current_week"] = 1
+		updates["current_year"] = current_year + 1
+		var new_year = current_year + 1
+
+		# === YEARLY POPULATION PHASE ===
+		var pop_rand_count = colonists.size() * 5 + 20
+		var pop_random = random_values.slice(rand_idx, rand_idx + pop_rand_count)
+		rand_idx += pop_rand_count
+
+		var pop_result = _MCSPopulation.advance_year(
+			colonists,
+			new_year,
+			resources,
+			buildings,
+			pop_random
+		)
+		updates["colonists"] = pop_result.colonists
+
+		for birth in pop_result.births:
+			new_log.append({
+				"year": new_year,
+				"message": "%s was born to the colony!" % birth.display_name,
+				"log_type": "birth"
+			})
+
+		for death in pop_result.deaths:
+			new_log.append({
+				"year": new_year,
+				"message": "%s has passed away. %s" % [death.name, death.cause],
+				"log_type": "death"
+			})
+
+		for adult in pop_result.new_adults:
+			new_log.append({
+				"year": new_year,
+				"message": "%s has come of age and joined the workforce." % adult.display_name,
+				"log_type": "milestone"
+			})
+
+		# === YEARLY BUILDING MAINTENANCE ===
+		var maint_rand = random_values.slice(rand_idx, rand_idx + buildings.size() + 5)
+		rand_idx += buildings.size() + 5
+		var maint_result = _MCSEconomy.apply_building_maintenance(
+			updates.get("buildings", buildings),
+			updates["resources"],
+			new_year,
+			maint_rand
+		)
+		updates["buildings"] = maint_result.buildings
+		updates["resources"] = maint_result.resources
+
+		for breakdown in maint_result.breakdowns:
+			new_log.append({
+				"year": new_year,
+				"message": "%s has broken down and needs repair!" % breakdown,
+				"log_type": "crisis"
+			})
+
+		# === YEARLY POLITICS ===
+		var politics = state.get("politics", {})
+		var pol_result = _MCSPolitics.update_faction_standings(
+			politics,
+			updates.get("colonists", colonists),
+			updates["resources"]
+		)
+		updates["politics"] = pol_result
+
+		# Election every 4 years after year 5
+		if new_year >= 5 and (new_year - 5) % 4 == 0:
+			var election_rand = random_values.slice(rand_idx, rand_idx + 10)
+			rand_idx += 10
+			var election_result = _MCSPolitics.hold_election(
+				updates["politics"],
+				updates.get("colonists", colonists),
+				election_rand
+			)
+			updates["politics"] = election_result.politics
+			new_log.append({
+				"year": new_year,
+				"message": "Colony election held. %s" % election_result.summary,
+				"log_type": "political"
+			})
+
+		# Update stability
+		var had_shortages = false
+		for key in ["food", "water", "oxygen"]:
+			if updates["resources"].get(key, 100) < 20:
+				had_shortages = true
+				break
+
+		updates["politics"] = _MCSPolitics.update_stability(
+			updates["politics"],
+			updates.get("colonists", colonists),
+			updates["resources"],
+			had_shortages
+		)
+
+		# === PHASE TRANSITIONS ===
+		var colony_phase = state.get("colony_phase", 0)
+		updates["colony_phase"] = _check_phase_transition(colony_phase, updates, new_year)
+		if updates["colony_phase"] != colony_phase:
+			new_log.append({
+				"year": new_year,
+				"message": "Colony has entered a new era: %s" % _MCSTypes.get_phase_name(updates["colony_phase"]),
+				"log_type": "milestone"
+			})
+
+		# === VICTORY CHECK ===
+		var victory_result = _check_victory_conditions(
+			updates.get("colonists", colonists),
+			updates.get("politics", politics),
+			new_year
+		)
+		if victory_result.game_over:
+			updates["is_game_over"] = true
+			updates["is_victory"] = victory_result.is_victory
+			updates["end_reason"] = victory_result.reason
+			new_log.append({
+				"year": new_year,
+				"message": victory_result.reason,
+				"log_type": "milestone" if victory_result.is_victory else "crisis"
+			})
+	else:
+		updates["current_week"] = new_week
+
+	updates["mission_log"] = new_log
 	return _with_fields(state, updates)
 
 static func _reduce_add_colonist(state: Dictionary, action: Dictionary) -> Dictionary:
@@ -546,7 +800,7 @@ static func _reduce_update_colonist(state: Dictionary, action: Dictionary) -> Di
 	return _with_field(state, "colonists", new_colonists)
 
 static func _reduce_start_construction(state: Dictionary, action: Dictionary) -> Dictionary:
-	var result = MCSEconomy.start_construction(
+	var result = _MCSEconomy.start_construction(
 		state.get("buildings", []),
 		state.get("resources", {}),
 		action.get("building_type", 0),
@@ -559,7 +813,7 @@ static func _reduce_start_construction(state: Dictionary, action: Dictionary) ->
 	var new_log = state.get("mission_log", []).duplicate()
 	new_log.append({
 		"year": state.get("current_year", 1),
-		"message": "Construction started: %s" % MCSTypes.get_building_name(action.get("building_type", 0)),
+		"message": "Construction started: %s" % _MCSTypes.get_building_name(action.get("building_type", 0)),
 		"log_type": "info"
 	})
 
@@ -579,7 +833,7 @@ static func _reduce_complete_construction(state: Dictionary, action: Dictionary)
 			updated["is_operational"] = true
 			updated["construction_progress"] = 1.0
 			new_buildings.append(updated)
-			completed_name = MCSTypes.get_building_name(building.get("type", 0))
+			completed_name = _MCSTypes.get_building_name(building.get("type", 0))
 		else:
 			new_buildings.append(building)
 
@@ -606,7 +860,7 @@ static func _reduce_demolish_building(state: Dictionary, action: Dictionary) -> 
 		if building.get("id", "") != action.get("building_id", ""):
 			new_buildings.append(building)
 		else:
-			demolished_name = MCSTypes.get_building_name(building.get("type", 0))
+			demolished_name = _MCSTypes.get_building_name(building.get("type", 0))
 
 	if demolished_name.is_empty():
 		return state
@@ -629,7 +883,7 @@ static func _reduce_demolish_building(state: Dictionary, action: Dictionary) -> 
 	})
 
 static func _reduce_repair_building(state: Dictionary, action: Dictionary) -> Dictionary:
-	var result = MCSEconomy.repair_building(
+	var result = _MCSEconomy.repair_building(
 		state.get("buildings", []),
 		state.get("resources", {}),
 		action.get("building_id", "")
@@ -653,7 +907,7 @@ static func _reduce_repair_building(state: Dictionary, action: Dictionary) -> Di
 
 static func _reduce_update_resource(state: Dictionary, action: Dictionary) -> Dictionary:
 	var new_resources = state.get("resources", {}).duplicate(true)
-	var resource_name = MCSTypes.get_resource_name(action.get("resource_type", 0))
+	var resource_name = _MCSTypes.get_resource_name(action.get("resource_type", 0))
 	new_resources[resource_name] = maxf(0, new_resources.get(resource_name, 0) + action.get("delta", 0))
 
 	return _with_field(state, "resources", new_resources)
@@ -662,7 +916,7 @@ static func _reduce_apply_production(state: Dictionary, _action: Dictionary) -> 
 	var buildings = state.get("buildings", [])
 	var colonists = state.get("colonists", [])
 	var resources = state.get("resources", {})
-	var production = MCSEconomy.calc_yearly_production(buildings, colonists, resources)
+	var production = _MCSEconomy.calc_yearly_production(buildings, colonists, resources)
 
 	var new_resources = resources.duplicate(true)
 	for key in production.keys():
@@ -673,7 +927,7 @@ static func _reduce_apply_production(state: Dictionary, _action: Dictionary) -> 
 static func _reduce_apply_consumption(state: Dictionary, _action: Dictionary) -> Dictionary:
 	var colonists = state.get("colonists", [])
 	var buildings = state.get("buildings", [])
-	var consumption = MCSEconomy.calc_yearly_consumption(colonists, buildings)
+	var consumption = _MCSEconomy.calc_yearly_consumption(colonists, buildings)
 
 	var new_resources = state.get("resources", {}).duplicate(true)
 	for key in consumption.keys():
@@ -712,13 +966,13 @@ static func _reduce_unassign_worker(state: Dictionary, action: Dictionary) -> Di
 static func _reduce_auto_assign_workers(state: Dictionary, _action: Dictionary) -> Dictionary:
 	var colonists = state.get("colonists", [])
 	var buildings = state.get("buildings", [])
-	var result = MCSEconomy.auto_assign_workers(colonists, buildings)
+	var result = _MCSEconomy.auto_assign_workers(colonists, buildings)
 	return _with_field(state, "buildings", result.get("buildings", buildings))
 
 static func _reduce_hold_election(state: Dictionary, action: Dictionary) -> Dictionary:
 	var politics = state.get("politics", {})
 	var colonists = state.get("colonists", [])
-	var result = MCSPolitics.hold_election(politics, colonists, action.get("random_values", []))
+	var result = _MCSPolitics.hold_election(politics, colonists, action.get("random_values", []))
 
 	var new_log = state.get("mission_log", []).duplicate()
 	new_log.append({
@@ -739,7 +993,7 @@ static func _reduce_change_government(state: Dictionary, action: Dictionary) -> 
 	var new_log = state.get("mission_log", []).duplicate()
 	new_log.append({
 		"year": state.get("current_year", 1),
-		"message": "Government changed to: %s" % MCSTypes.get_political_system_name(action.get("new_system", 0)),
+		"message": "Government changed to: %s" % _MCSTypes.get_political_system_name(action.get("new_system", 0)),
 		"log_type": "politics"
 	})
 
@@ -752,13 +1006,13 @@ static func _reduce_update_faction_standings(state: Dictionary, _action: Diction
 	var politics = state.get("politics", {})
 	var colonists = state.get("colonists", [])
 	var resources = state.get("resources", {})
-	var new_politics = MCSPolitics.update_faction_standings(politics, colonists, resources)
+	var new_politics = _MCSPolitics.update_faction_standings(politics, colonists, resources)
 	return _with_field(state, "politics", new_politics)
 
 static func _reduce_hold_independence_vote(state: Dictionary, action: Dictionary) -> Dictionary:
 	var politics = state.get("politics", {})
 	var colonists = state.get("colonists", [])
-	var result = MCSPolitics.hold_independence_vote(politics, colonists, action.get("random_value", 0.5))
+	var result = _MCSPolitics.hold_independence_vote(politics, colonists, action.get("random_value", 0.5))
 
 	var new_log = state.get("mission_log", []).duplicate()
 
@@ -815,7 +1069,7 @@ static func _reduce_resolve_event_choice(state: Dictionary, action: Dictionary) 
 		return state
 
 	# Apply choice effects
-	var result = MCSEvents.apply_event_choice(
+	var result = _MCSEvents.apply_event_choice(
 		state,
 		event,
 		action.get("choice_index", 0),
@@ -929,24 +1183,60 @@ static func _check_phase_transition(current_phase: int, state_updates: Dictionar
 	var pop_count = state_updates.get("colonists", []).size()
 
 	match current_phase:
-		MCSTypes.ColonyPhase.ACT_1_FOUNDERS:
+		_MCSTypes.ColonyPhase.ACT_1_FOUNDERS:
 			# Transition to ACT_2_SETTLEMENT when stable food + 30 pop + year 5
 			if year >= 5 and pop_count >= 30:
 				var resources = state_updates.get("resources", {})
 				if resources.get("food", 0) >= 100:
-					return MCSTypes.ColonyPhase.ACT_2_SETTLEMENT
+					return _MCSTypes.ColonyPhase.ACT_2_SETTLEMENT
 
-		MCSTypes.ColonyPhase.ACT_2_SETTLEMENT:
+		_MCSTypes.ColonyPhase.ACT_2_SETTLEMENT:
 			# Transition to ACT_3_COLONY when 100 pop + year 20
 			if year >= 20 and pop_count >= 100:
-				return MCSTypes.ColonyPhase.ACT_3_COLONY
+				return _MCSTypes.ColonyPhase.ACT_3_COLONY
 
-		MCSTypes.ColonyPhase.ACT_3_COLONY:
+		_MCSTypes.ColonyPhase.ACT_3_COLONY:
 			# Transition to ACT_4_INDEPENDENCE when 300 pop + year 50
 			if year >= 50 and pop_count >= 300:
-				return MCSTypes.ColonyPhase.ACT_4_INDEPENDENCE
+				return _MCSTypes.ColonyPhase.ACT_4_INDEPENDENCE
 
 	return current_phase
+
+static func _check_victory_conditions(colonists: Array, politics: Dictionary, year: int) -> Dictionary:
+	"""Check victory and loss conditions, return result dictionary"""
+	var stability = politics.get("stability", 75.0)
+	var is_independent = politics.get("is_independent", false)
+
+	# Check loss conditions
+	if colonists.size() == 0:
+		return {
+			"game_over": true,
+			"is_victory": false,
+			"reason": "Colony has perished. No survivors remain."
+		}
+	elif stability <= 0:
+		return {
+			"game_over": true,
+			"is_victory": false,
+			"reason": "Colony collapsed due to civil unrest."
+		}
+
+	# Check victory conditions
+	elif is_independent and colonists.size() >= 1000:
+		return {
+			"game_over": true,
+			"is_victory": true,
+			"reason": "Mars is free! A thriving nation of %d souls has secured humanity's future." % colonists.size()
+		}
+	elif year >= 100 and colonists.size() >= 500:
+		return {
+			"game_over": true,
+			"is_victory": true,
+			"reason": "After 100 years, the colony stands strong. Humanity has become a multi-planetary species."
+		}
+
+	# No end condition reached
+	return {"game_over": false, "is_victory": false, "reason": ""}
 
 ## Immutable-style field update
 static func _with_field(dict: Dictionary, key: String, value) -> Dictionary:

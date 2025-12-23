@@ -1,11 +1,13 @@
 [gd_scene load_steps=2 format=3 uid="uid://cwsy7hr6b7e5c"]
 
-[ext_resource type="Script" path="res://scripts/von_neumann_probe/vnp_ui.gd" id="1_w8q4m"]
+[ext_resource type="Script" uid="uid://br4qw0caxx6xo" path="res://scripts/von_neumann_probe/vnp_ui.gd" id="1_vnpui"]
 
 [node name="VnpUI" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 mouse_filter = 2
-script = ExtResource("1_w8q4m")
+script = ExtResource("1_vnpui")

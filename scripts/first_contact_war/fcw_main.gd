@@ -3,7 +3,9 @@ extends Control
 ## First Contact War - Main UI Controller
 ## Real-time strategy with adjustable speed
 
-# Preload battle system scripts
+# Preload FCW scripts
+const FCWTypes = preload("res://scripts/first_contact_war/fcw_types.gd")
+const FCWSolarMap = preload("res://scripts/first_contact_war/fcw_solar_map.gd")
 const FCWBattleSystem = preload("res://scripts/first_contact_war/fcw_battle_system.gd")
 const FCWBattleView = preload("res://scripts/first_contact_war/fcw_battle_view.gd")
 const FCWPlanetView = preload("res://scripts/first_contact_war/fcw_planet_view.gd")
@@ -12,8 +14,8 @@ const FCWPlanetView = preload("res://scripts/first_contact_war/fcw_planet_view.g
 # CONSTANTS
 # ============================================================================
 
-const SPEED_SETTINGS = [0.0, 5.0, 3.0, 1.5, 0.5]  # Paused, Slow, Normal, Fast, Very Fast
-const SPEED_NAMES = ["PAUSED", "SLOW", "NORMAL", "FAST", "VERY FAST"]
+const SPEED_SETTINGS = [0.0, 5.0, 3.0, 1.5, 0.5, 0.2, 0.1]  # Paused, Slow, Normal, Fast, Very Fast, Turbo, Debug
+const SPEED_NAMES = ["PAUSED", "SLOW", "NORMAL", "FAST", "VERY FAST", "TURBO", "DEBUG"]
 
 # ============================================================================
 # NODE REFERENCES
@@ -69,24 +71,33 @@ var auto_play_btn: Button  # Created dynamically
 @onready var new_game_btn: Button = $GameOverPanel/VBox/Buttons/NewGameBtn
 @onready var menu_btn: Button = $GameOverPanel/VBox/Buttons/MenuBtn
 
+# Zone fallen overlay (created dynamically)
+var _zone_fallen_overlay: PanelContainer
+var _zone_fallen_label: RichTextLabel
+var _zone_fallen_sublabel: Label
+var _zone_fallen_btn: Button
+
 # State
 var _selected_zone: int = -1
 var _speed_index: int = 2  # Start at Normal
-var _turn_timer: float = 0.0
 var _is_paused: bool = false
 var _attack_phase_timer: float = 0.0
 var _is_in_attack_phase: bool = false
 var _auto_play: bool = true  # AI plays autonomously (on by default)
 const ATTACK_PHASE_DURATION = 1.5  # Show attack animation for 1.5 seconds
 
-# Continuous Time System - smooth time flow instead of jerky week jumps
-var _week_progress: float = 0.0  # 0.0 to 1.0 progress through current week (7 days)
-var _day_of_week: int = 1  # Current day (1-7)
-var _hour_of_day: float = 0.0  # Current hour (0-24)
-const DAYS_PER_WEEK = 7
-const HOURS_PER_DAY = 24
-const TIME_SCALE_MULTIPLIERS = [0.0, 0.5, 1.0, 2.0, 4.0]  # Paused, Slow, Normal, Fast, Very Fast
-const BASE_WEEK_DURATION = 8.0  # Seconds of real time for one game week at Normal speed
+# NEW TIME SYSTEM - Discrete ticks with visual interpolation
+# Time advances in 1-hour ticks; visuals interpolate between ticks
+var _tick_progress: float = 0.0  # 0.0 to 1.0 progress toward next hour tick
+var _accumulated_time: float = 0.0  # Accumulated real time since last tick
+
+# Speed settings: ticks (hours) per real second
+# At NORMAL (1.0), 1 hour = 1 second, full week = 168 seconds (~3 min)
+# At FAST (4.0), 1 hour = 0.25 sec, full week = 42 seconds
+# At VERY_FAST (12.0), 1 hour = ~0.08 sec, full week = 14 seconds
+# At TURBO (48.0), full week = ~3.5 seconds
+# At DEBUG (168.0), 1 week per second
+const TICKS_PER_SECOND = [0.0, 0.5, 1.0, 4.0, 12.0, 48.0, 168.0]  # Paused, Slow, Normal, Fast, Very Fast, Turbo, Debug
 
 # Battle System
 var _battle_system: FCWBattleSystem
@@ -107,6 +118,7 @@ func _ready() -> void:
 	_setup_ui()
 	_setup_battle_system()
 	_setup_planet_view()
+	_setup_zone_fallen_overlay()
 	_connect_signals()
 	_start_new_game()
 	_sync_ui()
@@ -162,6 +174,93 @@ func _setup_planet_view() -> void:
 	add_child(_planet_view)
 	_planet_view.close_requested.connect(_on_planet_view_close)
 
+func _setup_zone_fallen_overlay() -> void:
+	# Create dramatic full-screen overlay for zone fallen events
+	_zone_fallen_overlay = PanelContainer.new()
+	_zone_fallen_overlay.name = "ZoneFallenOverlay"
+	_zone_fallen_overlay.visible = false
+
+	# Semi-transparent dark background
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.0, 0.0, 0.85)
+	style.border_color = Color(0.8, 0.2, 0.2, 1.0)
+	style.set_border_width_all(3)
+	style.set_corner_radius_all(10)
+	_zone_fallen_overlay.add_theme_stylebox_override("panel", style)
+
+	# Center the overlay
+	_zone_fallen_overlay.set_anchors_preset(Control.PRESET_CENTER)
+	_zone_fallen_overlay.custom_minimum_size = Vector2(500, 200)
+
+	# Container for content
+	var vbox = VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 15)
+	_zone_fallen_overlay.add_child(vbox)
+
+	# Main label - big dramatic text
+	_zone_fallen_label = RichTextLabel.new()
+	_zone_fallen_label.bbcode_enabled = true
+	_zone_fallen_label.fit_content = true
+	_zone_fallen_label.scroll_active = false
+	_zone_fallen_label.custom_minimum_size = Vector2(480, 60)
+	_zone_fallen_label.add_theme_font_size_override("normal_font_size", 32)
+	vbox.add_child(_zone_fallen_label)
+
+	# Sub label - lives lost
+	_zone_fallen_sublabel = Label.new()
+	_zone_fallen_sublabel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_zone_fallen_sublabel.add_theme_color_override("font_color", Color(0.9, 0.6, 0.6))
+	_zone_fallen_sublabel.add_theme_font_size_override("font_size", 18)
+	vbox.add_child(_zone_fallen_sublabel)
+
+	# Continue button
+	_zone_fallen_btn = Button.new()
+	_zone_fallen_btn.text = "CONTINUE"
+	_zone_fallen_btn.custom_minimum_size = Vector2(150, 40)
+	_zone_fallen_btn.pressed.connect(_on_zone_fallen_continue)
+	vbox.add_child(_zone_fallen_btn)
+
+	# Center button
+	var center_container = CenterContainer.new()
+	vbox.remove_child(_zone_fallen_btn)
+	center_container.add_child(_zone_fallen_btn)
+	vbox.add_child(center_container)
+
+	add_child(_zone_fallen_overlay)
+	_zone_fallen_overlay.z_index = 200  # Above everything
+
+func _show_zone_fallen_overlay(zone_id: int, lives_lost: int) -> void:
+	# Position overlay in center of screen
+	var viewport_size = get_viewport_rect().size
+	_zone_fallen_overlay.position = Vector2(
+		(viewport_size.x - 500) / 2,
+		(viewport_size.y - 200) / 2
+	)
+
+	var zone_name = FCWTypes.get_zone_name(zone_id)
+
+	# Dramatic message
+	_zone_fallen_label.text = "[center][color=red][b]%s HAS FALLEN[/b][/color][/center]" % zone_name.to_upper()
+
+	# Lives lost
+	if lives_lost > 0:
+		_zone_fallen_sublabel.text = "%s souls lost to the Herald" % FCWTypes.format_population(lives_lost)
+	else:
+		_zone_fallen_sublabel.text = "The Herald advances..."
+
+	_zone_fallen_overlay.visible = true
+	move_child(_zone_fallen_overlay, get_child_count() - 1)  # Bring to front
+
+func _on_zone_fallen_continue() -> void:
+	_zone_fallen_overlay.visible = false
+	# Resume the game
+	_set_paused(false)
+	if _speed_index == 0:
+		_speed_index = 2  # Default to normal
+	speed_slider.value = _speed_index
+	_sync_speed_display()
+
 func _start_new_game() -> void:
 	store.start_new_game()
 	# Generate named ships for starting fleet
@@ -169,6 +268,9 @@ func _start_new_game() -> void:
 	_battle_system.generate_starting_fleet(store.get_fleet(), FCWTypes.ZoneId.EARTH)
 
 func _process(delta: float) -> void:
+	# Guard against store not being initialized yet
+	if not store:
+		return
 	if store.is_game_over():
 		return
 
@@ -203,35 +305,111 @@ func _process(delta: float) -> void:
 	if _is_paused:
 		return
 
-	# === CONTINUOUS TIME SYSTEM ===
-	# Time flows smoothly, not in discrete jumps
-	var time_multiplier = TIME_SCALE_MULTIPLIERS[_speed_index]
-	if time_multiplier <= 0:
+	# === NEW TICK-BASED TIME SYSTEM ===
+	# Time advances in discrete 1-hour ticks
+	# Visuals interpolate between ticks for smoothness
+	var ticks_per_second = TICKS_PER_SECOND[_speed_index]
+	if ticks_per_second <= 0:
 		return  # Paused
 
-	# Calculate time advancement
-	var week_delta = delta * time_multiplier / BASE_WEEK_DURATION
-	var old_progress = _week_progress
-	_week_progress += week_delta
+	# Accumulate time toward next tick
+	_accumulated_time += delta * ticks_per_second
 
-	# Update day and hour display
-	var total_hours = _week_progress * DAYS_PER_WEEK * HOURS_PER_DAY
-	_day_of_week = int(total_hours / HOURS_PER_DAY) + 1
-	_hour_of_day = fmod(total_hours, HOURS_PER_DAY)
+	# Process complete ticks
+	while _accumulated_time >= 1.0:
+		_accumulated_time -= 1.0
+		_process_tick()
 
-	# Pass continuous time to solar map for smooth animations
+	# Calculate tick progress for interpolation (0.0 to 1.0)
+	_tick_progress = _accumulated_time
+
+	# Pass tick progress to solar map for interpolation
 	if solar_map:
-		solar_map.set_time_progress(_week_progress, store.get_fleets_in_transit(), store.get_herald_transit())
-
-	# Check for week completion
-	if _week_progress >= 1.0:
-		_week_progress = 0.0
-		_day_of_week = 1
-		_hour_of_day = 0.0
-		_process_week_end()
+		solar_map.set_tick_progress(_tick_progress, store.get_prev_entity_positions(), store.get_prev_zone_positions())
 
 	# Update header with time display
 	_sync_header()
+
+func _process_tick() -> void:
+	## Called when a full hour tick completes
+	## Dispatches to store which handles all game logic
+	var old_week = store.get_current_week()
+
+	# Dispatch the tick - this advances game_time by 1 hour
+	store.dispatch_tick()
+
+	var new_week = store.get_current_week()
+
+	# On week boundary, run additional processing
+	if new_week > old_week:
+		_process_week_boundary()
+
+func _process_week_boundary() -> void:
+	## Called when crossing a week boundary
+	## Handles AI, visuals, and any week-specific logic
+	var week = store.get_turn()
+	const PEACE_TURNS = 3
+
+	# Track colony ships for visual spawning
+	var colony_ships_before = store.get_colony_ships_in_transit().size()
+
+	# PEACE PERIOD - First few turns are calm before the storm
+	if week <= PEACE_TURNS:
+		_process_peace_week(week)
+		_spawn_visual_colony_ships(colony_ships_before)
+		return
+
+	# Run AI decisions if auto-play is enabled
+	if _auto_play:
+		_run_ai_turn()
+
+	# Update narrative state based on game situation
+	_update_narrative_state()
+
+	# Check evacuation milestones
+	solar_map.trigger_evacuation_milestone(store.get_lives_evacuated())
+
+	# Check if combat will occur this turn
+	var target = store.get_herald_target()
+	var target_defense = store.get_zone_defense(target)
+	var herald_strength = store.get_herald_strength()
+	var zone_status = store.get_zone(target).get("status", 0)
+
+	# Trigger battle view for ALL combat
+	var should_show_battle = _show_battle_view and zone_status != FCWTypes.ZoneStatus.FALLEN
+
+	if should_show_battle:
+		var defending_ships = _battle_system.get_ships_at_zone(target)
+		var herald_count = maxi(int(herald_strength / 15), 3)
+		var will_hold = target_defense >= herald_strength and target_defense > 0
+		var zone_name = FCWTypes.get_zone_name(target)
+
+		if not _battle_view.visible:
+			var viewport_size = get_viewport_rect().size
+			_battle_view.position = Vector2(viewport_size.x - 420, viewport_size.y - 300)
+			_battle_view.size = Vector2(400, 280)
+			move_child(_battle_view, get_child_count() - 1)
+			_battle_view.start_battle(zone_name, defending_ships, herald_count, will_hold)
+		else:
+			_spawn_cascading_battle_view(zone_name, defending_ships, herald_count, will_hold)
+
+	# Start attack animation on galaxy map
+	if target_defense < herald_strength * 2:
+		_is_in_attack_phase = true
+		_attack_phase_timer = 0.0
+		solar_map.set_attacking(true)
+		_show_planet_view_for_zone(target, true)
+
+		var attack_intensity = clampi(int(herald_strength / 25), 3, 30)
+		if target_defense < herald_strength:
+			solar_map.spawn_mass_attack(target, attack_intensity + 10)
+			solar_map.spawn_skirmish(target, -1, true, attack_intensity)
+		else:
+			solar_map.spawn_herald_attack_wave(target, mini(attack_intensity, 8))
+			if attack_intensity > 5:
+				solar_map.spawn_skirmish(target, -1, true, attack_intensity / 2)
+
+	_spawn_visual_colony_ships(colony_ships_before)
 
 func _setup_ui() -> void:
 	# Create visual solar system map
@@ -275,6 +453,9 @@ func _create_solar_map() -> void:
 	# Connect signals
 	solar_map.zone_clicked.connect(_on_zone_clicked)
 	solar_map.zone_hovered.connect(_on_zone_hovered)
+
+	# Initialize speed multiplier
+	solar_map.set_speed(TICKS_PER_SECOND[_speed_index])
 
 func _create_build_buttons() -> void:
 	for child in build_buttons.get_children():
@@ -333,6 +514,9 @@ func _on_state_changed(_new_state: Dictionary) -> void:
 	_update_guidance()
 
 func _sync_ui() -> void:
+	# Guard against uninitialized nodes
+	if not store or not is_inside_tree():
+		return
 	_sync_header()
 	_sync_resources()
 	_sync_fleet()
@@ -343,12 +527,13 @@ func _sync_ui() -> void:
 	_sync_speed_display()
 
 func _sync_header() -> void:
-	var week = store.get_turn()
+	if not store or not turn_label:
+		return
+	var week = store.get_current_week()
 	const PEACE_TURNS = 3  # Must match fcw_reducer.gd
 
-	# Format time display: "WEEK X, DAY Y - HH:00"
-	var hour_display = "%02d:00" % int(_hour_of_day)
-	var time_str = "WEEK %d, DAY %d - %s" % [week, _day_of_week, hour_display]
+	# Format time display using new time system: "WEEK X, DAY Y - HH:00"
+	var time_str = store.get_formatted_time()
 
 	# During peace, show calm info; after detection, show threat info
 	if week < PEACE_TURNS:
@@ -371,6 +556,8 @@ func _sync_header() -> void:
 		threat_label.text = "HERALD: %d → %s (%s)" % [threat, FCWTypes.get_zone_name(target), status]
 
 func _sync_resources() -> void:
+	if not store or not resources_container:
+		return
 	# Clear and rebuild
 	for child in resources_container.get_children():
 		if child is Label and child.name != "Title":
@@ -385,6 +572,8 @@ func _sync_resources() -> void:
 		resources_container.add_child(label)
 
 func _sync_fleet() -> void:
+	if not store or not fleet_list:
+		return
 	fleet_list.clear()
 	var fleet = store.get_fleet()
 	var available = store.get_available_ships()
@@ -424,7 +613,7 @@ func _sync_fleet() -> void:
 		production_label.text = "Building: %s [%d/%d]" % [", ".join(items), queue.size(), queue.size() + capacity]
 
 func _sync_map() -> void:
-	if not solar_map:
+	if not store or not solar_map:
 		return
 
 	var state = store.get_state()
@@ -441,6 +630,8 @@ func _sync_map() -> void:
 	solar_map.set_selected_zone(_selected_zone)
 
 func _sync_event_log() -> void:
+	if not store or not event_log:
+		return
 	var log = store.get_event_log()
 	var text = ""
 	var start = maxi(0, log.size() - 8)
@@ -452,6 +643,8 @@ func _sync_event_log() -> void:
 	event_log.text = text
 
 func _sync_zone_detail() -> void:
+	if not store or not zone_detail:
+		return
 	if _selected_zone < 0:
 		zone_detail.visible = false
 		return
@@ -491,6 +684,8 @@ func _sync_zone_detail() -> void:
 	zone_defense_label.text += "\n" + fleet_text
 
 func _sync_build_buttons() -> void:
+	if not store or not build_buttons:
+		return
 	var capacity = store.get_production_capacity()
 	var idx = 0
 	for ship_type in [FCWTypes.ShipType.FRIGATE, FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.DREADNOUGHT]:
@@ -500,6 +695,8 @@ func _sync_build_buttons() -> void:
 		idx += 1
 
 func _sync_speed_display() -> void:
+	if not speed_label or not pause_btn:
+		return
 	speed_label.text = "Speed: %s" % SPEED_NAMES[_speed_index]
 	pause_btn.text = "▶ PLAY" if _is_paused else "⏸ PAUSE"
 
@@ -508,6 +705,8 @@ func _sync_speed_display() -> void:
 # ============================================================================
 
 func _update_guidance() -> void:
+	if not store:
+		return
 	var state = store.get_state()
 	var turn = state.turn
 	const PEACE_TURNS = 3
@@ -602,8 +801,10 @@ func _update_guidance() -> void:
 # ============================================================================
 
 func _process_week_end() -> void:
-	## Called when a full week of game time completes
-	## This is where end-of-week events are processed (production, combat, etc.)
+	## DEPRECATED: Use _process_week_boundary() instead
+	## This was the old week-end handler that called dispatch_end_turn()
+	## Now replaced by tick-based system where _process_tick() handles dispatch
+	## and _process_week_boundary() handles visual/AI effects
 	var week = store.get_turn()
 	const PEACE_TURNS = 3  # Must match fcw_reducer.gd
 
@@ -789,25 +990,77 @@ func _run_ai_turn() -> void:
 	# --- PHASE 7: REDISTRIBUTE FROM SAFE ZONES ---
 	_ai_redistribute_fleet(herald_target)
 
-func _ai_build_ships(turn: int, herald_strength: int) -> void:
+func _ai_build_ships(_turn: int, herald_strength: int) -> void:
+	## Need-based ship building: analyze strategic situation and build accordingly
 	var capacity = store.get_production_capacity()
+	if capacity <= 0:
+		return
+
+	# Calculate strategic needs
+	var target = store.get_herald_target()
+	var target_defense = store.get_zone_defense(target)
+	var total_fleet_power = store.get_total_fleet_strength()
+
+	# Calculate defense deficit: how much more power do we need?
+	var defense_deficit = herald_strength * 1.3 - target_defense
+	var overall_deficit = herald_strength * 2.0 - total_fleet_power  # Want 2x Herald strength overall
+
+	# Calculate evacuation capacity at Earth
+	var earth_zone = store.get_zone(FCWTypes.ZoneId.EARTH)
+	var earth_fleet = earth_zone.get("assigned_fleet", {}) if earth_zone else {}
+	var carrier_count = earth_fleet.get(FCWTypes.ShipType.CARRIER, 0)
+	var fleet_carriers = store.get_fleet().get(FCWTypes.ShipType.CARRIER, 0)
+	var total_carriers = carrier_count  # Carriers at Earth
+
+	# Target: 1 carrier per 10M population remaining (very rough)
+	var earth_pop = earth_zone.get("population", 0) if earth_zone else 0
+	var target_carriers = ceili(float(earth_pop) / 10_000_000.0)
+	var carrier_deficit = target_carriers - fleet_carriers  # Total carriers owned, not just at Earth
+
+	# Estimate turns until Earth is reached
+	var eta = store.estimate_turns_until_earth()
+
 	while capacity > 0:
 		var built = false
 
-		# Late game: build dreadnoughts to counter scaling herald
-		if herald_strength > 500 and store.can_afford_ship(FCWTypes.ShipType.DREADNOUGHT):
+		# PRIORITY 1: Urgent defense need - dreadnoughts for heavy firepower
+		if defense_deficit > 200 and store.can_afford_ship(FCWTypes.ShipType.DREADNOUGHT):
 			store.dispatch_build_ship(FCWTypes.ShipType.DREADNOUGHT)
-			_add_to_event_log("Dreadnought commissioned - heavy firepower!", false)
+			defense_deficit -= FCWTypes.get_ship_combat_power(FCWTypes.ShipType.DREADNOUGHT)
+			_add_to_event_log("Dreadnought commissioned - urgent defense!", false)
 			built = true
-		# Every 4th turn: carrier for evacuation
-		elif turn % 4 == 0 and store.can_afford_ship(FCWTypes.ShipType.CARRIER):
+
+		# PRIORITY 2: Evacuation capacity - carriers save lives
+		elif carrier_deficit > 0 and store.can_afford_ship(FCWTypes.ShipType.CARRIER):
 			store.dispatch_build_ship(FCWTypes.ShipType.CARRIER)
+			carrier_deficit -= 1
 			built = true
-		# Cruisers for balanced power
-		elif turn % 3 == 0 and store.can_afford_ship(FCWTypes.ShipType.CRUISER):
+
+		# PRIORITY 3: Moderate defense need - cruisers for balanced power
+		elif defense_deficit > 50 and store.can_afford_ship(FCWTypes.ShipType.CRUISER):
 			store.dispatch_build_ship(FCWTypes.ShipType.CRUISER)
+			defense_deficit -= FCWTypes.get_ship_combat_power(FCWTypes.ShipType.CRUISER)
 			built = true
-		# Frigates: fast, cheap, numerous
+
+		# PRIORITY 4: Late game heavy investment - dreadnoughts if herald is strong
+		elif herald_strength > 400 and overall_deficit > 0 and store.can_afford_ship(FCWTypes.ShipType.DREADNOUGHT):
+			store.dispatch_build_ship(FCWTypes.ShipType.DREADNOUGHT)
+			overall_deficit -= FCWTypes.get_ship_combat_power(FCWTypes.ShipType.DREADNOUGHT)
+			built = true
+
+		# PRIORITY 5: Build up fleet reserves - cruisers preferred
+		elif overall_deficit > 100 and store.can_afford_ship(FCWTypes.ShipType.CRUISER):
+			store.dispatch_build_ship(FCWTypes.ShipType.CRUISER)
+			overall_deficit -= FCWTypes.get_ship_combat_power(FCWTypes.ShipType.CRUISER)
+			built = true
+
+		# PRIORITY 6: Cheap frigates to fill gaps
+		elif overall_deficit > 0 and store.can_afford_ship(FCWTypes.ShipType.FRIGATE):
+			store.dispatch_build_ship(FCWTypes.ShipType.FRIGATE)
+			overall_deficit -= FCWTypes.get_ship_combat_power(FCWTypes.ShipType.FRIGATE)
+			built = true
+
+		# PRIORITY 7: Always build something if we can afford frigates
 		elif store.can_afford_ship(FCWTypes.ShipType.FRIGATE):
 			store.dispatch_build_ship(FCWTypes.ShipType.FRIGATE)
 			built = true
@@ -818,15 +1071,39 @@ func _ai_build_ships(turn: int, herald_strength: int) -> void:
 
 func _ai_emergency_response(zone_id: int, deficit: int) -> void:
 	## SCRAMBLE! Pull ships from everywhere to save the zone
+	## Uses recall_fleet to actually move ships from other zones
 	_add_to_event_log("⚠ EMERGENCY: Scrambling all available ships to %s!" % FCWTypes.get_zone_name(zone_id), true)
 
-	# Find zones we can pull ships from (not the target, not Earth if target isn't Earth)
-	var donor_zones: Array = []
-	for zid in FCWTypes.ZoneId.values():
-		if zid == zone_id:
-			continue
-		var zone = store.get_zone(zid)
-		if zone.status == FCWTypes.ZoneStatus.CONTROLLED:
+	var power_gathered = 0
+	var total_ships_scrambled = 0
+
+	# STEP 1: Send all available ships first (fastest response)
+	var available = store.get_available_ships()
+	for ship_type in [FCWTypes.ShipType.FRIGATE, FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.DREADNOUGHT]:
+		if power_gathered >= deficit:
+			break
+		var avail_count = available.get(ship_type, 0)
+		if avail_count > 0:
+			var ship_power = FCWTypes.get_ship_combat_power(ship_type)
+			var to_send = mini(avail_count, ceili(float(deficit - power_gathered) / ship_power))
+
+			# Game state handles visualization via _draw_fleets_in_transit
+			store.dispatch_assign_fleet(zone_id, ship_type, to_send)
+			if _battle_system:
+				_battle_system.assign_ships_to_zone(FCWTypes.ZoneId.EARTH, zone_id, ship_type, to_send)
+			power_gathered += ship_power * to_send
+			total_ships_scrambled += to_send
+
+	# STEP 2: Pull ships from other zones if still not enough
+	if power_gathered < deficit:
+		# Find donor zones (not the target, not Earth, not fallen)
+		var donor_zones: Array = []
+		for zid in FCWTypes.ZoneId.values():
+			if zid == zone_id or zid == FCWTypes.ZoneId.EARTH:
+				continue
+			var zone = store.get_zone(zid)
+			if zone.status != FCWTypes.ZoneStatus.CONTROLLED:
+				continue
 			var zone_fleet = zone.get("assigned_fleet", {})
 			var has_ships = false
 			for st in zone_fleet:
@@ -836,36 +1113,39 @@ func _ai_emergency_response(zone_id: int, deficit: int) -> void:
 			if has_ships:
 				donor_zones.append(zid)
 
-	# Pull ships from donor zones
-	var power_gathered = 0
-	for donor_id in donor_zones:
-		if power_gathered >= deficit:
-			break
+		# Pull ships from donor zones using recall_fleet
+		for donor_id in donor_zones:
+			if power_gathered >= deficit:
+				break
 
-		var donor_zone = store.get_zone(donor_id)
-		var donor_fleet = donor_zone.get("assigned_fleet", {})
+			var donor_zone = store.get_zone(donor_id)
+			var donor_fleet = donor_zone.get("assigned_fleet", {})
 
-		# Send fast frigates first (rapid response)
-		for ship_type in [FCWTypes.ShipType.FRIGATE, FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.DREADNOUGHT]:
-			var count = donor_fleet.get(ship_type, 0)
-			if count > 0:
-				var ships_to_send = mini(count, 3)  # Send up to 3 at a time
+			# Send combat ships (leave carriers for evacuation)
+			for ship_type in [FCWTypes.ShipType.FRIGATE, FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.DREADNOUGHT]:
+				if power_gathered >= deficit:
+					break
+				var count = donor_fleet.get(ship_type, 0)
+				if count <= 0:
+					continue
+
+				var ships_to_send = mini(count, 5)  # Send up to 5 at a time in emergency
 				var power = FCWTypes.get_ship_combat_power(ship_type) * ships_to_send
 
-				# Visual: Ships warping from donor to target
-				for i in range(ships_to_send):
-					solar_map.spawn_ship_transit(donor_id, zone_id)
+				# Actually recall the ships from the donor zone to the target
+				# Game state handles visualization via entities or fleets_in_transit
+				store.dispatch_recall_fleet(donor_id, zone_id, ship_type, ships_to_send)
 
-				# Note: We can't actually move assigned ships in current store design
-				# So we send from available pool instead and show the visual
-				var available = store.get_available_ships()
-				var avail_count = available.get(ship_type, 0)
-				if avail_count > 0:
-					var to_send = mini(avail_count, ships_to_send)
-					store.dispatch_assign_fleet(zone_id, ship_type, to_send)
-					if _battle_system:
-						_battle_system.assign_ships_to_zone(FCWTypes.ZoneId.EARTH, zone_id, ship_type, to_send)
-					power_gathered += FCWTypes.get_ship_combat_power(ship_type) * to_send
+				if _battle_system:
+					_battle_system.assign_ships_to_zone(donor_id, zone_id, ship_type, ships_to_send)
+
+				power_gathered += power
+				total_ships_scrambled += ships_to_send
+
+	if total_ships_scrambled > 0:
+		_add_to_event_log("SCRAMBLE COMPLETE: %d ships en route to %s" % [
+			total_ships_scrambled, FCWTypes.get_zone_name(zone_id)
+		], true)
 
 func _ai_reinforce_zone(zone_id: int, deficit: int) -> void:
 	## Standard reinforcement - send available ships
@@ -881,13 +1161,7 @@ func _ai_reinforce_zone(zone_id: int, deficit: int) -> void:
 			var ship_power = FCWTypes.get_ship_combat_power(ship_type)
 			var ships_to_send = mini(avail_count, ceili(float(deficit) / ship_power))
 			if ships_to_send > 0:
-				# Visual: fleet formation transit
-				if ships_to_send >= 3:
-					solar_map.spawn_fleet_transit(FCWTypes.ZoneId.EARTH, zone_id, ships_to_send, ship_type)
-				else:
-					for j in range(ships_to_send):
-						solar_map.spawn_ship_transit(FCWTypes.ZoneId.EARTH, zone_id, ship_type)
-
+				# Game state handles visualization via _draw_fleets_in_transit
 				store.dispatch_assign_fleet(zone_id, ship_type, ships_to_send)
 				if _battle_system:
 					_battle_system.assign_ships_to_zone(FCWTypes.ZoneId.EARTH, zone_id, ship_type, ships_to_send)
@@ -924,8 +1198,7 @@ func _ai_establish_blockade(zone_id: int) -> void:
 			var ship_power = FCWTypes.get_ship_combat_power(ship_type)
 			var ships_to_send = mini(avail_count, ceili(float(deficit) / ship_power))
 			if ships_to_send > 0:
-				# Visual: blockade formation
-				solar_map.spawn_ship_transit(FCWTypes.ZoneId.EARTH, zone_id)
+				# Game state handles visualization via _draw_fleets_in_transit
 				store.dispatch_assign_fleet(zone_id, ship_type, ships_to_send)
 				if _battle_system:
 					_battle_system.assign_ships_to_zone(FCWTypes.ZoneId.EARTH, zone_id, ship_type, ships_to_send)
@@ -936,24 +1209,66 @@ func _ai_establish_blockade(zone_id: int) -> void:
 		_add_to_event_log("Blockade forming at %s (%d ships)" % [zone_name, total_ships_sent], false)
 
 func _ai_evacuation_fleet() -> void:
-	## Keep carriers and some frigates at Earth for evacuation
+	## Manage evacuation fleet at Earth with proper escort ratios
+	## Carriers need escorts to protect transports from Herald interception
 	var available = store.get_available_ships()
+	var earth_zone = store.get_zone(FCWTypes.ZoneId.EARTH)
+	var earth_fleet = earth_zone.get("assigned_fleet", {}) if earth_zone else {}
 
-	# All carriers go to Earth
+	# Current carriers at Earth
+	var carriers_at_earth = earth_fleet.get(FCWTypes.ShipType.CARRIER, 0)
+	var frigates_at_earth = earth_fleet.get(FCWTypes.ShipType.FRIGATE, 0)
+	var cruisers_at_earth = earth_fleet.get(FCWTypes.ShipType.CRUISER, 0)
+
+	# All available carriers go to Earth for evacuation
 	var carriers = available.get(FCWTypes.ShipType.CARRIER, 0)
 	if carriers > 0:
 		store.dispatch_assign_fleet(FCWTypes.ZoneId.EARTH, FCWTypes.ShipType.CARRIER, carriers)
+		carriers_at_earth += carriers
 
-	# Half of frigates for escort duty
-	var frigates = available.get(FCWTypes.ShipType.FRIGATE, 0) / 2
-	if frigates > 0:
-		store.dispatch_assign_fleet(FCWTypes.ZoneId.EARTH, FCWTypes.ShipType.FRIGATE, frigates)
+	# ESCORT LOGIC: Each carrier needs 2 frigates or 1 cruiser for escort
+	# This protects evacuation transports from Herald drone interception
+	var escort_needed = carriers_at_earth * 2  # 2 escorts per carrier
+	var current_escorts = frigates_at_earth + (cruisers_at_earth * 2)  # Cruisers count as 2 frigates
+	var escort_deficit = escort_needed - current_escorts
+
+	if escort_deficit > 0:
+		# Prefer cruisers for escort (more firepower per ship)
+		var cruisers = available.get(FCWTypes.ShipType.CRUISER, 0)
+		var cruisers_to_assign = mini(cruisers / 2, escort_deficit / 2)  # Keep half for frontline
+		if cruisers_to_assign > 0:
+			store.dispatch_assign_fleet(FCWTypes.ZoneId.EARTH, FCWTypes.ShipType.CRUISER, cruisers_to_assign)
+			escort_deficit -= cruisers_to_assign * 2
+
+		# Fill remaining escort need with frigates
+		if escort_deficit > 0:
+			var frigates = available.get(FCWTypes.ShipType.FRIGATE, 0)
+			var frigates_to_assign = mini(frigates / 2, escort_deficit)  # Keep half for frontline
+			if frigates_to_assign > 0:
+				store.dispatch_assign_fleet(FCWTypes.ZoneId.EARTH, FCWTypes.ShipType.FRIGATE, frigates_to_assign)
+
+	# Log escort status if we have significant evacuation fleet
+	if carriers_at_earth >= 2:
+		var total_escorts = frigates_at_earth + cruisers_at_earth
+		if total_escorts < carriers_at_earth:
+			_add_to_event_log("⚠ Evacuation fleet needs more escorts at Earth", false)
 
 func _ai_redistribute_fleet(herald_target: int) -> void:
-	## Pull ships from zones far from the action
-	# Zones sorted by distance from Herald target
-	var safe_zones: Array = []
+	## Pull ships from zones far from the action and redeploy them
+	## Safe zones = not adjacent to Herald target, not Earth
+	var herald_strength = store.get_herald_strength()
+	var target_defense = store.get_zone_defense(herald_target)
 
+	# Only redistribute if target zone needs reinforcement
+	if target_defense >= herald_strength * 1.5:
+		return  # Target is well defended, no need to strip other zones
+
+	var deficit = int(herald_strength * 1.3) - target_defense
+	if deficit <= 0:
+		return
+
+	# Find safe zones with ships we can pull
+	var safe_zones: Array = []
 	for zone_id in FCWTypes.ZoneId.values():
 		if zone_id == herald_target or zone_id == FCWTypes.ZoneId.EARTH:
 			continue
@@ -963,11 +1278,60 @@ func _ai_redistribute_fleet(herald_target: int) -> void:
 
 		# Check if this zone is adjacent to Herald target
 		var is_adjacent = zone_id in FCWTypes.ZONE_CONNECTIONS.get(herald_target, [])
-		if not is_adjacent:
+		if is_adjacent:
+			continue  # Don't pull from adjacent zones - they may be attacked next
+
+		# Check if zone has ships
+		var zone_fleet = zone.get("assigned_fleet", {})
+		var has_ships = false
+		for st in zone_fleet:
+			if zone_fleet[st] > 0:
+				has_ships = true
+				break
+		if has_ships:
 			safe_zones.append(zone_id)
 
-	# These zones are safe - we could pull ships from them
-	# (This creates a sense of dynamic fleet movement)
+	# Pull ships from safe zones toward the threatened zone
+	var power_gathered = 0
+	var total_ships_moved = 0
+
+	for donor_id in safe_zones:
+		if power_gathered >= deficit:
+			break
+
+		var donor_zone = store.get_zone(donor_id)
+		var donor_fleet = donor_zone.get("assigned_fleet", {})
+
+		# Pull combat ships (not carriers - those stay for evacuation if needed)
+		for ship_type in [FCWTypes.ShipType.FRIGATE, FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.DREADNOUGHT]:
+			var count = donor_fleet.get(ship_type, 0)
+			if count <= 0:
+				continue
+
+			# Keep at least 1 ship for scouting/early warning
+			var ships_to_pull = maxi(0, count - 1)
+			if ships_to_pull <= 0:
+				continue
+
+			var power = FCWTypes.get_ship_combat_power(ship_type) * ships_to_pull
+
+			# Actually move the ships - game state handles visualization
+			store.dispatch_recall_fleet(donor_id, herald_target, ship_type, ships_to_pull)
+
+			# Update battle system tracking
+			if _battle_system:
+				_battle_system.assign_ships_to_zone(donor_id, herald_target, ship_type, ships_to_pull)
+
+			power_gathered += power
+			total_ships_moved += ships_to_pull
+
+			if power_gathered >= deficit:
+				break
+
+	if total_ships_moved > 0:
+		_add_to_event_log("REDEPLOYMENT: %d ships recalled from safe zones to %s" % [
+			total_ships_moved, FCWTypes.get_zone_name(herald_target)
+		], false)
 
 func _on_zone_clicked(zone_id: int) -> void:
 	_select_zone(zone_id)
@@ -993,22 +1357,34 @@ func _assign_ship_to_zone(ship_type: int) -> void:
 	if _battle_system:
 		_battle_system.assign_ships_to_zone(FCWTypes.ZoneId.EARTH, _selected_zone, ship_type, 1)
 
+func _set_paused(paused: bool) -> void:
+	## Central function to set pause state - keeps solar_map in sync
+	_is_paused = paused
+	if solar_map:
+		solar_map.set_paused(paused)
+
 func _on_speed_changed(value: float) -> void:
 	_speed_index = int(value)
 	if _speed_index == 0:
-		_is_paused = true
+		_set_paused(true)
 	else:
-		_is_paused = false
+		_set_paused(false)
+	# Sync speed multiplier to solar map for visual animations
+	if solar_map:
+		solar_map.set_speed(TICKS_PER_SECOND[_speed_index])
 	_sync_speed_display()
 
 func _on_pause_pressed() -> void:
-	_is_paused = not _is_paused
+	_set_paused(not _is_paused)
 	if _is_paused:
 		speed_slider.value = 0
 	else:
 		if _speed_index == 0:
 			_speed_index = 2  # Default to normal
 		speed_slider.value = _speed_index
+	# Sync speed multiplier to solar map
+	if solar_map:
+		solar_map.set_speed(TICKS_PER_SECOND[_speed_index])
 	_sync_speed_display()
 
 func _on_auto_play_toggled(pressed: bool) -> void:
@@ -1016,9 +1392,12 @@ func _on_auto_play_toggled(pressed: bool) -> void:
 	auto_play_btn.text = "🤖 AUTO ON" if _auto_play else "🤖 AUTO"
 	# When enabling auto-play, also unpause and set to fast speed
 	if _auto_play:
-		_is_paused = false
+		_set_paused(false)
 		_speed_index = 3  # Fast
 		speed_slider.value = _speed_index
+		# Sync speed multiplier to solar map
+		if solar_map:
+			solar_map.set_speed(TICKS_PER_SECOND[_speed_index])
 		_sync_speed_display()
 		# Log AI takeover
 		_add_to_event_log("=== AI COMMAND ACTIVATED ===", true)
@@ -1272,12 +1651,13 @@ func _on_zone_fallen(zone_id: int) -> void:
 	# Set desperate narrative state
 	solar_map.set_narrative_state(3)  # Desperate
 
-	# Brief pause on zone fall for drama
-	_is_paused = true
+	# Pause and show dramatic overlay
+	_set_paused(true)
 	_sync_speed_display()
+	_show_zone_fallen_overlay(zone_id, lives_lost)
 
 func _on_game_over(victory_tier: int) -> void:
-	_is_paused = true
+	_set_paused(true)
 
 	# Cinematic camera - pull back to galaxy for final perspective
 	if solar_map:
@@ -1355,7 +1735,9 @@ func _on_game_over(victory_tier: int) -> void:
 
 func _on_new_game() -> void:
 	game_over_panel.visible = false
-	_is_paused = false
+	if _zone_fallen_overlay:
+		_zone_fallen_overlay.visible = false
+	_set_paused(false)
 	_speed_index = 2
 	speed_slider.value = 2
 	_auto_play = false

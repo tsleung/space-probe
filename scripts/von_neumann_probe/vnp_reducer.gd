@@ -5,6 +5,11 @@ const VnpTypes = preload("res://scripts/von_neumann_probe/vnp_types.gd")
 # Minimum cost to build any combat ship
 const MIN_SHIP_COST = 50  # Frigate cost
 
+# Expansion constants
+const INITIAL_WORLD_SCALE = 1.5
+const EXPANSION_SCALE_INCREMENT = 0.3
+const MAX_EXPANSIONS = 10
+
 # Initial state of the game
 func get_initial_state():
 	return {
@@ -16,7 +21,27 @@ func get_initial_state():
 		"ships": {}, # { id: { team, type, position, health, target... } }
 		"planets": {}, # { id: { position, resource_amount, owner } } - legacy, keeping for compat
 		"strategic_points": {}, # { id: { type, position, owner, capture_progress } }
+		"expansion": {
+			"phase": 0,
+			"world_scale": INITIAL_WORLD_SCALE,
+			"max_phase": MAX_EXPANSIONS,
+		},
+		# The Cycle - Convergence system
+		"convergence": {
+			"phase": VnpTypes.ConvergencePhase.DORMANT,
+			"center": Vector2.ZERO,           # Set by vnp_main when initialized
+			"original_radius": 0.0,           # Set when convergence starts
+			"absorption_radius": 0.0,         # Current safe zone (shrinks)
+			"pull_strength": 0.0,             # Current gravitational pull
+			"instability": 0.0,               # 0-100, fragmentation at 100
+			"absorbed_count": 0,              # Ships consumed by the Progenitor
+			"time_in_phase": 0.0,             # Time tracker for transitions
+			"progenitor_revealed": false,     # Has ??? become THE PROGENITOR?
+		},
+		# Outpost system - mini-factories at strategic points
+		"outposts": {},  # point_id -> { team, build_progress, production_timer }
 		"next_ship_id": 1,
+		"next_expansion_point_id": 0,
 		"game_over": false,
 		"winner": -1,
 	}
@@ -142,6 +167,42 @@ func reduce(state, action):
 			if new_state["teams"].has(team):
 				new_state["teams"][team]["rally_point"] = target
 
+		"FULL_SEND":
+			# Force ALL ships of this team to aggressively move to target
+			var team = action["team"]
+			var target = action["target"]
+			if new_state["teams"].has(team):
+				new_state["teams"][team]["rally_point"] = target
+				new_state["teams"][team]["full_send_target"] = target
+				# Set all ships to moving state toward target
+				for ship_id in new_state["ships"]:
+					var ship = new_state["ships"][ship_id]
+					if ship["team"] == team:
+						# Add some spread so ships don't all stack
+						var offset = Vector2(randf_range(-80, 80), randf_range(-80, 80))
+						new_state["ships"][ship_id]["state"] = "moving"
+						new_state["ships"][ship_id]["target"] = target + offset
+
+		"EXPAND_WORLD":
+			# Expand the map - increase world scale and phase
+			var current_phase = new_state["expansion"]["phase"]
+			var max_phase = new_state["expansion"]["max_phase"]
+			if current_phase < max_phase:
+				new_state["expansion"]["phase"] = current_phase + 1
+				new_state["expansion"]["world_scale"] += EXPANSION_SCALE_INCREMENT
+
+		"SPAWN_EXPANSION_POINT":
+			# Spawn a new strategic point at the edge of expanded territory
+			var point_id = action["point_id"]
+			var point_type = action.get("point_type", VnpTypes.PointType.ASTEROID_FIELD)
+			var position = action["position"]
+			new_state["strategic_points"][point_id] = {
+				"type": point_type,
+				"position": position,
+				"owner": null,
+			}
+			new_state["next_expansion_point_id"] += 1
+
 		"CHECK_VICTORY":
 			if not new_state.get("game_over", false):
 				var teams_alive = []
@@ -157,6 +218,163 @@ func reduce(state, action):
 
 		"RESET_GAME":
 			new_state = get_initial_state()
+
+		# === THE CYCLE - CONVERGENCE ACTIONS ===
+
+		"CONVERGENCE_SET_PHASE":
+			var phase = action["phase"]
+			new_state["convergence"]["phase"] = phase
+			new_state["convergence"]["time_in_phase"] = 0.0
+
+			# Set pull strength based on phase
+			var timing = VnpTypes.CONVERGENCE_TIMING
+			match phase:
+				VnpTypes.ConvergencePhase.EMERGENCE:
+					new_state["convergence"]["pull_strength"] = timing["pull_strength_base"]
+				VnpTypes.ConvergencePhase.CRITICAL:
+					new_state["convergence"]["pull_strength"] = timing["pull_strength_critical"]
+				_:
+					new_state["convergence"]["pull_strength"] = 0.0
+
+		"CONVERGENCE_INITIALIZE":
+			# Called when convergence first triggers
+			var center = action["center"]
+			var radius = action["radius"]
+			new_state["convergence"]["center"] = center
+			new_state["convergence"]["original_radius"] = radius
+			new_state["convergence"]["absorption_radius"] = radius
+
+		"CONVERGENCE_SHRINK":
+			# Shrink the absorption zone
+			var amount = action["amount"]
+			var min_radius = 100.0  # Never shrink smaller than this
+			new_state["convergence"]["absorption_radius"] = max(
+				new_state["convergence"]["absorption_radius"] - amount,
+				min_radius
+			)
+
+		"CONVERGENCE_UPDATE_TIME":
+			# Update time in current phase
+			var delta = action["delta"]
+			new_state["convergence"]["time_in_phase"] += delta
+
+		"CONVERGENCE_ABSORB_SHIP":
+			# A ship was absorbed by the Progenitor
+			var ship_id = action["ship_id"]
+			if new_state["ships"].has(ship_id):
+				new_state["ships"].erase(ship_id)
+				new_state["convergence"]["absorbed_count"] += 1
+
+		"CONVERGENCE_ADD_INSTABILITY":
+			# Increase instability (toward fragmentation)
+			var amount = action["amount"]
+			new_state["convergence"]["instability"] = min(
+				new_state["convergence"]["instability"] + amount,
+				VnpTypes.CONVERGENCE_TIMING["instability_threshold"]
+			)
+
+		"CONVERGENCE_REVEAL_PROGENITOR":
+			# Transition from ??? to THE PROGENITOR
+			new_state["convergence"]["progenitor_revealed"] = true
+
+		"CONVERGENCE_SLIDE":
+			# Slide the convergence center (pushing the safe zone)
+			var new_center = action["new_center"]
+			new_state["convergence"]["center"] = new_center
+
+		"CONVERGENCE_FRAGMENTATION":
+			# The Progenitor shatters - player survives
+			new_state["convergence"]["phase"] = VnpTypes.ConvergencePhase.FRAGMENTATION
+			new_state["game_over"] = true
+			# Winner is whoever has the most ships (they become next Progenitor)
+			var team_counts = {}
+			for ship_id in new_state["ships"]:
+				var team = new_state["ships"][ship_id]["team"]
+				team_counts[team] = team_counts.get(team, 0) + 1
+			var best_team = -1
+			var best_count = 0
+			for team in team_counts:
+				if team_counts[team] > best_count:
+					best_count = team_counts[team]
+					best_team = team
+			new_state["winner"] = best_team
+
+		"FULL_RETREAT":
+			# The flip of FULL_SEND - flee toward center (safety)
+			var team = action["team"]
+			var safe_center = new_state["convergence"]["center"]
+			if new_state["teams"].has(team):
+				new_state["teams"][team]["rally_point"] = safe_center
+				new_state["teams"][team]["full_retreat_active"] = true
+				# Set all ships to flee toward center
+				for ship_id in new_state["ships"]:
+					var ship = new_state["ships"][ship_id]
+					if ship["team"] == team:
+						var offset = Vector2(randf_range(-100, 100), randf_range(-100, 100))
+						new_state["ships"][ship_id]["state"] = "moving"
+						new_state["ships"][ship_id]["target"] = safe_center + offset
+
+		# === OUTPOST SYSTEM ACTIONS ===
+
+		"OUTPOST_START_BUILD":
+			# Harvester begins building at a strategic point
+			var point_id = action["point_id"]
+			var team = action["team"]
+			if not new_state["outposts"].has(point_id):
+				new_state["outposts"][point_id] = {
+					"team": team,
+					"build_progress": 0.0,
+					"production_timer": 0.0,
+					"complete": false,
+				}
+
+		"OUTPOST_UPDATE_BUILD":
+			# Update build progress for an outpost
+			var point_id = action["point_id"]
+			var delta = action["delta"]
+			if new_state["outposts"].has(point_id):
+				var outpost = new_state["outposts"][point_id]
+				if not outpost["complete"]:
+					outpost["build_progress"] += delta
+					var build_time = VnpTypes.OUTPOST_CONFIG["build_time"]
+					if outpost["build_progress"] >= build_time:
+						outpost["complete"] = true
+						outpost["production_timer"] = 0.0
+
+		"OUTPOST_CANCEL_BUILD":
+			# Harvester left before completion - cancel build
+			var point_id = action["point_id"]
+			if new_state["outposts"].has(point_id):
+				if not new_state["outposts"][point_id]["complete"]:
+					new_state["outposts"].erase(point_id)
+
+		"OUTPOST_PRODUCE":
+			# Outpost produces a ship (handled by vnp_main for spawning)
+			var point_id = action["point_id"]
+			if new_state["outposts"].has(point_id):
+				new_state["outposts"][point_id]["production_timer"] = 0.0
+
+		"OUTPOST_UPDATE_PRODUCTION":
+			# Tick production timers for all complete outposts
+			var delta = action["delta"]
+			for point_id in new_state["outposts"]:
+				var outpost = new_state["outposts"][point_id]
+				if outpost["complete"]:
+					outpost["production_timer"] += delta
+
+		"OUTPOST_DESTROY":
+			# Outpost consumed by Progenitor or captured
+			var point_id = action["point_id"]
+			if new_state["outposts"].has(point_id):
+				new_state["outposts"].erase(point_id)
+
+		"OUTPOST_CHANGE_OWNER":
+			# Strategic point captured - outpost changes team or is destroyed
+			var point_id = action["point_id"]
+			var new_team = action["team"]
+			if new_state["outposts"].has(point_id):
+				# Outpost is destroyed when point changes hands
+				new_state["outposts"].erase(point_id)
 
 	return new_state
 

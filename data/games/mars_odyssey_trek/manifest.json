@@ -17,11 +17,12 @@
   "initial_phase": "ship_building",
 
   "systems": {
-    "hex_grid": true,
+    "hex_grid": false,
     "crew": true,
     "resources": true,
     "events": true,
-    "components": true
+    "components": false,
+    "orbital": true
   },
 
   "settings": {

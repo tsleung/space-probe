@@ -2,7 +2,7 @@ extends RefCounted
 class_name FCWTypes
 
 ## First Contact War - Type Definitions
-## Mindustry-style production + Sins/Rebellion fleet management
+## Movement-based space combat: position, velocity, time, detection
 
 # ============================================================================
 # ENUMS
@@ -28,6 +28,26 @@ enum ShipType {
 	CRUISER,
 	CARRIER,
 	DREADNOUGHT
+}
+
+# New unified entity system
+enum EntityType {
+	WARSHIP,      # Combat vessels
+	TRANSPORT,    # Civilian evacuation ships
+	WEAPON,       # Torpedoes, missiles (follow same physics)
+	HERALD_SHIP   # Enemy vessels
+}
+
+enum Faction {
+	HUMAN,
+	HERALD
+}
+
+enum MovementState {
+	BURNING,      # Engine active, high signature, changing velocity
+	COASTING,     # Engine off, low signature, constant velocity
+	ORBITING,     # Stationed at a body
+	DESTROYED     # No longer active
 }
 
 enum BuildingType {
@@ -222,12 +242,281 @@ const HERALD_STRENGTH_BY_TURN = [
 ]
 
 # ============================================================================
+# ORBITAL MECHANICS
+# ============================================================================
+
+# Zone orbital data - positions change over time
+# All positions in AU (astronomical units), centered on Sun
+# Orbital periods in Earth years
+const ZONE_ORBITAL_DATA = {
+	ZoneId.EARTH: {
+		"semi_major_axis": 1.0,      # 1 AU
+		"orbital_period": 1.0,       # 1 year
+		"base_angle": 0.0            # Starting angle (radians)
+	},
+	ZoneId.MARS: {
+		"semi_major_axis": 1.52,     # 1.52 AU
+		"orbital_period": 1.88,      # 1.88 years
+		"base_angle": 0.5
+	},
+	ZoneId.ASTEROID_BELT: {
+		"semi_major_axis": 2.7,      # 2.7 AU (middle of belt)
+		"orbital_period": 4.4,       # ~4.4 years
+		"base_angle": 1.0
+	},
+	ZoneId.JUPITER: {
+		"semi_major_axis": 5.2,      # 5.2 AU
+		"orbital_period": 11.86,     # 11.86 years
+		"base_angle": 2.0
+	},
+	ZoneId.SATURN: {
+		"semi_major_axis": 9.5,      # 9.5 AU
+		"orbital_period": 29.46,     # 29.46 years
+		"base_angle": 3.5
+	},
+	ZoneId.KUIPER: {
+		"semi_major_axis": 40.0,     # ~40 AU (inner Kuiper belt)
+		"orbital_period": 250.0,     # ~250 years
+		"base_angle": 4.0
+	}
+}
+
+# Ship thrust capabilities (acceleration in AU/week^2)
+# Higher = faster travel, but all ships have unlimited fuel
+const SHIP_THRUST = {
+	ShipType.FRIGATE: 0.08,       # Fast scouts
+	ShipType.CRUISER: 0.05,       # Standard
+	ShipType.CARRIER: 0.03,       # Slow evacuation vessels
+	ShipType.DREADNOUGHT: 0.04    # Heavy but decent thrust
+}
+
+# Detection constants
+const BURN_SIGNATURE = 1.0         # Full visibility when burning
+const COAST_SIGNATURE = 0.1        # Low visibility when coasting
+const WEAPON_SIGNATURE = 0.05      # Very low (small, cold)
+const HERALD_OBSERVATION_RADIUS = 5.0  # AU - Herald can see burns within this range
+
+# Detection probability constants (per day, as fraction)
+# These represent the chance Herald detects something in a region
+const DETECTION_RATE_IDLE = 0.001      # 0.1% per day - minimal background
+const DETECTION_RATE_LOW = 0.01        # 1% per day - occasional traffic
+const DETECTION_RATE_MEDIUM = 0.05     # 5% per day - regular traffic
+const DETECTION_RATE_HIGH = 0.10       # 10% per day - heavy traffic
+const DETECTION_RATE_BURNING = 0.50    # 50% per day - active burn in range
+
+# Traffic accumulation - how quickly lanes become "known"
+const TRAFFIC_DECAY_RATE = 0.1         # Per week, how much traffic memory fades
+const TRAFFIC_PER_TRANSIT = 0.2        # Each ship transit adds this to route traffic
+
+# Detection zone visual thresholds
+const DETECTION_ZONE_LOW = 0.01        # Start showing faint zone
+const DETECTION_ZONE_MEDIUM = 0.05     # More visible zone
+const DETECTION_ZONE_HIGH = 0.10       # Danger zone visualization
+
+# ============================================================================
+# ENTITY SYSTEM
+# ============================================================================
+
+static var _next_entity_id: int = 0
+
+static func create_entity(overrides: Dictionary = {}) -> Dictionary:
+	## Create a unified entity (warship, transport, weapon, or herald ship)
+	## All entities follow the same physics and detection rules
+	_next_entity_id += 1
+	var defaults = {
+		"id": "entity_%d" % _next_entity_id,
+		"entity_type": EntityType.WARSHIP,
+		"faction": Faction.HUMAN,
+		"ship_type": ShipType.FRIGATE,  # For warships, determines stats
+
+		# Physics - all in AU and AU/week
+		"position": Vector2.ZERO,       # Solar system coordinates
+		"velocity": Vector2.ZERO,       # Current velocity vector
+		"acceleration": 0.05,           # Max thrust (AU/week^2)
+
+		# Detection
+		"signature": COAST_SIGNATURE,   # Current detectability
+		"movement_state": MovementState.ORBITING,
+
+		# Payload
+		"combat_power": 10.0,           # Damage capability
+		"hull": 100.0,                  # Health
+		"cargo": {},                    # People, resources aboard
+		"count": 1,                     # Number of ships in this group
+
+		# Orders
+		"destination": -1,              # Target zone/body (-1 = none)
+		"route": [],                    # Waypoints (gravity assists)
+		"eta": 0.0,                     # Time to arrival (weeks)
+		"origin": -1                    # Where this entity came from
+	}
+	return _merge(defaults, overrides)
+
+static func create_warship(ship_type: int, position: Vector2, count: int = 1) -> Dictionary:
+	## Create a warship entity with stats from SHIP_DEFS
+	var ship_def = SHIP_DEFS.get(ship_type, SHIP_DEFS[ShipType.FRIGATE])
+	var thrust = SHIP_THRUST.get(ship_type, 0.05)
+	return create_entity({
+		"entity_type": EntityType.WARSHIP,
+		"faction": Faction.HUMAN,
+		"ship_type": ship_type,
+		"position": position,
+		"acceleration": thrust,
+		"combat_power": ship_def.combat_power * count,
+		"hull": 100.0 * count,
+		"count": count,
+		"movement_state": MovementState.ORBITING
+	})
+
+static func create_transport(position: Vector2, souls_aboard: int, name: String = "") -> Dictionary:
+	## Create a civilian transport/evacuation ship
+	if name.is_empty():
+		name = COLONY_SHIP_NAMES[randi() % COLONY_SHIP_NAMES.size()]
+	return create_entity({
+		"entity_type": EntityType.TRANSPORT,
+		"faction": Faction.HUMAN,
+		"position": position,
+		"acceleration": 0.02,  # Slow, heavily loaded
+		"combat_power": 0.0,   # No combat capability
+		"hull": 50.0,
+		"cargo": {"souls": souls_aboard},
+		"count": 1,
+		"name": name,
+		"movement_state": MovementState.ORBITING
+	})
+
+static func create_weapon(position: Vector2, velocity: Vector2, combat_power: float) -> Dictionary:
+	## Create a weapon entity (torpedo, missile)
+	## Inherits velocity from launcher, can coast silently or burn to track
+	return create_entity({
+		"entity_type": EntityType.WEAPON,
+		"faction": Faction.HUMAN,
+		"position": position,
+		"velocity": velocity,
+		"acceleration": 0.1,  # High thrust for terminal guidance
+		"combat_power": combat_power,
+		"hull": 10.0,  # Fragile
+		"signature": WEAPON_SIGNATURE,
+		"movement_state": MovementState.COASTING  # Default: silent running
+	})
+
+static func create_herald_ship(position: Vector2, combat_power: float) -> Dictionary:
+	## Create a Herald attack ship
+	return create_entity({
+		"entity_type": EntityType.HERALD_SHIP,
+		"faction": Faction.HERALD,
+		"position": position,
+		"acceleration": 0.1,  # Herald ships are fast
+		"combat_power": combat_power,
+		"hull": combat_power * 2.0,  # Tough
+		"signature": BURN_SIGNATURE,
+		"movement_state": MovementState.BURNING  # Herald always visible when moving
+	})
+
+# Herald entity constant ID - used to find the main Herald in entities array
+const HERALD_ENTITY_ID = "herald_main"
+
+static func _create_herald_entity() -> Dictionary:
+	## Create the main Herald entity for initial state
+	## Starts at Kuiper Belt, orbiting
+	var kuiper_pos = get_zone_position(ZoneId.KUIPER, 0.0)
+	return {
+		"id": HERALD_ENTITY_ID,
+		"entity_type": EntityType.HERALD_SHIP,
+		"faction": Faction.HERALD,
+		"position": kuiper_pos,
+		"velocity": Vector2.ZERO,
+		"acceleration": 0.08,  # Herald is fast but not as fast as drones
+		"signature": COAST_SIGNATURE,  # Herald is stealthy when not moving
+		"movement_state": MovementState.ORBITING,
+		"combat_power": 50.0,  # Initial strength (increases each turn)
+		"hull": 1000.0,  # Very tough
+		"cargo": {},
+		"count": 1,
+		"destination": ZoneId.KUIPER,  # Current target zone
+		"origin": ZoneId.KUIPER,  # Starting zone
+		"route": [],
+		"eta": 0.0
+	}
+
+static func get_herald_entity(state: Dictionary) -> Dictionary:
+	## Find and return the main Herald entity from state
+	## Returns empty dict if not found
+	for entity in state.get("entities", []):
+		if entity.get("id") == HERALD_ENTITY_ID:
+			return entity
+	return {}
+
+static func get_zone_position(zone_id: int, game_time: float) -> Vector2:
+	## Get the current position of a zone/body at a given game time
+	## game_time is in HOURS (the base unit of the new time system)
+	## Returns position in AU as Vector2
+	var orbital = ZONE_ORBITAL_DATA.get(zone_id)
+	if not orbital:
+		return Vector2.ZERO
+
+	# Convert game time (hours) to years
+	# 168 hours/week * 52 weeks/year = 8736 hours/year
+	const HOURS_PER_YEAR = 168.0 * 52.0
+	var time_years = game_time / HOURS_PER_YEAR
+
+	# Calculate orbital angle (radians)
+	var angular_velocity = TAU / orbital.orbital_period  # radians per year
+	var angle = orbital.base_angle + (angular_velocity * time_years)
+
+	# Calculate position (circular orbit approximation)
+	var radius = orbital.semi_major_axis
+	return Vector2(
+		radius * cos(angle),
+		radius * sin(angle)
+	)
+
+static func get_zone_position_at_week(zone_id: int, week: float) -> Vector2:
+	## Legacy helper - get zone position given time in weeks
+	## Converts to hours internally
+	return get_zone_position(zone_id, week * 168.0)
+
+static func get_all_zone_positions(game_time: float) -> Dictionary:
+	## Get positions of all zones at a given time
+	var positions = {}
+	for zone_id in ZoneId.values():
+		positions[zone_id] = get_zone_position(zone_id, game_time)
+	return positions
+
+# Detection calculation moved to FCWHeraldAI.calc_detection_probability()
+# See scripts/first_contact_war/fcw_herald_ai.gd for the detection system
+
+static func calc_route_traffic_key(from_zone: int, to_zone: int) -> String:
+	## Generate a unique key for a route between two zones
+	## Keys are normalized so A->B and B->A use the same key
+	var min_zone = mini(from_zone, to_zone)
+	var max_zone = maxi(from_zone, to_zone)
+	return "%d_%d" % [min_zone, max_zone]
+
+static func get_detection_visual_level(detection_rate: float) -> int:
+	## Get visual level for detection zone display
+	## Returns 0 (none), 1 (low), 2 (medium), 3 (high)
+	if detection_rate >= DETECTION_ZONE_HIGH:
+		return 3
+	elif detection_rate >= DETECTION_ZONE_MEDIUM:
+		return 2
+	elif detection_rate >= DETECTION_ZONE_LOW:
+		return 1
+	return 0
+
+# ============================================================================
 # DATA STRUCTURES
 # ============================================================================
 
 static func create_initial_state() -> Dictionary:
 	return {
 		"turn": 1,
+		"game_time": 0.0,  # HOURS elapsed (base unit of time system)
+
+		# Snapshot system for visual interpolation
+		# Stores positions at the start of current tick for smooth animation
+		"prev_entity_positions": {},  # entity_id -> Vector2 (position at tick start)
+		"prev_zone_positions": {},    # zone_id -> Vector2 (orbital positions at tick start)
 		"resources": {
 			"ore": 100,
 			"steel": 50,
@@ -237,6 +526,11 @@ static func create_initial_state() -> Dictionary:
 			"weapons": 10
 		},
 		"zones": _create_initial_zones(),
+
+		# New unified entity system - includes Herald as an entity
+		"entities": [_create_herald_entity()],  # Array of FCWEntity dictionaries
+
+		# Legacy fleet system (kept for backward compatibility during migration)
 		"fleet": {
 			ShipType.FRIGATE: 10,
 			ShipType.CRUISER: 3,
@@ -249,14 +543,33 @@ static func create_initial_state() -> Dictionary:
 		"fleets_in_transit": [],  # [{from_zone, to_zone, ship_type, count, turns_remaining}]
 		"colony_ships_in_transit": [],  # [{souls_aboard, turns_remaining, total_turns, name, intercepted}]
 		"colony_ships_safe": 0,  # Number of ships that reached safety
+
+		# Evacuation tracking
 		"lives_evacuated": 0,
 		"lives_lost": 0,
 		"lives_intercepted": 0,  # Lives lost to Herald interception
 		"total_population": 8_000_000_000,  # 8 billion
+
+		# Herald tracking (will migrate to entity system)
 		"herald_attack_target": ZoneId.KUIPER,
 		"herald_current_zone": ZoneId.KUIPER,  # Where Herald physically is
 		"herald_transit": {},  # {from_zone, to_zone, turns_remaining, total_turns} when traveling
 		"herald_strength": 50,
+
+		# Detection system (new)
+		"herald_intel": {
+			"known_routes": {},      # route_key -> observation_count
+			"last_detected": {},     # entity_id -> {position, velocity, time}
+			"activity_zones": {}     # zone_id -> activity_level (0-1)
+		},
+
+		# Events that occurred this tick (cleared each tick, used for signal emission)
+		"tick_events": {
+			"intercepts": [],        # [{pursuer_id, target_id, souls_lost}]
+			"detections": [],        # [{entity_id, position}]
+			"arrivals": []           # [{entity_id, zone_id}]
+		},
+
 		"event_log": [],
 		"game_over": false,
 		"victory_tier": VictoryTier.ANNIHILATION

@@ -336,6 +336,7 @@ static func create_colony_state(overrides: Dictionary = {}) -> Dictionary:
 	var state = {
 		# Time
 		"current_year": 1,
+		"current_week": 1,  # Week within the year (1-52)
 		"current_month": 1,
 		"total_sols": 0,
 		"colony_phase": ColonyPhase.ACT_1_FOUNDERS,
@@ -735,6 +736,55 @@ static func get_building_definition(type: BuildingType) -> Dictionary:
 				"power_generation": 50.0,
 				"construction_years": 1,
 				"required_workers": 0,
+				"maintenance_cost": {"machine_parts": 1}
+			}
+		BuildingType.WATER_EXTRACTOR:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 20.0,
+				"construction_years": 1,
+				"required_workers": 1,
+				"produces": {"water": 400.0},  # 24 colonists × 20 = 480 water/yr needed
+				"maintenance_cost": {"machine_parts": 2}
+			}
+		BuildingType.WORKSHOP:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 30.0,
+				"construction_years": 1,
+				"required_workers": 3,
+				"produces": {"machine_parts": 20.0},
+				"consumes": {"building_materials": 15.0},
+				"maintenance_cost": {"machine_parts": 1}
+			}
+		BuildingType.FACTORY:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 60.0,
+				"construction_years": 2,
+				"required_workers": 6,
+				"produces": {"machine_parts": 50.0, "building_materials": 30.0},
+				"consumes": {"fuel": 10.0},
+				"maintenance_cost": {"machine_parts": 5}
+			}
+		BuildingType.HYDROPONICS:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 25.0,
+				"construction_years": 1,
+				"required_workers": 2,
+				"produces": {"food": 800.0},
+				"consumes": {"water": 30.0},
+				"maintenance_cost": {"machine_parts": 2}
+			}
+		BuildingType.OXYGENATOR:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 15.0,
+				"construction_years": 1,
+				"required_workers": 1,
+				"produces": {"oxygen": 200.0},
+				"consumes": {"water": 10.0},
 				"maintenance_cost": {"machine_parts": 1}
 			}
 		BuildingType.MEDICAL_BAY:

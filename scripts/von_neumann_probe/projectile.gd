@@ -5,6 +5,12 @@ extends Area2D
 const VnpTypes = preload("res://scripts/von_neumann_probe/vnp_types.gd")
 const ImpactFxScene = preload("res://scenes/von_neumann_probe/impact_fx.tscn")
 
+# Static cached textures (shared across all projectiles)
+static var _cached_glow_texture_small: GradientTexture2D = null
+static var _cached_glow_texture_medium: GradientTexture2D = null
+static var _active_particle_count: int = 0
+const MAX_ACTIVE_PARTICLES = 30  # Limit simultaneous particle effects
+
 # Core properties
 var team: int = -1
 var weapon_type: int = -1
@@ -35,11 +41,12 @@ var turbolaser_size: float = 12
 
 # State
 var is_ready: bool = false
+var active: bool = false  # For object pooling
 
 # Trail system (Line2D based)
 var trail_line: Line2D = null
 var trail_points: Array[Vector2] = []
-const MAX_TRAIL_POINTS = 15
+const MAX_TRAIL_POINTS = 8  # Shorter, more subtle trails
 
 # Resource tracking for cleanup (prevents texture leaks)
 var _trail_gradient: Gradient = null
@@ -48,6 +55,9 @@ var _glow_material: ParticleProcessMaterial = null
 
 
 func init(data: Dictionary):
+	# Reset state for pooling
+	_reset_state()
+
 	team = data.get("team", -1)
 	weapon_type = data.get("weapon_type", VnpTypes.WeaponType.GUN)
 	damage = data.get("damage", 10)
@@ -62,6 +72,71 @@ func init(data: Dictionary):
 	rotation = start_rot
 	direction = Vector2.RIGHT.rotated(start_rot)
 
+	active = true
+	visible = true
+	set_physics_process(true)
+
+	# Setup weapon-specific behavior
+	_setup_projectile(data)
+
+
+func _reset_state():
+	# Reset all state for pooling reuse
+	pierced_ships.clear()
+	arc_t = 0.0
+	is_ready = false
+	active = false
+	lifetime = 2.0
+
+	# Clear trail
+	trail_points.clear()
+	if trail_line and is_instance_valid(trail_line):
+		trail_line.clear_points()
+
+	# Remove any metadata
+	if has_meta("deflection_checked"):
+		remove_meta("deflection_checked")
+
+
+func deactivate():
+	# Return to pool instead of queue_free
+	active = false
+	visible = false
+	set_physics_process(false)
+	is_ready = false
+
+	# Clean up trail (it's added to scene root, not as child)
+	if trail_line and is_instance_valid(trail_line):
+		trail_line.gradient = null
+		trail_line.queue_free()
+		trail_line = null
+	trail_points.clear()
+
+	# Clean up any child visual elements and timers added during setup
+	for child in get_children():
+		if child.name == "RailGlow" or child.name == "TurboGlow":
+			child.queue_free()
+		elif child is Timer:
+			child.stop()
+			child.queue_free()
+
+	# Remove from missiles group if applicable
+	if is_in_group("missiles"):
+		remove_from_group("missiles")
+
+	# Move off-screen
+	global_position = Vector2(-9999, -9999)
+
+
+func _return_to_pool():
+	# Use pool if vnp_main exists, otherwise fallback to queue_free
+	if vnp_main and is_instance_valid(vnp_main):
+		vnp_main.return_projectile(self)
+	else:
+		queue_free()
+
+
+func _setup_projectile(data: Dictionary):
 	# Apply weapon-specific setup
 	match weapon_type:
 		VnpTypes.WeaponType.GUN:
@@ -90,11 +165,23 @@ func _setup_railgun():
 	lifetime = 1.5
 	max_pierces = 3
 
-	# Long thin slug shape
+	# Sharp elongated slug
 	$Polygon2D.polygon = PackedVector2Array([
-		Vector2(-12, -2), Vector2(12, -1), Vector2(14, 0), Vector2(12, 1), Vector2(-12, 2)
+		Vector2(-10, -2), Vector2(14, -1), Vector2(18, 0), Vector2(14, 1), Vector2(-10, 2)
 	])
-	_create_line_trail(4.0)
+
+	# Add a glow outline
+	var rail_color = VnpTypes.get_weapon_color(team, VnpTypes.WeaponType.GUN)
+	var glow = Line2D.new()
+	glow.name = "RailGlow"
+	glow.width = 4.0
+	glow.default_color = Color(rail_color.r, rail_color.g, rail_color.b, 0.4)
+	glow.add_point(Vector2(-10, 0))
+	glow.add_point(Vector2(18, 0))
+	glow.z_index = -1
+	add_child(glow)
+
+	_create_line_trail(2.0)
 
 
 func _setup_missile(data: Dictionary):
@@ -155,50 +242,58 @@ func _setup_turbolaser(data: Dictionary):
 		Vector2(-turbolaser_size, turbolaser_size * 0.4),
 	])
 
-	# Make the bolt glow bright
-	$Polygon2D.modulate = Color(1.5, 1.5, 1.5, 1.0)  # Overbright
+	# Make the bolt glow subtly bright
+	$Polygon2D.modulate = Color(1.2, 1.2, 1.2, 1.0)
 
-	# Thick bright trail
-	_create_line_trail(turbolaser_size * 0.8)
+	# Subtle trail
+	_create_line_trail(turbolaser_size * 0.4)
 
 	# Add a trailing glow effect
 	_create_turbolaser_glow()
 
 
 func _create_turbolaser_glow():
-	# Particle glow trailing behind the bolt
-	var glow = GPUParticles2D.new()
-	glow.name = "TurboGlow"
-	glow.amount = 30
-	glow.lifetime = 0.4
-	glow.emitting = true
-
-	_glow_material = ParticleProcessMaterial.new()
-	_glow_material.direction = Vector3(-1, 0, 0)
-	_glow_material.spread = 20.0
-	_glow_material.initial_velocity_min = 20.0
-	_glow_material.initial_velocity_max = 50.0
-	_glow_material.damping_min = 20.0
-	_glow_material.damping_max = 40.0
-	_glow_material.scale_min = 2.0
-	_glow_material.scale_max = 4.0
-
-	# Bright faction-colored glow
+	# Simple glow halo - no particles
 	var turbo_color = VnpTypes.get_weapon_color(team, VnpTypes.WeaponType.TURBOLASER)
-	var grad = Gradient.new()
-	grad.set_color(0, Color(turbo_color.r * 1.5, turbo_color.g * 1.5, turbo_color.b * 1.5, 0.9))
-	grad.set_color(1, Color(turbo_color.r, turbo_color.g, turbo_color.b, 0))
-	var tex = GradientTexture1D.new()
-	tex.gradient = grad
-	_glow_material.color_ramp = tex
 
-	glow.process_material = _glow_material
-	var mesh = QuadMesh.new()
-	mesh.size = Vector2(8, 8)
-	glow.draw_pass_1 = mesh
-	glow.position = Vector2(-turbolaser_size, 0)
-
+	# Outer glow ring
+	var glow = Line2D.new()
+	glow.name = "TurboGlow"
+	glow.width = turbolaser_size * 0.8
+	glow.default_color = Color(turbo_color.r, turbo_color.g, turbo_color.b, 0.3)
+	var points = []
+	for i in range(9):
+		var angle = i * (PI * 2 / 8)
+		points.append(Vector2(cos(angle), sin(angle)) * turbolaser_size * 0.6)
+	glow.points = PackedVector2Array(points)
+	glow.z_index = -1
 	add_child(glow)
+
+
+func _create_glow_texture(radius: float) -> GradientTexture2D:
+	# Use cached textures to avoid creating new ones constantly
+	if radius <= 2.0:
+		if _cached_glow_texture_small == null:
+			_cached_glow_texture_small = _make_glow_texture(2.5)
+		return _cached_glow_texture_small
+	else:
+		if _cached_glow_texture_medium == null:
+			_cached_glow_texture_medium = _make_glow_texture(4.0)
+		return _cached_glow_texture_medium
+
+
+static func _make_glow_texture(radius: float) -> GradientTexture2D:
+	var texture = GradientTexture2D.new()
+	texture.width = int(radius * 4)
+	texture.height = int(radius * 4)
+	texture.fill = GradientTexture2D.FILL_RADIAL
+	texture.fill_from = Vector2(0.5, 0.5)
+	texture.fill_to = Vector2(0.5, 0.0)
+	var gradient = Gradient.new()
+	gradient.set_color(0, Color.WHITE)
+	gradient.set_color(1, Color(1, 1, 1, 0))
+	texture.gradient = gradient
+	return texture
 
 
 func _create_line_trail(width: float):
@@ -241,40 +336,8 @@ func _update_trail():
 
 
 func _create_smoke_trail():
-	var smoke = GPUParticles2D.new()
-	smoke.name = "SmokeTrail"
-	smoke.amount = 20  # Fewer particles for sleeker missiles
-	smoke.lifetime = 0.4  # Shorter trail
-	smoke.emitting = true
-
-	_smoke_material = ParticleProcessMaterial.new()
-	_smoke_material.direction = Vector3(-1, 0, 0)
-	_smoke_material.spread = 15.0
-	_smoke_material.initial_velocity_min = 30.0
-	_smoke_material.initial_velocity_max = 60.0
-	_smoke_material.gravity = Vector3(0, -10, 0)
-	_smoke_material.damping_min = 15.0
-	_smoke_material.damping_max = 25.0
-	_smoke_material.scale_min = 0.8
-	_smoke_material.scale_max = 1.8
-
-	# Use team-colored exhaust
-	var exhaust_color = VnpTypes.get_weapon_color(team, VnpTypes.WeaponType.MISSILE)
-	var grad = Gradient.new()
-	grad.set_color(0, exhaust_color.lightened(0.4))
-	grad.add_point(0.3, exhaust_color)
-	grad.set_color(1, Color(0.3, 0.3, 0.3, 0.0))
-	var grad_tex = GradientTexture1D.new()
-	grad_tex.gradient = grad
-	_smoke_material.color_ramp = grad_tex
-
-	smoke.process_material = _smoke_material
-	var mesh = QuadMesh.new()
-	mesh.size = Vector2(4, 4)  # Smaller particles
-	smoke.draw_pass_1 = mesh
-	smoke.position = Vector2(-8, 0)
-
-	add_child(smoke)
+	# Simple line trail for missiles - same as other weapons
+	_create_line_trail(3.0)
 
 
 func _start_lifetime_timer():
@@ -289,7 +352,7 @@ func _start_lifetime_timer():
 func _on_lifetime_expired():
 	if weapon_type == VnpTypes.WeaponType.MISSILE:
 		_explode()
-	queue_free()
+	_return_to_pool()
 
 
 func _ready():
@@ -342,7 +405,7 @@ func _move_railgun(delta):
 func _move_missile(delta):
 	var store = _get_store()
 	if not store:
-		queue_free()
+		_return_to_pool()
 		return
 
 	var state = store.get_state()
@@ -357,7 +420,7 @@ func _move_missile(delta):
 
 	if arc_t >= 1.0:
 		_explode()
-		queue_free()
+		_return_to_pool()
 		return
 
 	# Quadratic bezier
@@ -374,7 +437,7 @@ func _move_missile(delta):
 	# Check arrival
 	if global_position.distance_to(arc_target) < 35:
 		_explode()
-		queue_free()
+		_return_to_pool()
 
 
 func _move_turbolaser(delta):
@@ -394,10 +457,10 @@ func _on_area_entered(area):
 			_hit_railgun(ship)
 		VnpTypes.WeaponType.MISSILE:
 			_explode()
-			queue_free()
+			_return_to_pool()
 		VnpTypes.WeaponType.TURBOLASER:
 			_hit_turbolaser(ship)
-			queue_free()
+			_return_to_pool()
 
 
 func _hit_railgun(ship):
@@ -417,7 +480,7 @@ func _hit_railgun(ship):
 	_spawn_impact(global_position, 0.5)
 
 	if pierced_ships.size() >= max_pierces:
-		queue_free()
+		_return_to_pool()
 
 
 func _hit_turbolaser(ship):
@@ -530,9 +593,20 @@ func _explode():
 
 
 func _spawn_explosion_particles(parent, amount, life, vel_min, vel_max, scale_min, scale_max, color_start, color_end):
+	# Rate limit particle effects to prevent performance issues
+	if _active_particle_count >= MAX_ACTIVE_PARTICLES:
+		return  # Skip this effect
+
+	_active_particle_count += 1
+
+	# Reduce particle count when many effects active
+	var actual_amount = amount
+	if _active_particle_count > MAX_ACTIVE_PARTICLES / 2:
+		actual_amount = max(5, amount / 2)
+
 	var particles = GPUParticles2D.new()
 	particles.global_position = global_position
-	particles.amount = amount
+	particles.amount = actual_amount
 	particles.lifetime = life
 	particles.one_shot = true
 	particles.explosiveness = 1.0
@@ -557,14 +631,13 @@ func _spawn_explosion_particles(parent, amount, life, vel_min, vel_max, scale_mi
 	mat.color_ramp = tex
 
 	particles.process_material = mat
-	var mesh = QuadMesh.new()
-	mesh.size = Vector2(5, 5)
-	particles.draw_pass_1 = mesh
+	particles.texture = _create_glow_texture(2.5)
 
 	parent.add_child(particles)
 
 	# Cleanup - free material and texture to prevent leaks
 	get_tree().create_timer(life + 0.5).timeout.connect(func():
+		_active_particle_count = max(0, _active_particle_count - 1)
 		if is_instance_valid(particles):
 			# Clear references before freeing to prevent texture leaks
 			if particles.process_material != null:
@@ -711,45 +784,20 @@ func _spawn_deflection_trail(new_direction: Vector2):
 	tween.tween_property(trail, "modulate:a", 0.0, 0.4)
 	tween.tween_callback(func(): trail.queue_free())
 
-	# Sparks at deflection point
-	var sparks = GPUParticles2D.new()
-	sparks.global_position = global_position
-	sparks.amount = 12
-	sparks.lifetime = 0.25
-	sparks.one_shot = true
-	sparks.explosiveness = 1.0
-	sparks.emitting = true
+	# Small deflection ring (no GPU particles for performance)
+	var ring = Line2D.new()
+	ring.global_position = global_position
+	ring.width = 3.0
+	ring.default_color = Color(0.8, 0.6, 1.0, 0.8)
+	var ring_points = []
+	for i in range(9):
+		var angle = i * (PI * 2 / 8)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 6)
+	ring.points = PackedVector2Array(ring_points)
+	get_tree().root.add_child(ring)
 
-	var mat = ParticleProcessMaterial.new()
-	mat.direction = Vector3(new_direction.x, new_direction.y, 0)
-	mat.spread = 45.0
-	mat.initial_velocity_min = 100.0
-	mat.initial_velocity_max = 200.0
-	mat.scale_min = 1.0
-	mat.scale_max = 2.0
-
-	# Purple-tinted sparks from gravity interaction
-	var grad = Gradient.new()
-	grad.set_color(0, Color(0.8, 0.6, 1.0, 1.0))
-	grad.set_color(1, Color(0.4, 0.2, 0.6, 0.0))
-	var tex = GradientTexture1D.new()
-	tex.gradient = grad
-	mat.color_ramp = tex
-
-	sparks.process_material = mat
-	var spark_mesh = QuadMesh.new()
-	spark_mesh.size = Vector2(3, 3)
-	sparks.draw_pass_1 = spark_mesh
-
-	get_tree().root.add_child(sparks)
-
-	# Cleanup - free material and texture to prevent leaks
-	get_tree().create_timer(0.5).timeout.connect(func():
-		if is_instance_valid(sparks):
-			if sparks.process_material != null:
-				var m = sparks.process_material as ParticleProcessMaterial
-				if m != null and m.color_ramp != null:
-					m.color_ramp = null
-				sparks.process_material = null
-			sparks.queue_free()
-	)
+	var ring_tween = get_tree().create_tween()
+	ring_tween.set_parallel(true)
+	ring_tween.tween_property(ring, "scale", Vector2(4, 4), 0.2)
+	ring_tween.tween_property(ring, "modulate:a", 0.0, 0.2)
+	ring_tween.tween_callback(func(): ring.queue_free())

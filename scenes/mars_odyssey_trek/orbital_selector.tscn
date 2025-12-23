@@ -1,0 +1,154 @@
+[gd_scene load_steps=2 format=3 uid="uid://cjk7x2qr5m8yl"]
+
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/orbital_selector.gd" id="1_orbital"]
+
+[node name="OrbitalSelector" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_orbital")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.05, 0.05, 0.1, 1)
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="MainLayout" type="HBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="LeftPanel" type="VBoxContainer" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 2.0
+theme_override_constants/separation = 15
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainLayout/LeftPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "LAUNCH WINDOW SELECTION"
+horizontal_alignment = 1
+
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainLayout/LeftPanel"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "Choose when to depart for Mars"
+horizontal_alignment = 1
+
+[node name="SolarViewContainer" type="PanelContainer" parent="MarginContainer/MainLayout/LeftPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SolarView" type="Control" parent="MarginContainer/MainLayout/LeftPanel/SolarViewContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(400, 400)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="TimelineLabel" type="Label" parent="MarginContainer/MainLayout/LeftPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Launch Windows"
+
+[node name="TimelineScroll" type="ScrollContainer" parent="MarginContainer/MainLayout/LeftPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_stretch_ratio = 0.3
+horizontal_scroll_mode = 3
+vertical_scroll_mode = 0
+
+[node name="TimelineContainer" type="HBoxContainer" parent="MarginContainer/MainLayout/LeftPanel/TimelineScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="RightPanel" type="VBoxContainer" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 15
+
+[node name="InfoPanel" type="PanelContainer" parent="MarginContainer/MainLayout/RightPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="InfoContent" type="VBoxContainer" parent="MarginContainer/MainLayout/RightPanel/InfoPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/MainLayout/RightPanel/InfoPanel/InfoContent"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Select a Launch Window"
+
+[node name="Separator1" type="HSeparator" parent="MarginContainer/MainLayout/RightPanel/InfoPanel/InfoContent"]
+layout_mode = 2
+
+[node name="DetailsLabel" type="Label" parent="MarginContainer/MainLayout/RightPanel/InfoPanel/InfoContent"]
+layout_mode = 2
+text = "Click on a window in the timeline
+or use LAUNCH NOW for immediate departure"
+
+[node name="Separator2" type="HSeparator" parent="MarginContainer/MainLayout/RightPanel/InfoPanel/InfoContent"]
+layout_mode = 2
+
+[node name="EducationalLabel" type="Label" parent="MarginContainer/MainLayout/RightPanel/InfoPanel/InfoContent"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_colors/font_color = Color(0.6, 0.7, 0.8, 1)
+theme_override_font_sizes/font_size = 12
+text = "Hohmann Transfer Orbit
+
+A Hohmann transfer is the most fuel-efficient
+way to travel between two circular orbits.
+The spacecraft follows an elliptical path
+that touches both Earth's and Mars's orbits.
+
+Optimal launch windows occur when Mars is
+approximately 44 degrees ahead of Earth."
+autowrap_mode = 2
+
+[node name="ButtonsContainer" type="VBoxContainer" parent="MarginContainer/MainLayout/RightPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LaunchNowButton" type="Button" parent="MarginContainer/MainLayout/RightPanel/ButtonsContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 60)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "LAUNCH NOW
+(10 day prep)"
+
+[node name="ConfirmButton" type="Button" parent="MarginContainer/MainLayout/RightPanel/ButtonsContainer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "CONFIRM WINDOW"
+
+[node name="AnimateButton" type="Button" parent="MarginContainer/MainLayout/RightPanel/ButtonsContainer"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Animate Orbits"

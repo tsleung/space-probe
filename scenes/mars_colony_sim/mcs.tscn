@@ -26,17 +26,17 @@ anchor_right = 1.0
 offset_left = 10.0
 offset_top = 5.0
 offset_right = -10.0
-offset_bottom = 35.0
-theme_override_constants/separation = 20
+offset_bottom = 45.0
+theme_override_constants/separation = 30
 
 [node name="TitleLabel" type="Label" parent="TopBar"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 24
 text = "MARS COLONY"
 
 [node name="PhaseLabel" type="Label" parent="TopBar"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 20
 text = "Era: Survival"
 
 [node name="Spacer" type="Control" parent="TopBar"]
@@ -45,17 +45,17 @@ size_flags_horizontal = 3
 
 [node name="YearLabel" type="Label" parent="TopBar"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 20
 text = "Year: 1"
 
 [node name="PopulationLabel" type="Label" parent="TopBar"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 20
 text = "Pop: 12"
 
 [node name="StabilityLabel" type="Label" parent="TopBar"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 20
 text = "Stability: 75%"
 
 [node name="MainContent" type="HBoxContainer" parent="."]
@@ -64,13 +64,13 @@ anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 10.0
-offset_top = 40.0
+offset_top = 50.0
 offset_right = -10.0
-offset_bottom = -45.0
+offset_bottom = -50.0
 theme_override_constants/separation = 10
 
 [node name="LeftPanel" type="VBoxContainer" parent="MainContent"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(260, 0)
 layout_mode = 2
 theme_override_constants/separation = 5
 
@@ -82,10 +82,10 @@ size_flags_vertical = 3
 layout_mode = 1
 offset_left = 5.0
 offset_top = 3.0
-offset_right = 100.0
-offset_bottom = 18.0
+offset_right = 150.0
+offset_bottom = 25.0
 text = "Resources"
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 16
 
 [node name="ResourceContainer" type="VBoxContainer" parent="MainContent/LeftPanel/ResourcePanel"]
 layout_mode = 1
@@ -93,22 +93,23 @@ anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 5.0
-offset_top = 20.0
+offset_top = 28.0
 offset_right = -5.0
 offset_bottom = -5.0
+theme_override_constants/separation = 4
 
 [node name="BuildingPanel" type="Panel" parent="MainContent/LeftPanel"]
-custom_minimum_size = Vector2(0, 120)
+custom_minimum_size = Vector2(0, 320)
 layout_mode = 2
 
 [node name="Label" type="Label" parent="MainContent/LeftPanel/BuildingPanel"]
 layout_mode = 1
 offset_left = 5.0
 offset_top = 3.0
-offset_right = 100.0
-offset_bottom = 18.0
+offset_right = 150.0
+offset_bottom = 25.0
 text = "Buildings"
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 16
 
 [node name="BuildingList" type="ItemList" parent="MainContent/LeftPanel/BuildingPanel"]
 layout_mode = 1
@@ -116,9 +117,11 @@ anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 5.0
-offset_top = 20.0
+offset_top = 28.0
 offset_right = -5.0
-offset_bottom = -25.0
+offset_bottom = -60.0
+theme_override_font_sizes/font_size = 14
+auto_height = true
 
 [node name="BuildButton" type="Button" parent="MainContent/LeftPanel/BuildingPanel"]
 layout_mode = 1
@@ -127,23 +130,35 @@ anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 5.0
-offset_top = -22.0
-offset_right = -55.0
-offset_bottom = -3.0
+offset_top = -50.0
+offset_right = -5.0
+offset_bottom = -28.0
 text = "Build"
 
 [node name="RepairButton" type="Button" parent="MainContent/LeftPanel/BuildingPanel"]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 5.0
+offset_top = -25.0
+offset_right = -80.0
+offset_bottom = -3.0
+text = "Repair"
+
+[node name="AutoRepairButton" type="Button" parent="MainContent/LeftPanel/BuildingPanel"]
 layout_mode = 1
 anchors_preset = 3
 anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -50.0
-offset_top = -22.0
+offset_left = -75.0
+offset_top = -25.0
 offset_right = -5.0
 offset_bottom = -3.0
-text = "Repair"
+text = "Auto Repair"
 
 [node name="CenterPanel" type="VBoxContainer" parent="MainContent"]
 layout_mode = 2
@@ -155,17 +170,14 @@ layout_mode = 2
 size_flags_vertical = 3
 
 [node name="MCSView" type="Control" parent="MainContent/CenterPanel/MCSViewPanel"]
-custom_minimum_size = Vector2(512, 512)
 layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -256.0
-offset_top = -256.0
-offset_right = 256.0
-offset_bottom = 256.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 5.0
+offset_top = 5.0
+offset_right = -5.0
+offset_bottom = -5.0
 script = ExtResource("2_view")
 
 [node name="PopulationPanel" type="Panel" parent="MainContent/CenterPanel"]
@@ -268,34 +280,40 @@ layout_mode = 2
 layout_mode = 1
 offset_left = 5.0
 offset_top = 3.0
-offset_right = 100.0
-offset_bottom = 18.0
+offset_right = 150.0
+offset_bottom = 25.0
 text = "Active Event"
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 16
 
 [node name="EventTitle" type="Label" parent="MainContent/RightPanel/EventPanel"]
 layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
 offset_left = 5.0
-offset_top = 22.0
-offset_right = 270.0
-offset_bottom = 38.0
+offset_top = 28.0
+offset_right = -5.0
+offset_bottom = 50.0
 text = "No active event"
-theme_override_font_sizes/font_size = 13
+theme_override_font_sizes/font_size = 16
 
 [node name="EventDescription" type="RichTextLabel" parent="MainContent/RightPanel/EventPanel"]
 layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
 offset_left = 5.0
 offset_top = 40.0
-offset_right = 270.0
+offset_right = -5.0
 offset_bottom = 95.0
 bbcode_enabled = true
 text = "Events will appear here when they occur."
 
 [node name="ChoiceContainer" type="VBoxContainer" parent="MainContent/RightPanel/EventPanel"]
 layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
 offset_left = 5.0
 offset_top = 98.0
-offset_right = 270.0
+offset_right = -5.0
 offset_bottom = 135.0
 
 [node name="LogPanel" type="Panel" parent="MainContent/RightPanel"]
@@ -306,10 +324,10 @@ size_flags_vertical = 3
 layout_mode = 1
 offset_left = 5.0
 offset_top = 3.0
-offset_right = 100.0
-offset_bottom = 18.0
+offset_right = 150.0
+offset_bottom = 25.0
 text = "Chronicle"
-theme_override_font_sizes/font_size = 12
+theme_override_font_sizes/font_size = 16
 
 [node name="ColonyLog" type="RichTextLabel" parent="MainContent/RightPanel/LogPanel"]
 layout_mode = 1
@@ -317,11 +335,12 @@ anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 5.0
-offset_top = 20.0
+offset_top = 28.0
 offset_right = -5.0
 offset_bottom = -5.0
 bbcode_enabled = true
 scroll_following = true
+theme_override_font_sizes/normal_font_size = 14
 
 [node name="BottomBar" type="HBoxContainer" parent="."]
 layout_mode = 1
@@ -383,15 +402,15 @@ popup/item_3/text = "Cautious"
 popup/item_3/id = 3
 
 [node name="SpeedSlider" type="HSlider" parent="BottomBar"]
-custom_minimum_size = Vector2(80, 0)
+custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
 min_value = 1.0
-max_value = 10.0
-value = 2.0
+max_value = 50.0
+value = 3.0
 
 [node name="SpeedLabel" type="Label" parent="BottomBar"]
 layout_mode = 2
-text = "2x"
+text = "3x"
 
 [node name="SaveButton" type="Button" parent="BottomBar"]
 visible = false

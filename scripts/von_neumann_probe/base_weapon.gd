@@ -56,16 +56,29 @@ func _fire_arc_storm():
 	var max_range = _get_scaled_range()
 	var scaled_damage = _get_scaled_damage()
 
-	# Find all enemies in range
+	print("[ARC STORM] Firing with %d charges, range: %.0f, from base at %s" % [charge_count, max_range, base_position])
+
+	# Find all enemies in range - use REAL ship node positions, not stale state
 	var enemies_in_range = []
+	var total_enemies = 0
 	for ship_id in state.ships:
-		var ship = state.ships[ship_id]
-		if ship.team != team:
-			var dist = ship.position.distance_to(base_position)
+		var ship_data = state.ships[ship_id]
+		if ship_data.team != team:
+			total_enemies += 1
+			# Get real position from ship node if available
+			var ship_pos = ship_data.position  # Fallback to state position
+			if vnp_main and vnp_main.ship_nodes.has(ship_id):
+				var ship_node = vnp_main.ship_nodes[ship_id]
+				if is_instance_valid(ship_node):
+					ship_pos = ship_node.global_position
+			var dist = ship_pos.distance_to(base_position)
 			if dist <= max_range:
-				enemies_in_range.append({"id": ship_id, "pos": ship.position, "dist": dist})
+				enemies_in_range.append({"id": ship_id, "pos": ship_pos, "dist": dist})
+
+	print("[ARC STORM] Found %d enemies total, %d in range" % [total_enemies, enemies_in_range.size()])
 
 	if enemies_in_range.is_empty():
+		print("[ARC STORM] No enemies in range! Closest enemy might be too far.")
 		queue_free()
 		return
 
@@ -374,9 +387,15 @@ func _spawn_hellstorm_meteor(impact_pos: Vector2, delay: float, damage: float, h
 	var impact_radius = 60.0 + charge_count * 10
 	var world_impact = base_position + impact_pos
 	for ship_id in state.ships:
-		var ship = state.ships[ship_id]
-		if ship.team != team:
-			var dist = ship.position.distance_to(world_impact)
+		var ship_data = state.ships[ship_id]
+		if ship_data.team != team:
+			# Get real position from ship node (state may be stale)
+			var ship_pos = ship_data.position
+			if vnp_main and vnp_main.ship_nodes.has(ship_id):
+				var ship_node = vnp_main.ship_nodes[ship_id]
+				if is_instance_valid(ship_node):
+					ship_pos = ship_node.global_position
+			var dist = ship_pos.distance_to(world_impact)
 			if dist < impact_radius:
 				var falloff = 1.0 - (dist / impact_radius) * 0.5
 				store.dispatch({
@@ -521,9 +540,15 @@ func _fire_void_tear():
 		var current_state = store.get_state()
 		var world_target = base_position + local_target
 		for ship_id in current_state.ships:
-			var ship = current_state.ships[ship_id]
-			if ship.team != team:
-				var dist = ship.position.distance_to(world_target)
+			var ship_data = current_state.ships[ship_id]
+			if ship_data.team != team:
+				# Get real position from ship node (state may be stale)
+				var ship_pos = ship_data.position
+				if vnp_main and vnp_main.ship_nodes.has(ship_id):
+					var ship_node = vnp_main.ship_nodes[ship_id]
+					if is_instance_valid(ship_node):
+						ship_pos = ship_node.global_position
+				var dist = ship_pos.distance_to(world_target)
 				if dist < damage_radius:
 					var falloff = 1.0 - (dist / damage_radius) * 0.4
 					store.dispatch({
@@ -698,11 +723,17 @@ func _void_tear_implosion(container: Node2D, pos: Vector2, height: float, pull_l
 func _find_enemy_cluster_in_range(state, max_range: float) -> Vector2:
 	var enemy_positions = []
 	for ship_id in state.ships:
-		var ship = state.ships[ship_id]
-		if ship.team != team:
-			var dist = ship.position.distance_to(base_position)
+		var ship_data = state.ships[ship_id]
+		if ship_data.team != team:
+			# Get real position from ship node if available (state positions may be stale)
+			var ship_pos = ship_data.position  # Fallback
+			if vnp_main and vnp_main.ship_nodes.has(ship_id):
+				var ship_node = vnp_main.ship_nodes[ship_id]
+				if is_instance_valid(ship_node):
+					ship_pos = ship_node.global_position
+			var dist = ship_pos.distance_to(base_position)
 			if dist <= max_range:
-				enemy_positions.append(ship.position)
+				enemy_positions.append(ship_pos)
 
 	if enemy_positions.is_empty():
 		return Vector2.ZERO

@@ -1,0 +1,136 @@
+[gd_scene load_steps=2 format=3 uid="uid://cmotcrewsel"]
+
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/crew_selector.gd" id="1_crew"]
+
+[node name="CrewSelector" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_crew")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.06, 0.06, 0.1, 1)
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 15
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 15
+
+[node name="MainLayout" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Header" type="HBoxContainer" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="TitleContainer" type="VBoxContainer" parent="MarginContainer/MainLayout/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TitleHeader" type="Label" parent="MarginContainer/MainLayout/Header/TitleContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 24
+text = "CREW SELECTION"
+
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainLayout/Header/TitleContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "Pick 4 specialists for your mission"
+
+[node name="CrewCountLabel" type="Label" parent="MarginContainer/MainLayout/Header"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Crew: 0 / 4"
+
+[node name="SelectedPanel" type="HBoxContainer" parent="MarginContainer/MainLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(0, 70)
+theme_override_constants/separation = 15
+alignment = 1
+
+[node name="Separator" type="HSeparator" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+
+[node name="RosterScroll" type="ScrollContainer" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="RosterGrid" type="GridContainer" parent="MarginContainer/MainLayout/RosterScroll"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 10
+theme_override_constants/v_separation = 10
+columns = 5
+
+[node name="DetailsPanel" type="PanelContainer" parent="MarginContainer/MainLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(0, 100)
+
+[node name="DetailsContent" type="MarginContainer" parent="MarginContainer/MainLayout/DetailsPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 12
+
+[node name="VBox" type="VBoxContainer" parent="MarginContainer/MainLayout/DetailsPanel/DetailsContent"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="DetailName" type="Label" parent="MarginContainer/MainLayout/DetailsPanel/DetailsContent/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Hover over a crew member"
+
+[node name="DetailRole" type="Label" parent="MarginContainer/MainLayout/DetailsPanel/DetailsContent/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.7, 0.8, 1)
+theme_override_font_sizes/font_size = 12
+text = ""
+
+[node name="DetailBackground" type="Label" parent="MarginContainer/MainLayout/DetailsPanel/DetailsContent/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+theme_override_font_sizes/font_size = 12
+text = "Click to see their background and traits"
+autowrap_mode = 2
+
+[node name="DetailTrait" type="Label" parent="MarginContainer/MainLayout/DetailsPanel/DetailsContent/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.5, 1)
+theme_override_font_sizes/font_size = 11
+text = ""
+autowrap_mode = 2
+
+[node name="DetailStats" type="Label" parent="MarginContainer/MainLayout/DetailsPanel/DetailsContent/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.6, 0.7, 1)
+theme_override_font_sizes/font_size = 11
+text = ""

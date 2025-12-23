@@ -20,6 +20,7 @@ See `docs/` for detailed specs:
 - `docs/architecture/refactor-plan.md` - Architecture migration plan
 - `docs/principles/engineering-principles.md` - Coding principles
 - `docs/principles/llm-development.md` - LLM collaboration guidelines
+- `docs/principles/godot-performance.md` - Godot performance best practices
 - `docs/projects/` - Phase completion documentation
 - `docs/projects/vnp-game-design.md` - VNP game mechanics and design
 
@@ -172,6 +173,20 @@ var new_state = reducer.reduce(state, action, balance, rng)
 static func apply_daily_update(state, balance, rng: RNGManager) -> Dictionary:
     var roll = rng.randf()  # Deterministic with seed
 ```
+
+### Godot Performance (Summary)
+
+See `docs/principles/godot-performance.md` for full details. Key rules:
+
+1. **Nodes own their data** - Positions/velocities live on Node2D, not in state dictionaries
+2. **Cache everything** - `@onready` for node refs, cache targets with cooldown timers
+3. **Avoid O(N²)** - Use Area2D signals instead of iterating all entities
+4. **Pool high-frequency objects** - Projectiles yes, ships no
+5. **Profile first** - Use Godot's built-in profiler before optimizing
+
+**Use state management for:** Team resources, game phase, player choices, save/load data
+
+**Don't put in state:** Entity positions, velocities, transient combat data (targets, cooldowns)
 
 ### Game-Specific Code
 

@@ -10,6 +10,13 @@ class_name MCSStore
 ##
 ## Think of this like a Redux store - it holds state and dispatches actions
 
+# Preload dependencies
+const _MCSTypes = preload("res://scripts/mars_colony_sim/mcs_types.gd")
+const _MCSReducer = preload("res://scripts/mars_colony_sim/mcs_reducer.gd")
+const _MCSPopulation = preload("res://scripts/mars_colony_sim/mcs_population.gd")
+const _MCSEconomy = preload("res://scripts/mars_colony_sim/mcs_economy.gd")
+const _MCSEvents = preload("res://scripts/mars_colony_sim/mcs_events.gd")
+
 # ============================================================================
 # SIGNALS (for UI reactivity)
 # ============================================================================
@@ -34,7 +41,7 @@ signal game_ended(is_victory: bool, reason: String)
 # STATE
 # ============================================================================
 
-var _state: Dictionary = MCSTypes.create_colony_state()
+var _state: Dictionary = _MCSTypes.create_colony_state()
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # ============================================================================
@@ -44,7 +51,7 @@ var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 func _init():
 	# Ensure state is initialized immediately (not waiting for _ready)
 	if _state.is_empty():
-		_state = MCSTypes.create_colony_state()
+		_state = _MCSTypes.create_colony_state()
 
 func _ready():
 	pass  # State already initialized in _init
@@ -64,7 +71,7 @@ func get_phase() -> int:
 	return _state.get("colony_phase", 0)
 
 func get_phase_name() -> String:
-	return MCSTypes.get_phase_name(_state.get("colony_phase", 0))
+	return _MCSTypes.get_phase_name(_state.get("colony_phase", 0))
 
 func get_colonists() -> Array:
 	return _state.get("colonists", []).duplicate(true)
@@ -73,7 +80,7 @@ func get_colonist_count() -> int:
 	return _state.get("colonists", []).size()
 
 func get_workforce() -> Array:
-	return MCSPopulation.get_workforce(_state.get("colonists", []))
+	return _MCSPopulation.get_workforce(_state.get("colonists", []))
 
 func get_buildings() -> Array:
 	return _state.get("buildings", []).duplicate(true)
@@ -89,7 +96,7 @@ func get_resources() -> Dictionary:
 	return _state.get("resources", {}).duplicate(true)
 
 func get_resource(resource_type: int) -> float:
-	var res_name = MCSTypes.get_resource_name(resource_type)
+	var res_name = _MCSTypes.get_resource_name(resource_type)
 	return _state.get("resources", {}).get(res_name, 0.0)
 
 func get_political() -> Dictionary:
@@ -119,7 +126,7 @@ func is_independent() -> bool:
 
 func dispatch(action: Dictionary) -> void:
 	var old_state = _state
-	_state = MCSReducer.reduce(_state, action)
+	_state = _MCSReducer.reduce(_state, action)
 
 	# Emit appropriate signals based on what changed
 	_emit_change_signals(old_state, _state, action)
@@ -138,26 +145,26 @@ func dispatch_with_random(action: Dictionary, random_count: int = 50) -> void:
 # HIGH-LEVEL ACTIONS (convenience methods that dispatch)
 # ============================================================================
 
-func start_new_colony(founder_count: int = 12) -> void:
+func start_new_colony(founder_count: int = 24) -> void:
 	_rng.seed = int(Time.get_unix_time_from_system())
 
 	# Create founding colonists
 	var founders: Array = []
 	for i in range(founder_count):
-		var colonist = MCSTypes.create_colonist()
+		var colonist = _MCSTypes.create_colonist()
 		colonist.id = "founder_%03d" % i
-		colonist.generation = MCSTypes.Generation.EARTH_BORN
+		colonist.generation = _MCSTypes.Generation.EARTH_BORN
 		colonist.age = 25 + _rng.randi_range(0, 15)
-		colonist.life_stage = MCSTypes.LifeStage.ADULT
+		colonist.life_stage = _MCSTypes.LifeStage.ADULT
 
 		# Assign specialties (ensure coverage)
 		var specialty_pool = [
-			MCSTypes.Specialty.ENGINEER,
-			MCSTypes.Specialty.SCIENTIST,
-			MCSTypes.Specialty.MEDIC,
-			MCSTypes.Specialty.FARMER,
-			MCSTypes.Specialty.PILOT,
-			MCSTypes.Specialty.ADMINISTRATOR
+			_MCSTypes.Specialty.ENGINEER,
+			_MCSTypes.Specialty.SCIENTIST,
+			_MCSTypes.Specialty.MEDIC,
+			_MCSTypes.Specialty.FARMER,
+			_MCSTypes.Specialty.PILOT,
+			_MCSTypes.Specialty.ADMINISTRATOR
 		]
 		colonist.specialty = specialty_pool[i % specialty_pool.size()]
 
@@ -165,16 +172,16 @@ func start_new_colony(founder_count: int = 12) -> void:
 		colonist.display_name = _generate_name(colonist, i)
 
 		# Random traits
-		var trait_pool = MCSTypes.ColonistTrait.values()
+		var trait_pool = _MCSTypes.ColonistTrait.values()
 		colonist.traits.append(trait_pool[_rng.randi() % trait_pool.size()])
 
 		# Random faction leaning
-		var faction_pool = MCSTypes.Faction.values()
+		var faction_pool = _MCSTypes.Faction.values()
 		colonist.faction = faction_pool[_rng.randi() % faction_pool.size()]
 
 		founders.append(colonist)
 
-	dispatch(MCSReducer.action_start_new_colony(founders, _rng.seed))
+	dispatch(_MCSReducer.action_start_new_colony(founders, _rng.seed))
 
 func advance_year() -> void:
 	if is_game_over():
@@ -182,51 +189,74 @@ func advance_year() -> void:
 
 	# Generate random values for the year
 	var random_count = _state.get("colonists", []).size() * 10 + 50
-	dispatch_with_random(MCSReducer.action_advance_year([]), random_count)
+	dispatch_with_random(_MCSReducer.action_advance_year([]), random_count)
 
 	# Check for events
 	_check_yearly_events()
 
 	# Check victory/loss conditions
-	dispatch(MCSReducer.action_check_victory())
+	dispatch(_MCSReducer.action_check_victory())
+
+func advance_week() -> void:
+	"""Advance simulation by one week - more granular ticks for better feedback"""
+	if is_game_over():
+		return
+
+	# Generate random values for the week
+	var colonist_count = _state.get("colonists", []).size()
+	var building_count = _state.get("buildings", []).size()
+	var random_count = colonist_count * 6 + building_count + 30
+
+	var old_year = _state.get("current_year", 1)
+	dispatch_with_random(_MCSReducer.action_advance_week([]), random_count)
+	var new_year = _state.get("current_year", 1)
+
+	# If year changed (week 52 → week 1), do yearly events
+	if new_year != old_year:
+		year_advanced.emit(new_year)
+		_check_yearly_events()
+		dispatch(_MCSReducer.action_check_victory())
+
+func get_week() -> int:
+	return _state.get("current_week", 1)
 
 func start_construction(building_type: int) -> bool:
 	var old_count = _state.get("buildings", []).size()
-	dispatch(MCSReducer.action_start_construction(building_type))
+	dispatch(_MCSReducer.action_start_construction(building_type))
 	return _state.get("buildings", []).size() > old_count
 
 func complete_construction(building_id: String) -> void:
-	dispatch(MCSReducer.action_complete_construction(building_id))
+	dispatch(_MCSReducer.action_complete_construction(building_id))
 
 func demolish_building(building_id: String) -> void:
-	dispatch(MCSReducer.action_demolish_building(building_id))
+	dispatch(_MCSReducer.action_demolish_building(building_id))
 
 func repair_building(building_id: String) -> void:
-	dispatch(MCSReducer.action_repair_building(building_id))
+	dispatch(_MCSReducer.action_repair_building(building_id))
 
 func assign_worker(colonist_id: String, building_id: String) -> void:
-	dispatch(MCSReducer.action_assign_worker(colonist_id, building_id))
+	dispatch(_MCSReducer.action_assign_worker(colonist_id, building_id))
 
 func unassign_worker(colonist_id: String) -> void:
-	dispatch(MCSReducer.action_unassign_worker(colonist_id))
+	dispatch(_MCSReducer.action_unassign_worker(colonist_id))
 
 func auto_assign_workers() -> void:
-	dispatch(MCSReducer.action_auto_assign_workers())
+	dispatch(_MCSReducer.action_auto_assign_workers())
 
 func hold_election() -> void:
-	dispatch_with_random(MCSReducer.action_hold_election([]), 20)
+	dispatch_with_random(_MCSReducer.action_hold_election([]), 20)
 
 func change_government(new_system: int) -> void:
-	dispatch(MCSReducer.action_change_government(new_system))
+	dispatch(_MCSReducer.action_change_government(new_system))
 
 func hold_independence_vote() -> void:
-	dispatch(MCSReducer.action_hold_independence_vote(_rng.randf()))
+	dispatch(_MCSReducer.action_hold_independence_vote(_rng.randf()))
 
 func resolve_event(event_id: String, choice_index: int) -> void:
-	dispatch(MCSReducer.action_resolve_event_choice(event_id, choice_index, _rng.randf()))
+	dispatch(_MCSReducer.action_resolve_event_choice(event_id, choice_index, _rng.randf()))
 
 func add_log(message: String, log_type: String = "info") -> void:
-	dispatch(MCSReducer.action_add_log(message, log_type))
+	dispatch(_MCSReducer.action_add_log(message, log_type))
 
 # ============================================================================
 # EVENT CHECKING (side effect: uses RNG)
@@ -234,13 +264,13 @@ func add_log(message: String, log_type: String = "info") -> void:
 
 func _check_yearly_events() -> void:
 	# Get eligible events for this year
-	var eligible = MCSEvents.get_eligible_events(_state)
+	var eligible = _MCSEvents.get_eligible_events(_state)
 
 	if eligible.is_empty():
 		return
 
 	# Select events for this year (usually 1-2)
-	var selected = MCSEvents.select_yearly_events(
+	var selected = _MCSEvents.select_yearly_events(
 		eligible,
 		_state,
 		_rng.randf(),
@@ -249,7 +279,7 @@ func _check_yearly_events() -> void:
 
 	# Trigger each selected event
 	for event in selected:
-		dispatch(MCSReducer.action_trigger_event(event))
+		dispatch(_MCSReducer.action_trigger_event(event))
 
 # ============================================================================
 # PROJECTIONS & CALCULATIONS (read-only)
@@ -261,8 +291,8 @@ func project_next_year() -> Dictionary:
 	var colonists = _state.get("colonists", [])
 	var resources = _state.get("resources", {})
 
-	var production = MCSEconomy.calc_yearly_production(buildings, colonists, resources)
-	var consumption = MCSEconomy.calc_yearly_consumption(colonists, buildings)
+	var production = _MCSEconomy.calc_yearly_production(buildings, colonists, resources)
+	var consumption = _MCSEconomy.calc_yearly_consumption(colonists, buildings)
 
 	var net: Dictionary = {}
 	for key in production.keys():
@@ -273,26 +303,26 @@ func project_next_year() -> Dictionary:
 		"consumption": consumption,
 		"net": net,
 		"food_surplus_years": resources.get("food", 0.0) / maxf(1, consumption.get("food", 1)),
-		"power_balance": MCSEconomy.calc_power_balance(buildings, colonists),
-		"housing_balance": MCSEconomy.calc_housing_balance(buildings, colonists)
+		"power_balance": _MCSEconomy.calc_power_balance(buildings, colonists),
+		"housing_balance": _MCSEconomy.calc_housing_balance(buildings, colonists)
 	}
 
 func get_building_efficiency(building_id: String) -> float:
 	var colonists = _state.get("colonists", [])
 	for building in _state.get("buildings", []):
 		if building.get("id", "") == building_id:
-			return MCSEconomy.calc_building_efficiency(building, colonists)
+			return _MCSEconomy.calc_building_efficiency(building, colonists)
 	return 0.0
 
 func get_colonist_effectiveness(colonist_id: String) -> float:
 	for colonist in _state.get("colonists", []):
 		if colonist.get("id", "") == colonist_id:
-			return MCSPopulation.calc_effectiveness(colonist)
+			return _MCSPopulation.calc_effectiveness(colonist)
 	return 0.0
 
 func get_faction_breakdown() -> Dictionary:
 	var counts: Dictionary = {}
-	for faction in MCSTypes.Faction.values():
+	for faction in _MCSTypes.Faction.values():
 		counts[faction] = 0
 
 	for colonist in _state.get("colonists", []):
@@ -303,7 +333,7 @@ func get_faction_breakdown() -> Dictionary:
 
 func get_generation_breakdown() -> Dictionary:
 	var counts: Dictionary = {}
-	for gen in MCSTypes.Generation.values():
+	for gen in _MCSTypes.Generation.values():
 		counts[gen] = 0
 
 	for colonist in _state.get("colonists", []):
@@ -353,11 +383,11 @@ func _emit_change_signals(old_state: Dictionary, new_state: Dictionary, action: 
 
 	# Action-specific signals
 	match action.get("type", -1):
-		MCSReducer.ActionType.START_CONSTRUCTION:
+		_MCSReducer.ActionType.START_CONSTRUCTION:
 			if new_buildings.size() > old_buildings.size():
 				building_constructed.emit(new_buildings[-1])
 
-		MCSReducer.ActionType.DEMOLISH_BUILDING:
+		_MCSReducer.ActionType.DEMOLISH_BUILDING:
 			for building in old_buildings:
 				var found = false
 				for b in new_buildings:
@@ -367,10 +397,10 @@ func _emit_change_signals(old_state: Dictionary, new_state: Dictionary, action: 
 				if not found:
 					building_demolished.emit(building)
 
-		MCSReducer.ActionType.TRIGGER_EVENT:
+		_MCSReducer.ActionType.TRIGGER_EVENT:
 			event_triggered.emit(action.get("event", {}))
 
-		MCSReducer.ActionType.RESOLVE_EVENT_CHOICE:
+		_MCSReducer.ActionType.RESOLVE_EVENT_CHOICE:
 			var outcome = ""
 			var old_resolved = old_state.get("resolved_events", [])
 			var new_resolved = new_state.get("resolved_events", [])
@@ -378,18 +408,18 @@ func _emit_change_signals(old_state: Dictionary, new_state: Dictionary, action: 
 				outcome = new_resolved[-1].get("outcome", "")
 			event_resolved.emit(action.get("event_id", ""), action.get("choice_index", 0), outcome)
 
-		MCSReducer.ActionType.HOLD_ELECTION:
+		_MCSReducer.ActionType.HOLD_ELECTION:
 			election_held.emit(new_state.get("politics", {}))
 
-		MCSReducer.ActionType.CHECK_VICTORY_CONDITIONS:
+		_MCSReducer.ActionType.CHECK_VICTORY_CONDITIONS:
 			if new_state.get("game_over", false) and not old_state.get("game_over", false):
 				game_ended.emit(new_state.get("victory", false), new_state.get("end_reason", ""))
 
-		MCSReducer.ActionType.END_COLONY:
+		_MCSReducer.ActionType.END_COLONY:
 			game_ended.emit(action.get("is_victory", false), action.get("reason", ""))
 
 	# Check for births and deaths during ADVANCE_YEAR
-	if action.get("type", -1) == MCSReducer.ActionType.ADVANCE_YEAR:
+	if action.get("type", -1) == _MCSReducer.ActionType.ADVANCE_YEAR:
 		# Find new colonists (births)
 		var old_ids = {}
 		for c in old_colonists:
@@ -480,21 +510,21 @@ func delete_save(slot: int = 0) -> bool:
 func debug_add_colonists(count: int) -> void:
 	var current_year = _state.get("current_year", 1)
 	for i in range(count):
-		var colonist = MCSTypes.create_colonist()
+		var colonist = _MCSTypes.create_colonist()
 		colonist["id"] = "debug_%d_%03d" % [current_year, i]
-		colonist.generation = MCSTypes.Generation.FIRST_GEN
+		colonist.generation = _MCSTypes.Generation.FIRST_GEN
 		colonist.age = 20 + _rng.randi_range(0, 20)
-		colonist.life_stage = MCSTypes.LifeStage.ADULT
+		colonist.life_stage = _MCSTypes.LifeStage.ADULT
 		colonist.display_name = _generate_name(colonist, i)
-		dispatch(MCSReducer.action_add_colonist(colonist))
+		dispatch(_MCSReducer.action_add_colonist(colonist))
 
 func debug_add_resources(amount: float) -> void:
-	for resource_type in MCSTypes.ResourceType.values():
-		dispatch(MCSReducer.action_update_resource(resource_type, amount))
+	for resource_type in _MCSTypes.ResourceType.values():
+		dispatch(_MCSReducer.action_update_resource(resource_type, amount))
 
 func debug_trigger_event(event_id: String) -> void:
-	var all_events = MCSEvents.get_all_events()
+	var all_events = _MCSEvents.get_all_events()
 	for event in all_events:
 		if event.id == event_id:
-			dispatch(MCSReducer.action_trigger_event(event))
+			dispatch(_MCSReducer.action_trigger_event(event))
 			return

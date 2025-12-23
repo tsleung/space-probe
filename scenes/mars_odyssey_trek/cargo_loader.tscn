@@ -1,0 +1,148 @@
+[gd_scene load_steps=2 format=3 uid="uid://cmotcargoloader"]
+
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/cargo_loader.gd" id="1_cargo"]
+
+[node name="CargoLoader" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_cargo")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.06, 0.06, 0.1, 1)
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 40
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 40
+theme_override_constants/margin_bottom = 20
+
+[node name="MainLayout" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="Header" type="VBoxContainer" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="TitleHeader" type="Label" parent="MarginContainer/MainLayout/Header"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "CARGO MANIFEST"
+horizontal_alignment = 1
+
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainLayout/Header"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "Allocate supplies for the journey"
+horizontal_alignment = 1
+
+[node name="CapacityPanel" type="PanelContainer" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 80)
+
+[node name="CapacityContent" type="VBoxContainer" parent="MarginContainer/MainLayout/CapacityPanel"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Margin" type="MarginContainer" parent="MarginContainer/MainLayout/CapacityPanel/CapacityContent"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 15
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 15
+
+[node name="VBox" type="VBoxContainer" parent="MarginContainer/MainLayout/CapacityPanel/CapacityContent/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="CapacityHeader" type="HBoxContainer" parent="MarginContainer/MainLayout/CapacityPanel/CapacityContent/Margin/VBox"]
+layout_mode = 2
+
+[node name="CapacityTitle" type="Label" parent="MarginContainer/MainLayout/CapacityPanel/CapacityContent/Margin/VBox/CapacityHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 16
+text = "Cargo Capacity"
+
+[node name="CapacityLabel" type="Label" parent="MarginContainer/MainLayout/CapacityPanel/CapacityContent/Margin/VBox/CapacityHeader"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "0 / 5000 kg"
+
+[node name="CapacityBar" type="ProgressBar" parent="MarginContainer/MainLayout/CapacityPanel/CapacityContent/Margin/VBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 2
+max_value = 5000.0
+show_percentage = false
+
+[node name="WeightBreakdown" type="Label" parent="MarginContainer/MainLayout/CapacityPanel/CapacityContent/Margin/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.6, 0.7, 1)
+theme_override_font_sizes/font_size = 11
+text = "Food: 0 kg | Water: 0 kg | Parts: 0 kg | Medical: 0 kg | Equipment: 0 kg"
+horizontal_alignment = 1
+
+[node name="SlidersContainer" type="VBoxContainer" parent="MarginContainer/MainLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 15
+
+[node name="InfoPanel" type="PanelContainer" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 100)
+
+[node name="InfoContent" type="MarginContainer" parent="MarginContainer/MainLayout/InfoPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 15
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 15
+
+[node name="VBox" type="VBoxContainer" parent="MarginContainer/MainLayout/InfoPanel/InfoContent"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="InfoTitle" type="Label" parent="MarginContainer/MainLayout/InfoPanel/InfoContent/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Supply Guide"
+
+[node name="InfoText" type="Label" parent="MarginContainer/MainLayout/InfoPanel/InfoContent/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+theme_override_font_sizes/font_size = 12
+text = "Food: 2 kg/day per crew member. Minimum 400 days for round trip.
+Water Reserve: Emergency backup beyond recycling. 10 tanks recommended.
+Spare Parts: Each kit can repair one system failure. Bring extras!
+Medical Supplies: First aid, medication, surgery equipment. More is safer.
+Colony Equipment: Tools for Mars base operations. Optional but helpful."
+autowrap_mode = 2
+
+[node name="WarningsLabel" type="Label" parent="MarginContainer/MainLayout/InfoPanel/InfoContent/VBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.5, 0.3, 1)
+theme_override_font_sizes/font_size = 13
+text = ""
+autowrap_mode = 2

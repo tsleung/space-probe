@@ -5,6 +5,9 @@ class_name MCSEvents
 ## Core events for the colony narrative arc
 ## All functions are static and deterministic
 
+# Preload dependencies
+const _MCSTypes = preload("res://scripts/mars_colony_sim/mcs_types.gd")
+
 # ============================================================================
 # EVENT DEFINITIONS - 12 Core Events
 # ============================================================================
@@ -126,7 +129,7 @@ static func apply_event_choice(state: Dictionary, event: Dictionary, choice_inde
 		for c in colonists:
 			if c.get("is_alive", false):
 				var new_morale = clampf(c.get("morale", 50.0) + change, 0.0, 100.0)
-				updated_colonists.append(MCSTypes.with_field(c, "morale", new_morale))
+				updated_colonists.append(_MCSTypes.with_field(c, "morale", new_morale))
 			else:
 				updated_colonists.append(c)
 		new_state["colonists"] = updated_colonists
@@ -167,7 +170,7 @@ static func _event_first_crisis() -> Dictionary:
 		"type": "first_crisis",
 		"title": "Systems Failure",
 		"description": "Multiple systems have failed simultaneously. Life support is at 60%. This is the first real test of the colony.",
-		"severity": MCSTypes.EventSeverity.MAJOR,
+		"severity": _MCSTypes.EventSeverity.MAJOR,
 		"min_year": 1, "max_year": 5,
 		"one_time": true,
 		"trigger_chance": 0.8,
@@ -194,7 +197,7 @@ static func _event_first_birth() -> Dictionary:
 		"type": "first_birth",
 		"title": "First Martian",
 		"description": "A baby has been born - the first human born on Mars. The colony gathers to celebrate.",
-		"severity": MCSTypes.EventSeverity.MAJOR,
+		"severity": _MCSTypes.EventSeverity.MAJOR,
 		"min_year": 3, "max_year": 15,
 		"one_time": true,
 		"trigger_chance": 1.0,
@@ -219,7 +222,7 @@ static func _event_first_death() -> Dictionary:
 		"type": "first_death",
 		"title": "The First Loss",
 		"description": "A colonist has died. The colony has lost its first member. In the cramped quarters, death feels very close.",
-		"severity": MCSTypes.EventSeverity.MAJOR,
+		"severity": _MCSTypes.EventSeverity.MAJOR,
 		"min_year": 1, "max_year": 10,
 		"one_time": true,
 		"trigger_chance": 1.0,
@@ -248,7 +251,7 @@ static func _event_council_formation() -> Dictionary:
 		"type": "council_formation",
 		"title": "Voice of the People",
 		"description": "The colony has grown. New arrivals want representation. It's time to decide how decisions get made.",
-		"severity": MCSTypes.EventSeverity.MAJOR,
+		"severity": _MCSTypes.EventSeverity.MAJOR,
 		"min_year": 6, "max_year": 20,
 		"min_population": 25,
 		"one_time": true,
@@ -280,7 +283,7 @@ static func _event_first_generation() -> Dictionary:
 		"type": "first_generation",
 		"title": "Children of Mars",
 		"description": "The first Mars-born child has reached adulthood. They've never seen Earth. Mars is the only home they know.",
-		"severity": MCSTypes.EventSeverity.MODERATE,
+		"severity": _MCSTypes.EventSeverity.MODERATE,
 		"min_year": 18, "max_year": 35,
 		"one_time": true,
 		"trigger_chance": 1.0,
@@ -305,7 +308,7 @@ static func _event_resource_conflict() -> Dictionary:
 		"type": "resource_conflict",
 		"title": "Resource Dispute",
 		"description": "Workers demand better conditions and more say in resource allocation. Production has slowed.",
-		"severity": MCSTypes.EventSeverity.MAJOR,
+		"severity": _MCSTypes.EventSeverity.MAJOR,
 		"min_year": 10, "max_year": 40,
 		"min_population": 40,
 		"cooldown_years": 10,
@@ -343,7 +346,7 @@ static func _event_independence_question() -> Dictionary:
 		"type": "independence_question",
 		"title": "The Independence Question",
 		"description": "The colony no longer needs Earth to survive. Should Mars seek political independence?",
-		"severity": MCSTypes.EventSeverity.CRITICAL,
+		"severity": _MCSTypes.EventSeverity.CRITICAL,
 		"min_year": 25, "max_year": 80,
 		"min_population": 100,
 		"one_time": true,
@@ -375,7 +378,7 @@ static func _event_discovery() -> Dictionary:
 		"type": "discovery",
 		"title": "Breakthrough Discovery",
 		"description": "Deep drill samples contain something remarkable - evidence of ancient microbial life. Life existed on Mars.",
-		"severity": MCSTypes.EventSeverity.CRITICAL,
+		"severity": _MCSTypes.EventSeverity.CRITICAL,
 		"min_year": 20, "max_year": 100,
 		"one_time": true,
 		"trigger_chance": 0.2,
@@ -400,7 +403,7 @@ static func _event_last_founder() -> Dictionary:
 		"type": "last_founder",
 		"title": "End of an Era",
 		"description": "The last of the original founders has died. They were the last person who remembered Earth's sky.",
-		"severity": MCSTypes.EventSeverity.MAJOR,
+		"severity": _MCSTypes.EventSeverity.MAJOR,
 		"min_year": 50, "max_year": 100,
 		"one_time": true,
 		"trigger_chance": 1.0,
@@ -435,7 +438,7 @@ static func _quiet_homesickness() -> Dictionary:
 		"type": "quiet_homesickness",
 		"title": "Looking at Earth",
 		"description": "You find a colonist at the observation window, staring at the blue dot. 'I knew I'd never go back...'",
-		"severity": MCSTypes.EventSeverity.MINOR,
+		"severity": _MCSTypes.EventSeverity.MINOR,
 		"min_year": 1, "max_year": 30,
 		"cooldown_years": 3,
 		"trigger_chance": 0.3,
@@ -460,7 +463,7 @@ static func _quiet_celebration() -> Dictionary:
 		"type": "quiet_celebration",
 		"title": "Anniversary Gathering",
 		"description": "Colonists have gathered for the landing anniversary. They're looking at old photos, laughing and crying.",
-		"severity": MCSTypes.EventSeverity.MINOR,
+		"severity": _MCSTypes.EventSeverity.MINOR,
 		"min_year": 5, "max_year": 100,
 		"cooldown_years": 5,
 		"trigger_chance": 0.4,
@@ -485,7 +488,7 @@ static func _quiet_stargazing() -> Dictionary:
 		"type": "quiet_stargazing",
 		"title": "Questions About Earth",
 		"description": "Mars-born children at the window. One points at Earth. 'Why do the old people cry when they look at it?'",
-		"severity": MCSTypes.EventSeverity.MINOR,
+		"severity": _MCSTypes.EventSeverity.MINOR,
 		"min_year": 15, "max_year": 100,
 		"cooldown_years": 5,
 		"trigger_chance": 0.3,

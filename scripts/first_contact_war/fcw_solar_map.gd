@@ -283,7 +283,10 @@ const TRANSMISSIONS_LOSS = [
 # STATE
 # ============================================================================
 
+var _state: Dictionary = {}  # Full game state for entity system access
 var _zones: Dictionary = {}
+var _is_paused: bool = false  # When true, all ship movement freezes
+var _speed_multiplier: float = 1.0  # Game speed (0.5=slow, 1=normal, 4=fast, 12=very fast)
 var _herald_position: Vector2 = Vector2.ZERO
 var _herald_target_position: Vector2 = Vector2.ZERO
 var _herald_start_position: Vector2 = Vector2.ZERO  # Position at start of transit
@@ -381,76 +384,87 @@ func _process(delta: float) -> void:
 	if not _initialized:
 		return  # Wait for valid size
 
-	_global_time += delta
-	_nebula_offset += delta * 0.02  # Slow drift
-
-	# NOTE: Herald movement is now handled in set_time_progress() for smooth multi-week travel
-	# Trail particles are spawned there when Herald is in transit
-
-	# Flash when attacking - spawn combat effects
-	if _is_attacking:
-		_attack_flash_timer += delta * 5.0
-		_danger_pulse = minf(_danger_pulse + delta * 2.0, 1.0)
-		# Spawn lasers and explosions during combat
-		if randf() < delta * 15.0:
-			_spawn_combat_laser()
-		if randf() < delta * 8.0:
-			_spawn_combat_explosion()
-	else:
-		_danger_pulse = maxf(_danger_pulse - delta * 1.5, 0.0)
-
-	# Update screen shake
+	# Update screen shake (always runs for visual feedback, decays to zero)
 	if _screen_shake_intensity > 0:
 		_screen_shake = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _screen_shake_intensity
 		_screen_shake_intensity = maxf(_screen_shake_intensity - delta * 20.0, 0.0)
 	else:
 		_screen_shake = Vector2.ZERO
 
+	# Update zoom transitions (always runs for UI responsiveness)
+	_update_zoom(delta)
+
+	# === PAUSED: Skip all time-dependent updates ===
+	# This includes _global_time which drives visual animations
+	if _is_paused:
+		queue_redraw()  # Still redraw so we see current (frozen) state
+		return
+
+	# === GAME DELTA: Scale by speed multiplier ===
+	# All game-speed-dependent updates use this instead of raw delta
+	var game_delta = delta * _speed_multiplier
+
+	# Update global time and nebula drift (scaled by game speed)
+	_global_time += game_delta
+	_nebula_offset += game_delta * 0.02  # Slow drift
+
+	# NOTE: Herald movement is now handled in set_time_progress() for smooth multi-week travel
+	# Trail particles are spawned there when Herald is in transit
+
+	# Flash when attacking - spawn combat effects
+	if _is_attacking:
+		_attack_flash_timer += game_delta * 5.0
+		_danger_pulse = minf(_danger_pulse + game_delta * 2.0, 1.0)
+		# Spawn lasers and explosions during combat
+		if randf() < game_delta * 15.0:
+			_spawn_combat_laser()
+		if randf() < game_delta * 8.0:
+			_spawn_combat_explosion()
+	else:
+		_danger_pulse = maxf(_danger_pulse - game_delta * 1.5, 0.0)
+
 	# Update particles
-	_update_particles(delta)
+	_update_particles(game_delta)
 
 	# Update ships in transit
-	_update_ships(delta)
+	_update_ships(game_delta)
 
 	# Update lasers
-	_update_lasers(delta)
+	_update_lasers(game_delta)
 
 	# Update explosions
-	_update_explosions(delta)
+	_update_explosions(game_delta)
 
 	# Update warp flashes
-	_update_warp_flashes(delta)
+	_update_warp_flashes(game_delta)
 
 	# Update zone damage flashes
 	for zone_id in _zone_damage_flash.keys():
-		_zone_damage_flash[zone_id] = maxf(_zone_damage_flash[zone_id] - delta * 3.0, 0.0)
+		_zone_damage_flash[zone_id] = maxf(_zone_damage_flash[zone_id] - game_delta * 3.0, 0.0)
 
 	# Update skirmishes
-	_update_skirmishes(delta)
+	_update_skirmishes(game_delta)
 
 	# Update attack waves
-	_update_attack_waves(delta)
+	_update_attack_waves(game_delta)
 
 	# Update herald ships
-	_update_herald_ships(delta)
+	_update_herald_ships(game_delta)
 
 	# Update civilian traffic
-	_update_civilian_ships(delta)
-	_maybe_spawn_civilian_ship(delta)
+	_update_civilian_ships(game_delta)
+	_maybe_spawn_civilian_ship(game_delta)
 
 	# Update colony ships (exodus fleet)
-	_update_colony_ships(delta)
+	_update_colony_ships(game_delta)
 
 	# Update transmissions
-	_update_transmissions(delta)
-	_maybe_spawn_transmission(delta)
-
-	# Update zoom transitions
-	_update_zoom(delta)
+	_update_transmissions(game_delta)
+	_maybe_spawn_transmission(game_delta)
 
 	# Ambient particles near zones with ships (only in system view)
 	if _zoom_level == ZoomLevel.SYSTEM:
-		_spawn_ambient_particles(delta)
+		_spawn_ambient_particles(game_delta)
 
 	queue_redraw()
 
@@ -513,23 +527,27 @@ func _draw_system_view(rect: Rect2) -> void:
 	# Draw warp flashes
 	_draw_warp_flashes(offset)
 
-	# Draw civilian traffic (behind military ships)
+	# Draw civilian traffic (ambient atmosphere)
 	_draw_civilian_ships(offset)
 
-	# Draw colony ships (exodus fleet) - prominent, hopeful
-	_draw_colony_ships(offset)
-
-	# Draw fleets in transit (strategic fleet movements)
-	_draw_fleets_in_transit(offset)
-
-	# Draw ships in transit
-	_draw_ships(offset)
-
-	# Draw herald attack ships
+	# Draw herald attack ships (drones)
 	_draw_herald_ships(offset)
 
-	# Draw player fleets at zones
+	# Draw player fleets at zones (for zone defense indicator)
 	_draw_player_fleets(rect, offset)
+
+	# Entity system visualization
+	# Draw Herald observation zone (behind entities)
+	_draw_herald_observation_zone(offset)
+
+	# Draw traffic patterns that Herald has learned
+	_draw_traffic_patterns(offset)
+
+	# Draw entity trajectories (before entities)
+	_draw_entity_trajectories(offset)
+
+	# Draw all entities from unified entity system
+	_draw_entities(offset)
 
 	# Draw lasers
 	_draw_lasers(offset)
@@ -2609,11 +2627,16 @@ func spawn_colony_ship(evacuated_this_turn: int) -> void:
 	if evacuated_this_turn <= 0:
 		return
 
+	# Limit visual colony ships to avoid clutter at high speeds
+	const MAX_COLONY_SHIPS = 15
+	if _colony_ships.size() >= MAX_COLONY_SHIPS:
+		return  # Don't spawn more, evacuation still tracked in game state
+
 	# Accumulate evacuation - spawn a ship per ~500K evacuated
 	_colony_ship_spawn_accumulator += evacuated_this_turn
 	const SOULS_PER_SHIP = 500_000
 
-	while _colony_ship_spawn_accumulator >= SOULS_PER_SHIP:
+	while _colony_ship_spawn_accumulator >= SOULS_PER_SHIP and _colony_ships.size() < MAX_COLONY_SHIPS:
 		_colony_ship_spawn_accumulator -= SOULS_PER_SHIP
 
 		# Get Earth position as start
@@ -2638,6 +2661,11 @@ func spawn_colony_ship(evacuated_this_turn: int) -> void:
 func spawn_colony_ship_from_data(ship_data: Dictionary) -> void:
 	## Spawn a visual colony ship from game state data
 	## Called when reducer creates a new colony ship in transit
+	# Limit visual colony ships to avoid clutter at high speeds
+	const MAX_COLONY_SHIPS = 15
+	if _colony_ships.size() >= MAX_COLONY_SHIPS:
+		return  # Don't spawn more, evacuation still tracked in game state
+
 	var souls = ship_data.get("souls_aboard", 500000)
 	var ship_name = ship_data.get("name", "Exodus")
 
@@ -2865,6 +2893,11 @@ func spawn_zone_destroyed(zone_id: int) -> void:
 
 func spawn_ship_transit(from_zone: int, to_zone: int, ship_type: int = -1) -> void:
 	# Spawn a ship moving between zones with full visual effects
+	# Limit visual ships to avoid clutter at high speeds
+	const MAX_VISUAL_SHIPS = 30
+	if _ships.size() >= MAX_VISUAL_SHIPS:
+		return  # Don't spawn more visual ships, game state still tracks them
+
 	var from_pos = _get_zone_pixel_pos(from_zone)
 	var to_pos = _get_zone_pixel_pos(to_zone)
 	var from_size = ZONE_SIZES.get(from_zone, 20.0)
@@ -3002,6 +3035,11 @@ func _spawn_warp_out_effect(pos: Vector2, ship_class: int) -> void:
 
 func spawn_fleet_transit(from_zone: int, to_zone: int, ship_count: int, ship_type: int = -1) -> void:
 	## Spawn multiple ships in formation
+	# Limit visual ships to avoid clutter at high speeds
+	const MAX_VISUAL_SHIPS = 30
+	if _ships.size() >= MAX_VISUAL_SHIPS:
+		return  # Don't spawn more visual ships, game state still tracks them
+
 	var from_pos = _get_zone_pixel_pos(from_zone)
 	var to_pos = _get_zone_pixel_pos(to_zone)
 	var direction = (to_pos - from_pos).normalized()
@@ -3126,6 +3164,9 @@ func _get_zone_at_position(pos: Vector2) -> int:
 # ============================================================================
 
 func update_state(state: Dictionary, zone_defenses: Dictionary, fleets_in_transit: Array = []) -> void:
+	# Store full state for entity system access
+	_state = state
+
 	_zones = {}
 	for zone_id in state.zones:
 		var zone = state.zones[zone_id]
@@ -3145,10 +3186,9 @@ func update_state(state: Dictionary, zone_defenses: Dictionary, fleets_in_transi
 	# Store fleets in transit for visualization
 	_fleets_in_transit = fleets_in_transit
 
-	# Update herald - now uses travel time system
+	# Update herald from entity system
 	var new_target = state.herald_attack_target
-	var new_current_zone = state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
-	var new_transit = state.get("herald_transit", {})
+	var herald_entity = FCWTypes.get_herald_entity(state)
 
 	# Check if target changed (zone fell and Herald is moving to new target)
 	if new_target != _herald_target_zone:
@@ -3165,24 +3205,74 @@ func update_state(state: Dictionary, zone_defenses: Dictionary, fleets_in_transi
 		# Clear herald ships targeting old zone
 		_herald_ships.clear()
 
-	# Update current zone and transit state
-	_herald_current_zone = new_current_zone
-	_herald_transit = new_transit.duplicate()
+	# Update Herald state from entity
+	if not herald_entity.is_empty():
+		# Herald entity exists - read state from entity
+		var herald_origin = herald_entity.get("origin", FCWTypes.ZoneId.KUIPER)
+		var herald_dest = herald_entity.get("destination", FCWTypes.ZoneId.KUIPER)
+		var is_in_transit = herald_entity.movement_state == FCWTypes.MovementState.BURNING
 
-	# Update positions based on transit state
-	if _initialized:
-		if not _herald_transit.is_empty():
-			# Herald is in transit - set up interpolation positions
-			_herald_start_position = _get_zone_pixel_pos(_herald_transit.from_zone)
-			_herald_target_position = _get_zone_pixel_pos(_herald_transit.to_zone)
-			# Position will be interpolated in set_time_progress()
+		_herald_current_zone = herald_origin if not is_in_transit else herald_dest
+		if is_in_transit:
+			# Calculate travel progress based on entity position
+			var game_time = state.get("game_time", 0.0)
+			var origin_au = FCWTypes.get_zone_position(herald_origin, game_time)
+			var dest_au = FCWTypes.get_zone_position(herald_dest, game_time)
+			var total_dist = origin_au.distance_to(dest_au)
+			var current_dist = herald_entity.position.distance_to(dest_au)
+			var travel_progress = 1.0 - (current_dist / maxf(total_dist, 0.1))
+
+			_herald_transit = {
+				"from_zone": herald_origin,
+				"to_zone": herald_dest,
+				"turns_remaining": int((1.0 - travel_progress) * 5),  # Rough estimate
+				"total_turns": 5  # Estimate
+			}
 		else:
-			# Herald is stationary at current zone
-			var current_pos = _get_zone_pixel_pos(_herald_current_zone)
-			_herald_position = current_pos
-			_herald_start_position = current_pos
-			_herald_target_position = current_pos
-			_herald_travel_progress = 1.0
+			_herald_transit = {}
+
+		# Update positions based on zone IDs (use visual ZONE_POSITIONS, not AU)
+		if _initialized:
+			var origin_pos = _get_zone_pixel_pos(herald_origin)
+			var dest_pos = _get_zone_pixel_pos(herald_dest)
+
+			if is_in_transit:
+				# Interpolate position between zones using entity's actual progress
+				var game_time = state.get("game_time", 0.0)
+				var origin_au = FCWTypes.get_zone_position(herald_origin, game_time)
+				var dest_au = FCWTypes.get_zone_position(herald_dest, game_time)
+				var total_dist = origin_au.distance_to(dest_au)
+				var current_dist = herald_entity.position.distance_to(dest_au)
+				var travel_progress = clampf(1.0 - (current_dist / maxf(total_dist, 0.1)), 0.0, 1.0)
+
+				_herald_position = origin_pos.lerp(dest_pos, travel_progress)
+				_herald_start_position = origin_pos
+				_herald_target_position = dest_pos
+				_herald_travel_progress = travel_progress
+			else:
+				# Stationary at current zone
+				_herald_position = origin_pos
+				_herald_start_position = origin_pos
+				_herald_target_position = origin_pos
+				_herald_travel_progress = 1.0
+	else:
+		# Fallback to legacy state for backward compatibility
+		var new_current_zone = state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
+		var new_transit = state.get("herald_transit", {})
+		_herald_current_zone = new_current_zone
+		_herald_transit = new_transit.duplicate()
+
+		# Update positions based on transit state
+		if _initialized:
+			if not _herald_transit.is_empty():
+				_herald_start_position = _get_zone_pixel_pos(_herald_transit.from_zone)
+				_herald_target_position = _get_zone_pixel_pos(_herald_transit.to_zone)
+			else:
+				var current_pos = _get_zone_pixel_pos(_herald_current_zone)
+				_herald_position = current_pos
+				_herald_start_position = current_pos
+				_herald_target_position = current_pos
+				_herald_travel_progress = 1.0
 
 	_herald_strength = state.herald_strength
 
@@ -3198,6 +3288,7 @@ func set_selected_zone(zone_id: int) -> void:
 	queue_redraw()
 
 func set_time_progress(progress: float, fleets_in_transit: Array, herald_transit: Dictionary = {}) -> void:
+	## DEPRECATED: Use set_tick_progress() instead
 	## Called continuously to update time-based animations
 	## progress: 0.0 to 1.0 representing progress through current week
 	## fleets_in_transit: current fleet transit data for smooth animation
@@ -3232,11 +3323,54 @@ func set_time_progress(progress: float, fleets_in_transit: Array, herald_transit
 
 	queue_redraw()
 
+# Snapshot data for interpolation
+var _prev_entity_positions: Dictionary = {}
+var _prev_zone_positions: Dictionary = {}
+var _tick_progress: float = 0.0
+
+func set_tick_progress(progress: float, prev_entity_positions: Dictionary, prev_zone_positions: Dictionary) -> void:
+	## NEW TIME SYSTEM: Update interpolation state for smooth animation between discrete ticks
+	##
+	## progress: 0.0 to 1.0 representing progress toward the next hour tick
+	## prev_entity_positions: entity_id -> Vector2 positions at start of current tick
+	## prev_zone_positions: zone_id -> Vector2 positions at start of current tick
+	##
+	## All entity positions are interpolated between prev_position and current_position
+	## based on the tick progress.
+	_tick_progress = progress
+	_prev_entity_positions = prev_entity_positions
+	_prev_zone_positions = prev_zone_positions
+
+	# Also update legacy _week_progress for any code that still uses it
+	# Convert hourly progress to weekly context (rough approximation)
+	_week_progress = progress
+
+	queue_redraw()
+
+func get_interpolated_entity_pos(entity_id: String, current_pos: Vector2) -> Vector2:
+	## Get interpolated position for an entity
+	var prev_pos = _prev_entity_positions.get(entity_id, current_pos)
+	return prev_pos.lerp(current_pos, _tick_progress)
+
+func get_interpolated_zone_pos(zone_id: int, current_pos: Vector2) -> Vector2:
+	## Get interpolated position for a zone (orbital bodies)
+	var prev_pos = _prev_zone_positions.get(zone_id, current_pos)
+	return prev_pos.lerp(current_pos, _tick_progress)
+
 func set_attacking(is_attacking: bool) -> void:
 	_is_attacking = is_attacking
 	if is_attacking:
 		_attack_flash_timer = 0.0
 	queue_redraw()
+
+func set_paused(paused: bool) -> void:
+	## Set pause state - when paused, all ship movement freezes
+	_is_paused = paused
+
+func set_speed(multiplier: float) -> void:
+	## Set game speed multiplier - affects all visual animations
+	## 0.5 = slow, 1.0 = normal, 4.0 = fast, 12.0 = very fast
+	_speed_multiplier = multiplier
 
 func get_selected_zone() -> int:
 	return _selected_zone
@@ -3602,3 +3736,277 @@ func cinematic_victory_moment() -> void:
 func cinematic_game_over() -> void:
 	## Called when the game ends - pull back to galaxy
 	zoom_to_galaxy()
+
+# ============================================================================
+# ENTITY SYSTEM VISUALIZATION (Phase 6 - Movement as Core Mechanic)
+# ============================================================================
+# "Everything is Trajectory" - entities rendered at actual positions in AU
+# "The Tyranny of Time" - trajectories show where ships will be
+# "Detection & Signatures" - Herald observation zones visible
+
+## Convert AU coordinates to screen pixels
+## AU range: roughly -50 to +50 for the solar system
+func _au_to_screen_pos(au_pos: Vector2) -> Vector2:
+	# Scale factor: map ~100 AU range to screen width
+	var center = size * 0.5
+	var scale_factor = size.x / 100.0  # 100 AU across screen
+	return center + au_pos * scale_factor
+
+## Draw all entities from the new unified entity system
+func _draw_entities(offset: Vector2) -> void:
+	var entities = _state.get("entities", [])
+	var game_time = _state.get("game_time", 0.0)
+
+	for entity in entities:
+		if entity.movement_state == FCWTypes.MovementState.DESTROYED:
+			continue
+
+		# Skip Herald entity - drawn by _draw_herald for detailed visuals
+		if entity.get("id") == FCWTypes.HERALD_ENTITY_ID:
+			continue
+
+		# Calculate screen position based on entity's origin/destination zones
+		var screen_pos: Vector2
+		var origin_zone = entity.get("origin", -1)
+		var dest_zone = entity.get("destination", -1)
+
+		if entity.movement_state == FCWTypes.MovementState.ORBITING and origin_zone >= 0:
+			# Orbiting at origin zone
+			screen_pos = _get_zone_pixel_pos(origin_zone) + offset
+		elif dest_zone >= 0 and origin_zone >= 0:
+			# In transit - interpolate between zones
+			var origin_pos = _get_zone_pixel_pos(origin_zone)
+			var dest_pos = _get_zone_pixel_pos(dest_zone)
+
+			# Calculate travel progress from AU positions
+			var origin_au = FCWTypes.get_zone_position(origin_zone, game_time)
+			var dest_au = FCWTypes.get_zone_position(dest_zone, game_time)
+			var total_dist = origin_au.distance_to(dest_au)
+			var current_dist = entity.position.distance_to(dest_au)
+			var travel_progress = clampf(1.0 - (current_dist / maxf(total_dist, 0.1)), 0.0, 1.0)
+
+			screen_pos = origin_pos.lerp(dest_pos, travel_progress) + offset
+		else:
+			# Fallback to AU conversion
+			screen_pos = _au_to_screen_pos(entity.position) + offset
+
+		# Determine color and size based on entity type and faction
+		var entity_color: Color
+		var entity_size: float = 4.0
+
+		if entity.faction == FCWTypes.Faction.HERALD:
+			entity_color = Color(1.0, 0.2, 0.3)  # Red for Herald
+			entity_size = 6.0 if entity.get("is_drone", false) else 8.0
+		else:
+			match entity.entity_type:
+				FCWTypes.EntityType.WARSHIP:
+					entity_color = Color(0.3, 0.7, 1.0)  # Blue for warships
+					entity_size = 5.0 + entity.combat_power * 0.02
+				FCWTypes.EntityType.TRANSPORT:
+					entity_color = Color(0.2, 0.9, 0.4)  # Green for transports
+					entity_size = 4.0
+				FCWTypes.EntityType.WEAPON:
+					entity_color = Color(1.0, 0.8, 0.2)  # Yellow for weapons
+					entity_size = 3.0
+				_:
+					entity_color = Color.WHITE
+					entity_size = 4.0
+
+		# Movement state visual effects
+		match entity.movement_state:
+			FCWTypes.MovementState.BURNING:
+				# Engine glow - "burning ships are visible"
+				var pulse = sin(_global_time * 6.0) * 0.3 + 0.7
+				var engine_size = entity_size * 2.0 * pulse
+				draw_circle(screen_pos, engine_size, Color(1.0, 0.6, 0.2, 0.4 * pulse))
+				draw_circle(screen_pos, engine_size * 0.6, Color(1.0, 0.9, 0.5, 0.6 * pulse))
+
+				# Draw engine trail
+				var trail_dir = -entity.velocity.normalized() if entity.velocity.length() > 0.01 else Vector2.DOWN
+				var trail_end = screen_pos + trail_dir * entity_size * 3.0
+				draw_line(screen_pos, trail_end, Color(1.0, 0.5, 0.1, 0.6), 2.0)
+
+			FCWTypes.MovementState.COASTING:
+				# Dim, stealthy appearance - "coasting ships are nearly invisible"
+				entity_color = entity_color.darkened(0.3)
+				entity_color.a = 0.7
+
+			FCWTypes.MovementState.ORBITING:
+				# Subtle station-keeping indicator
+				draw_arc(screen_pos, entity_size + 3, 0, TAU, 16, entity_color.darkened(0.4), 1.0)
+
+		# Draw entity body
+		draw_circle(screen_pos, entity_size, entity_color)
+
+		# Drone indicator
+		if entity.get("is_drone", false):
+			# Sharp triangular shape for drones
+			var drone_pulse = sin(_global_time * 8.0) * 0.2 + 0.8
+			draw_circle(screen_pos, entity_size * 0.6, Color(1.0, 0.3, 0.3, drone_pulse))
+
+## Draw projected trajectories for entities
+func _draw_entity_trajectories(offset: Vector2) -> void:
+	var entities = _state.get("entities", [])
+	var game_time = _state.get("game_time", 0.0)
+
+	for entity in entities:
+		if entity.movement_state == FCWTypes.MovementState.DESTROYED:
+			continue
+		if entity.movement_state == FCWTypes.MovementState.ORBITING:
+			continue  # Stationary entities don't need trajectories
+		if entity.destination < 0:
+			continue  # No destination set
+		# Skip Herald - has its own visualization
+		if entity.get("id") == FCWTypes.HERALD_ENTITY_ID:
+			continue
+
+		# Use zone-based positions for trajectories
+		var origin_zone = entity.get("origin", -1)
+		var dest_zone = entity.destination
+
+		if origin_zone < 0 or dest_zone < 0:
+			continue
+
+		var origin_pos = _get_zone_pixel_pos(origin_zone)
+		var dest_pos = _get_zone_pixel_pos(dest_zone)
+
+		# Calculate current position along trajectory
+		var origin_au = FCWTypes.get_zone_position(origin_zone, game_time)
+		var dest_au = FCWTypes.get_zone_position(dest_zone, game_time)
+		var total_dist = origin_au.distance_to(dest_au)
+		var current_dist = entity.position.distance_to(dest_au)
+		var travel_progress = clampf(1.0 - (current_dist / maxf(total_dist, 0.1)), 0.0, 1.0)
+
+		var start_pos = origin_pos.lerp(dest_pos, travel_progress) + offset
+		dest_pos = dest_pos + offset
+
+		# Trajectory color based on faction
+		var traj_color: Color
+		if entity.faction == FCWTypes.Faction.HERALD:
+			traj_color = Color(1.0, 0.2, 0.3, 0.4)
+		else:
+			traj_color = Color(0.4, 0.7, 1.0, 0.3)
+
+		# Draw trajectory as dashed line
+		var direction = (dest_pos - start_pos).normalized()
+		var distance = start_pos.distance_to(dest_pos)
+		var dash_length = 10.0
+		var gap_length = 5.0
+
+		var dash_offset = 0.0
+		var drawing = true
+		while dash_offset < distance:
+			var segment_start = start_pos + direction * dash_offset
+			var segment_length = dash_length if drawing else gap_length
+			var segment_end = start_pos + direction * minf(dash_offset + segment_length, distance)
+
+			if drawing:
+				draw_line(segment_start, segment_end, traj_color, 1.5)
+
+			dash_offset += segment_length
+			drawing = not drawing
+
+		# Draw destination marker
+		draw_arc(dest_pos, 8.0, 0, TAU, 16, traj_color, 1.0)
+
+		# Show ETA
+		if entity.eta > 0 and entity.eta < 100:
+			var eta_text = "%.1fw" % entity.eta
+			var font = ThemeDB.fallback_font
+			var mid_pos = start_pos.lerp(dest_pos, 0.5)
+			draw_string(font, mid_pos + Vector2(5, -5), eta_text, HORIZONTAL_ALIGNMENT_LEFT, 50, 10, traj_color)
+
+## Draw Herald observation zone - shows detection risk
+## "Herald has observation radius (only sees nearby signatures)"
+func _draw_herald_observation_zone(offset: Vector2) -> void:
+	# Use zone-based pixel position for consistency with entity rendering
+	var screen_pos = _herald_position + offset
+
+	# Get observation zone settings from Herald AI (for radii)
+	var game_time = _state.get("game_time", 0.0)
+	var herald_au_pos = _get_herald_au_position(game_time)
+	var obs = FCWHeraldAI.get_observation_zone(herald_au_pos)
+
+	# Scale radii from AU to pixels - use visual scale for zone-based layout
+	# Average distance between zones in pixels vs AU gives reasonable scale
+	var visual_scale = size.x / 80.0  # Approximate scale for zone layout
+	var inner_radius = obs.inner_radius * visual_scale
+	var outer_radius = obs.radius * visual_scale
+	var drone_range = obs.drone_range * visual_scale
+
+	# Draw detection probability zones
+	# Outer zone - 0.1% detection (can see burning ships)
+	var outer_color = Color(1.0, 0.3, 0.3, 0.05)
+	draw_circle(screen_pos, outer_radius, outer_color)
+
+	# Inner zone - 1% detection (can see coasting ships)
+	var inner_color = Color(1.0, 0.2, 0.2, 0.1)
+	draw_circle(screen_pos, inner_radius, inner_color)
+
+	# Drone range - dangerous zone
+	var pulse = sin(_global_time * 2.0) * 0.3 + 0.5
+	draw_arc(screen_pos, drone_range, 0, TAU, 48, Color(1.0, 0.2, 0.2, pulse * 0.3), 2.0)
+
+	# Zone labels
+	var font = ThemeDB.fallback_font
+	draw_string(font, screen_pos + Vector2(outer_radius + 5, 0), "DETECTION ZONE", HORIZONTAL_ALIGNMENT_LEFT, 150, 9, Color(1.0, 0.4, 0.4, 0.6))
+
+## Get Herald position in AU coordinates
+func _get_herald_au_position(game_time: float) -> Vector2:
+	# Read from Herald entity if available
+	var herald_entity = FCWTypes.get_herald_entity(_state)
+	if not herald_entity.is_empty():
+		return herald_entity.position
+
+	# Fallback to legacy state
+	var herald_zone = _state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
+	var herald_transit = _state.get("herald_transit", {})
+
+	if herald_transit.is_empty():
+		return FCWTypes.get_zone_position(herald_zone, game_time)
+	else:
+		var from_pos = FCWTypes.get_zone_position(herald_transit.from_zone, game_time)
+		var to_pos = FCWTypes.get_zone_position(herald_transit.to_zone, game_time)
+		var progress = 1.0 - (float(herald_transit.turns_remaining) / float(herald_transit.total_turns))
+		return from_pos.lerp(to_pos, progress)
+
+## Draw traffic pattern visualization - shows Herald's known routes
+func _draw_traffic_patterns(offset: Vector2) -> void:
+	var herald_intel = _state.get("herald_intel", {})
+	var known_routes = herald_intel.get("known_routes", {})
+
+	for route_key in known_routes:
+		var traffic = known_routes[route_key]
+		if traffic < 0.1:
+			continue  # Don't show minimal traffic
+
+		# Parse route key
+		var parts = route_key.split("_")
+		if parts.size() != 2:
+			continue
+
+		var zone_a = int(parts[0])
+		var zone_b = int(parts[1])
+
+		# Use zone-based pixel positions for consistency
+		var pos_a = _get_zone_pixel_pos(zone_a) + offset
+		var pos_b = _get_zone_pixel_pos(zone_b) + offset
+
+		# Route color intensity based on traffic level
+		var route_color = Color(1.0, 0.6, 0.2, traffic * 0.5)
+		var width = 1.0 + traffic * 3.0
+
+		# Draw as wavy line to show it's "known" traffic
+		var direction = (pos_b - pos_a).normalized()
+		var perpendicular = Vector2(-direction.y, direction.x)
+		var distance = pos_a.distance_to(pos_b)
+		var segments = int(distance / 20.0)
+
+		var prev_point = pos_a
+		for i in range(1, segments + 1):
+			var t = float(i) / float(segments)
+			var base_point = pos_a.lerp(pos_b, t)
+			var wave_offset = sin(t * 4.0 * PI + _global_time) * 3.0 * traffic
+			var point = base_point + perpendicular * wave_offset
+			draw_line(prev_point, point, route_color, width)
+			prev_point = point

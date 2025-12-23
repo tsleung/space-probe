@@ -240,20 +240,20 @@ func _create_team_panel(team: int) -> PanelContainer:
 func _get_base_weapon_name(team: int) -> String:
 	var weapon_type = VnpTypes.BASE_WEAPONS.get(team, 0)
 	match weapon_type:
-		VnpTypes.BaseWeapon.ION_CANNON:
-			return "⚡ Ion"
-		VnpTypes.BaseWeapon.MISSILE_BARRAGE:
-			return "🚀 Missiles"
-		VnpTypes.BaseWeapon.SINGULARITY:
-			return "🌀 Singularity"
+		VnpTypes.BaseWeapon.ARC_STORM:
+			return "Arc Storm"
+		VnpTypes.BaseWeapon.HELLSTORM:
+			return "Hellstorm"
+		VnpTypes.BaseWeapon.VOID_TEAR:
+			return "Void Tear"
 	return "Weapon"
 
-func init(vnp_store, bases: Dictionary, controller = null, point_nodes: Dictionary = {}):
+func init(vnp_store, bases: Dictionary, controller = null, point_nodes: Dictionary = {}, main_scene = null):
 	self.store = vnp_store
 	self.base_positions = bases
 	self.ai_controller = controller
 	self.strategic_points = point_nodes
-	self.vnp_main = get_parent()  # Get reference to VnpMain
+	self.vnp_main = main_scene if main_scene else get_parent().get_parent()  # VnpMain is parent of UILayer
 
 	store.subscribe(self)
 
@@ -344,7 +344,12 @@ func _on_fire_button_pressed():
 
 func _on_burst_button_pressed():
 	if vnp_main:
-		vnp_main.burst_fire_base_weapon(VnpTypes.Team.PLAYER)
+		if convergence_active:
+			# During convergence, this is RETREAT - flee to center
+			vnp_main.trigger_full_retreat(VnpTypes.Team.PLAYER)
+		else:
+			# Normal operation - burst fire base weapon
+			vnp_main.burst_fire_base_weapon(VnpTypes.Team.PLAYER)
 
 func _count_team_ships(state: Dictionary, team: int) -> int:
 	var count = 0
@@ -851,3 +856,188 @@ func _update_fleet_composition(state: Dictionary):
 		var label = fleet_composition_labels[ship_type]
 		var short_name = _get_ship_short_name(ship_type)
 		label.text = "%s: %d" % [short_name, counts[ship_type]]
+
+
+# === THE CYCLE - CONVERGENCE UI ===
+
+var mystery_card: PanelContainer = null
+var progenitor_label: Label = null
+var cycle_ending_panel: PanelContainer = null
+var convergence_active: bool = false  # Track if convergence is happening
+
+func show_mystery_card():
+	"""Display ??? DETECTED card - first sign of The Progenitor"""
+	if mystery_card:
+		mystery_card.queue_free()
+
+	mystery_card = PanelContainer.new()
+	mystery_card.name = "MysteryCard"
+	mystery_card.set_anchors_preset(Control.PRESET_CENTER)
+
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.0, 0.15, 0.95)
+	style.border_color = VnpTypes.PROGENITOR_ACCENT
+	style.set_border_width_all(4)
+	style.set_corner_radius_all(10)
+	style.set_content_margin_all(30)
+	mystery_card.add_theme_stylebox_override("panel", style)
+
+	var vbox = VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	mystery_card.add_child(vbox)
+
+	var title = Label.new()
+	title.text = "??? DETECTED"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 48)
+	title.add_theme_color_override("font_color", VnpTypes.PROGENITOR_ACCENT)
+	vbox.add_child(title)
+
+	var subtitle = Label.new()
+	subtitle.text = "Something approaches from the edge..."
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle.add_theme_font_size_override("font_size", 18)
+	subtitle.add_theme_color_override("font_color", Color(0.7, 0.5, 0.8))
+	vbox.add_child(subtitle)
+
+	add_child(mystery_card)
+
+	# Auto-hide after a few seconds
+	var timer = get_tree().create_timer(4.0)
+	timer.timeout.connect(func():
+		if mystery_card and is_instance_valid(mystery_card):
+			var tween = create_tween()
+			tween.tween_property(mystery_card, "modulate:a", 0.0, 1.0)
+			tween.tween_callback(mystery_card.queue_free)
+	)
+
+
+func reveal_progenitor():
+	"""Transition from ??? to THE PROGENITOR - name revealed"""
+	convergence_active = true
+
+	if progenitor_label:
+		progenitor_label.queue_free()
+
+	progenitor_label = Label.new()
+	progenitor_label.name = "ProgenitorLabel"
+	progenitor_label.text = "THE PROGENITOR"
+	progenitor_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	progenitor_label.position.y = 80
+	progenitor_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	progenitor_label.add_theme_font_size_override("font_size", 32)
+	progenitor_label.add_theme_color_override("font_color", VnpTypes.PROGENITOR_ACCENT)
+	progenitor_label.add_theme_color_override("font_shadow_color", Color.BLACK)
+	progenitor_label.add_theme_constant_override("shadow_offset_x", 2)
+	progenitor_label.add_theme_constant_override("shadow_offset_y", 2)
+	add_child(progenitor_label)
+
+	# Flip the BURST button to show RETREAT functionality
+	_update_burst_button_for_convergence()
+
+
+func _update_burst_button_for_convergence():
+	"""Change BURST button behavior during convergence - retreat instead of attack"""
+	var player_panel = team_panels.get(VnpTypes.Team.PLAYER, null)
+	if not player_panel:
+		return
+
+	var weapon_container = player_panel.get_node_or_null("VBoxContainer/WeaponContainer")
+	if not weapon_container:
+		return
+
+	var burst_btn = weapon_container.get_node_or_null("BurstBtn")
+	if burst_btn:
+		burst_btn.text = "RETREAT"
+		burst_btn.tooltip_text = "All ships flee to safety! The Progenitor approaches!"
+
+		# Change button style to purple
+		var retreat_style = StyleBoxFlat.new()
+		retreat_style.bg_color = Color(0.4, 0.1, 0.5, 0.9)
+		retreat_style.border_color = VnpTypes.PROGENITOR_ACCENT
+		retreat_style.set_border_width_all(2)
+		retreat_style.set_corner_radius_all(4)
+		retreat_style.set_content_margin_all(4)
+		burst_btn.add_theme_stylebox_override("normal", retreat_style)
+
+
+func show_cycle_ending():
+	"""Display the cycle ending - player becomes the next Progenitor"""
+	if cycle_ending_panel:
+		cycle_ending_panel.queue_free()
+
+	cycle_ending_panel = PanelContainer.new()
+	cycle_ending_panel.name = "CycleEndingPanel"
+	cycle_ending_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.0, 0.1, 0.95)
+	cycle_ending_panel.add_theme_stylebox_override("panel", style)
+
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	cycle_ending_panel.add_child(center)
+
+	var vbox = VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 20)
+	center.add_child(vbox)
+
+	var title = Label.new()
+	title.text = "THE PROGENITOR SHATTERS"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 48)
+	title.add_theme_color_override("font_color", VnpTypes.PROGENITOR_ACCENT)
+	vbox.add_child(title)
+
+	var subtitle = Label.new()
+	subtitle.text = "You are now the largest network."
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle.add_theme_font_size_override("font_size", 24)
+	subtitle.add_theme_color_override("font_color", Color.WHITE)
+	vbox.add_child(subtitle)
+
+	var cycle_text = Label.new()
+	cycle_text.text = "The cycle continues..."
+	cycle_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cycle_text.add_theme_font_size_override("font_size", 20)
+	cycle_text.add_theme_color_override("font_color", Color(0.6, 0.4, 0.7))
+	vbox.add_child(cycle_text)
+
+	# Add a spacer
+	var spacer = Control.new()
+	spacer.custom_minimum_size = Vector2(0, 40)
+	vbox.add_child(spacer)
+
+	var warning = Label.new()
+	warning.text = "Somewhere, in a distant sector,\na small faction detects something massive approaching.\nThey call it..."
+	warning.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	warning.add_theme_font_size_override("font_size", 16)
+	warning.add_theme_color_override("font_color", Color(0.5, 0.5, 0.5))
+	vbox.add_child(warning)
+
+	var mystery = Label.new()
+	mystery.text = '"???"'
+	mystery.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mystery.add_theme_font_size_override("font_size", 36)
+	mystery.add_theme_color_override("font_color", VnpTypes.PROGENITOR_ACCENT)
+	vbox.add_child(mystery)
+
+	# Menu button
+	var menu_btn = Button.new()
+	menu_btn.text = "Return to Menu"
+	menu_btn.custom_minimum_size = Vector2(200, 50)
+	menu_btn.pressed.connect(_on_menu_button_pressed)
+	vbox.add_child(menu_btn)
+
+	add_child(cycle_ending_panel)
+
+	# Fade in
+	cycle_ending_panel.modulate.a = 0.0
+	var tween = create_tween()
+	tween.tween_property(cycle_ending_panel, "modulate:a", 1.0, 2.0)
+
+
+func is_convergence_active() -> bool:
+	"""Check if convergence is happening (for button behavior changes)"""
+	return convergence_active

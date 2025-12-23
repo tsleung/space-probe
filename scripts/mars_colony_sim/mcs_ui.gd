@@ -5,6 +5,7 @@ extends Control
 
 # Preload in dependency order to ensure proper load
 const _MCSTypes = preload("res://scripts/mars_colony_sim/mcs_types.gd")
+const _MCSStore = preload("res://scripts/mars_colony_sim/mcs_store.gd")
 const _MCSPopulation = preload("res://scripts/mars_colony_sim/mcs_population.gd")
 const _MCSEconomy = preload("res://scripts/mars_colony_sim/mcs_economy.gd")
 const _MCSAI = preload("res://scripts/mars_colony_sim/mcs_ai.gd")
@@ -25,6 +26,7 @@ const _MCSAI = preload("res://scripts/mars_colony_sim/mcs_ai.gd")
 @onready var building_list: ItemList = $MainContent/LeftPanel/BuildingPanel/BuildingList
 @onready var build_button: Button = $MainContent/LeftPanel/BuildingPanel/BuildButton
 @onready var repair_button: Button = $MainContent/LeftPanel/BuildingPanel/RepairButton
+@onready var auto_repair_button: Button = $MainContent/LeftPanel/BuildingPanel/AutoRepairButton
 
 # Center panel - Population
 @onready var tab_container: TabContainer = $MainContent/CenterPanel/PopulationPanel/TabContainer
@@ -77,15 +79,19 @@ const _MCSAI = preload("res://scripts/mars_colony_sim/mcs_ai.gd")
 
 var _colony_store: Node = null
 var _auto_advance: bool = false
-var _auto_advance_timer: float = 0.0
-var _auto_advance_speed: float = 0.5
 var _selected_building_idx: int = -1
 var _selected_build_type: int = -1
 var _peak_population: int = 0
 
+# Continuous time system - weekly ticks for granular feedback
+var _game_weeks: float = 0.0          # Continuous week counter
+var _time_scale: float = 6.0          # Weeks per real second (6 = ~8.7 sec/year at 52 weeks)
+var _last_processed_week: int = 1     # Track when to trigger weekly game logic
+const WEEKS_PER_YEAR: int = 52
+
 # AI Spectate mode - enabled by default for watch mode
 var _ai_enabled: bool = true
-var _ai_personality = _MCSAI.Personality.PRAGMATIST
+var _ai_personality = _MCSAI.Personality.VISIONARY  # Visionary by default - dreams big!
 var _ai_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # ============================================================================
@@ -94,9 +100,9 @@ var _ai_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 func _ready():
 	# Create and initialize the colony store FIRST
-	_colony_store = MCSStore.new()
+	_colony_store = _MCSStore.new()
 	add_child(_colony_store)
-	_colony_store.start_new_colony(12)
+	_colony_store.start_new_colony(24)  # EPIC: 24 founders for faster progression!
 
 	# Give colony view access to store immediately
 	if colony_view:
@@ -106,20 +112,66 @@ func _ready():
 	_connect_store_signals()
 	_connect_ui_signals()
 
-	# Enable auto-play
+	# Enable auto-play with Visionary AI - idle game style!
 	_auto_advance = true
 	_ai_enabled = true
-	_auto_advance_speed = 0.5
+	_ai_personality = _MCSAI.Personality.VISIONARY
+	_time_scale = 6.0  # Default: 6 weeks/sec (~8.7 sec/year at 52 weeks) - satisfying pace
 
-	# Update button states
+	# Update button states to match
 	if auto_button:
 		auto_button.button_pressed = true
 	if ai_button:
 		ai_button.button_pressed = true
+	if ai_personality_button:
+		ai_personality_button.selected = 1  # Index 1 = Visionary
 
-	# Initialize log and sync UI immediately
+	# Set speed slider - 3x feels good for watching
+	if speed_slider:
+		speed_slider.value = 3.0
+	if speed_label:
+		speed_label.text = "3x"
+
+	# Hide manual controls by default - can be revealed if player wants
+	_setup_idle_mode()
+
+	# Initialize log with inspiring message
 	_init_log()
+	_add_log_entry({
+		"year": 1,
+		"message": "=== VISIONARY AI GOVERNOR ONLINE ===",
+		"log_type": "milestone"
+	})
+	_add_log_entry({
+		"year": 1,
+		"message": "Building humanity's future on Mars...",
+		"log_type": "info"
+	})
+
 	_sync_ui()
+
+func _setup_idle_mode():
+	"""Configure UI for idle/watch mode - Universal Paperclips style"""
+	# Hide manual year advance buttons - AI handles it
+	if advance_button:
+		advance_button.visible = false
+	if advance_5_button:
+		advance_5_button.visible = false
+
+	# Hide workers button - auto-assigned
+	if workers_button:
+		workers_button.visible = false
+
+	# Build/Repair are available but auto-repair is on
+	if auto_repair_button:
+		auto_repair_button.button_pressed = true
+
+	# The key controls that remain visible:
+	# - Speed slider (let player control pace)
+	# - AI toggle (let them take over if they want)
+	# - AI personality (experiment with different governors)
+	# - Save/Menu (essential)
+	# - Auto toggle (pause if needed)
 
 func _connect_store_signals():
 	if _colony_store:
@@ -152,6 +204,8 @@ func _connect_ui_signals():
 		build_button.pressed.connect(_on_build_pressed)
 	if repair_button:
 		repair_button.pressed.connect(_on_repair_pressed)
+	if auto_repair_button:
+		auto_repair_button.pressed.connect(_on_auto_repair_pressed)
 	if building_list:
 		building_list.item_selected.connect(_on_building_selected)
 	if election_button:
@@ -176,38 +230,67 @@ func _connect_ui_signals():
 		main_menu_button.pressed.connect(_on_menu)
 
 func _process(delta: float):
-	# Simple auto-advance loop
+	# Continuous time simulation with weekly ticks for granular feedback
 	if _auto_advance and _colony_store and not _colony_store.is_game_over():
-		_auto_advance_timer += delta
-		if _auto_advance_timer >= _auto_advance_speed:
-			_auto_advance_timer = 0.0
+		# Advance time continuously (smooth real-time flow)
+		_game_weeks += delta * _time_scale
 
-			# Resolve any events with AI
-			var events = _colony_store.get_active_events()
-			for event in events:
-				var choice = _MCSAI.choose_event_option(event, _colony_store.get_state(), _ai_personality, randf())
-				_colony_store.resolve_event(event.get("id", ""), choice)
-				# Trigger visual for event resolution
-				_trigger_event_visual(event)
+		# Update colony view with continuous time for smooth animations
+		if colony_view and colony_view.has_method("set_game_time"):
+			# Convert weeks to days for view animations (7 days per week)
+			colony_view.set_game_time(_game_weeks * 7.0, _time_scale * 7.0)
 
-			# Advance the year
-			_colony_store.advance_year()
+		# Check if we've completed a new week
+		var current_week = int(_game_weeks) + 1  # +1 because we start at week 1
 
-			# AI building (30% chance)
-			if randf() < 0.3:
-				var building = _MCSAI.choose_building(_colony_store.get_state(), _ai_personality, randf())
-				if building >= 0:
-					_colony_store.start_construction(building)
-					# Construction visual
-					if colony_view:
-						colony_view.trigger_event_effect("construction", 2.0)
+		if current_week > _last_processed_week:
+			_last_processed_week = current_week
 
-			# Random ambient events for visual interest (10% chance per year)
-			if randf() < 0.1:
-				_trigger_random_visual_event()
+			# Resolve any events with AI before advancing
+			if _ai_enabled:
+				var events = _colony_store.get_active_events()
+				for event in events:
+					var choice = _MCSAI.choose_event_option(event, _colony_store.get_state(), _ai_personality, randf())
+					_colony_store.resolve_event(event.get("id", ""), choice)
+					_trigger_event_visual(event)
 
-			# Scale robots with population
-			_update_robot_count()
+			# Track year before advancing for detecting year transitions
+			var year_before = _colony_store.get_year()
+
+			# Advance the game logic by one week
+			_colony_store.advance_week()
+
+			var year_after = _colony_store.get_year()
+
+			# Year-end actions (when year changes)
+			if year_after > year_before:
+				# Auto-assign workers each year for smooth operation
+				_colony_store.auto_assign_workers()
+
+				# Auto-repair broken buildings (idle mode convenience)
+				_auto_repair_all()
+
+				# AI building - 60% base chance, Visionary builds more aggressively
+				var build_chance = 0.6 if _ai_personality == _MCSAI.Personality.VISIONARY else 0.4
+				if randf() < build_chance:
+					var building = _MCSAI.choose_building(_colony_store.get_state(), _ai_personality, randf())
+					if building >= 0:
+						_colony_store.start_construction(building)
+						if colony_view:
+							colony_view.trigger_event_effect("construction", 2.0)
+
+				# Random ambient events for visual interest (10% chance per year)
+				if randf() < 0.1:
+					_trigger_random_visual_event()
+
+				# Scale robots with population
+				_update_robot_count()
+
+		# Continuous ambient events (storms, small visual effects)
+		# About 0.5% chance per week (scaled by delta)
+		var storm_check = randf() < 0.005 * _time_scale * delta
+		if storm_check and colony_view:
+			colony_view.trigger_event_effect("sandstorm", 2.0)
 
 func _trigger_event_visual(event: Dictionary):
 	"""Trigger visual effects based on event content"""
@@ -291,7 +374,9 @@ func _sync_ui():
 	if phase_label:
 		phase_label.text = "Era: %s" % _colony_store.get_phase_name()
 	if year_label:
-		year_label.text = "Year: %d" % state.current_year
+		# Show year and week for granular time display
+		var week = _colony_store.get_week() if _colony_store else 1
+		year_label.text = "Year %d, Week %d" % [state.current_year, week]
 	if population_label:
 		population_label.text = "Pop: %d" % colonists.size()
 	if stability_label:
@@ -358,11 +443,12 @@ func _update_resources(resources: Dictionary):
 
 			var name_label = Label.new()
 			name_label.text = resource_name.capitalize()
-			name_label.custom_minimum_size = Vector2(80, 0)
+			name_label.custom_minimum_size = Vector2(100, 0)
+			name_label.add_theme_font_size_override("font_size", 16)
 			hbox.add_child(name_label)
 
 			var bar = ProgressBar.new()
-			bar.custom_minimum_size = Vector2(80, 16)
+			bar.custom_minimum_size = Vector2(60, 20)
 			bar.max_value = 500.0  # Cap for display
 			bar.value = minf(amount, 500.0)
 			bar.show_percentage = false
@@ -370,15 +456,16 @@ func _update_resources(resources: Dictionary):
 
 			var value_label = Label.new()
 			value_label.text = "%.0f" % amount
-			value_label.custom_minimum_size = Vector2(40, 0)
+			value_label.custom_minimum_size = Vector2(55, 0)
+			value_label.add_theme_font_size_override("font_size", 16)
 			hbox.add_child(value_label)
 
 			# Flow indicator: +prod / -cons = net
 			var flow_label = Label.new()
 			var net_sign = "+" if net >= 0 else ""
 			flow_label.text = "%s%.0f/yr" % [net_sign, net]
-			flow_label.custom_minimum_size = Vector2(55, 0)
-			flow_label.add_theme_font_size_override("font_size", 11)
+			flow_label.custom_minimum_size = Vector2(70, 0)
+			flow_label.add_theme_font_size_override("font_size", 14)
 			if net < 0:
 				flow_label.modulate = Color.RED
 			elif net > 0:
@@ -415,7 +502,7 @@ func _update_buildings(buildings: Array):
 		var worker_text = " (%d/%d)" % [workers, capacity] if capacity > 0 else ""
 
 		var building_type = building.get("type", 0)
-		var name = MCSTypes.get_building_name(building_type)
+		var name = _MCSTypes.get_building_name(building_type)
 
 		# Add production/consumption info
 		var output_text = _get_building_output_text(building_type, is_operational)
@@ -434,59 +521,59 @@ func _get_building_output_text(building_type: int, is_operational: bool) -> Stri
 
 	match building_type:
 		# Housing
-		MCSTypes.BuildingType.HAB_POD:
+		_MCSTypes.BuildingType.HAB_POD:
 			return "→ 4 beds"
-		MCSTypes.BuildingType.APARTMENT_BLOCK:
+		_MCSTypes.BuildingType.APARTMENT_BLOCK:
 			return "→ 12 beds"
-		MCSTypes.BuildingType.LUXURY_QUARTERS:
+		_MCSTypes.BuildingType.LUXURY_QUARTERS:
 			return "→ 6 beds +morale"
-		MCSTypes.BuildingType.BARRACKS:
+		_MCSTypes.BuildingType.BARRACKS:
 			return "→ 20 beds"
 		# Food production
-		MCSTypes.BuildingType.GREENHOUSE:
+		_MCSTypes.BuildingType.GREENHOUSE:
 			return "→ +20 food/yr"
-		MCSTypes.BuildingType.HYDROPONICS:
+		_MCSTypes.BuildingType.HYDROPONICS:
 			return "→ +40 food/yr"
-		MCSTypes.BuildingType.PROTEIN_VATS:
+		_MCSTypes.BuildingType.PROTEIN_VATS:
 			return "→ +30 food/yr"
 		# Power
-		MCSTypes.BuildingType.SOLAR_ARRAY:
+		_MCSTypes.BuildingType.SOLAR_ARRAY:
 			return "→ +25 power"
-		MCSTypes.BuildingType.WIND_TURBINE:
+		_MCSTypes.BuildingType.WIND_TURBINE:
 			return "→ +15 power"
-		MCSTypes.BuildingType.RTG:
+		_MCSTypes.BuildingType.RTG:
 			return "→ +10 power"
-		MCSTypes.BuildingType.FISSION_REACTOR:
+		_MCSTypes.BuildingType.FISSION_REACTOR:
 			return "→ +100 power"
 		# Water
-		MCSTypes.BuildingType.WATER_EXTRACTOR:
+		_MCSTypes.BuildingType.WATER_EXTRACTOR:
 			return "→ +30 water/yr"
 		# Industry
-		MCSTypes.BuildingType.WORKSHOP:
+		_MCSTypes.BuildingType.WORKSHOP:
 			return "→ repairs"
-		MCSTypes.BuildingType.FACTORY:
+		_MCSTypes.BuildingType.FACTORY:
 			return "→ +parts/yr"
 		# Medical
-		MCSTypes.BuildingType.MEDICAL_BAY:
+		_MCSTypes.BuildingType.MEDICAL_BAY:
 			return "→ +health"
-		MCSTypes.BuildingType.HOSPITAL:
+		_MCSTypes.BuildingType.HOSPITAL:
 			return "→ ++health"
 		# Science/Education
-		MCSTypes.BuildingType.LAB:
+		_MCSTypes.BuildingType.LAB:
 			return "→ research"
-		MCSTypes.BuildingType.SCHOOL:
+		_MCSTypes.BuildingType.SCHOOL:
 			return "→ education"
-		MCSTypes.BuildingType.UNIVERSITY:
+		_MCSTypes.BuildingType.UNIVERSITY:
 			return "→ +skills"
 		# Social
-		MCSTypes.BuildingType.RECREATION_CENTER:
+		_MCSTypes.BuildingType.RECREATION_CENTER:
 			return "→ +morale"
-		MCSTypes.BuildingType.TEMPLE:
+		_MCSTypes.BuildingType.TEMPLE:
 			return "→ +stability"
-		MCSTypes.BuildingType.GOVERNMENT_HALL:
+		_MCSTypes.BuildingType.GOVERNMENT_HALL:
 			return "→ governance"
 		# Infrastructure
-		MCSTypes.BuildingType.LANDING_PAD:
+		_MCSTypes.BuildingType.LANDING_PAD:
 			return "→ trade"
 		_:
 			return ""
@@ -520,13 +607,13 @@ func _create_colonist_entry(colonist: Dictionary) -> Control:
 
 	var generation = colonist.get("generation", 0)
 	var gen_label = Label.new()
-	gen_label.text = MCSTypes.get_generation_name(generation)
+	gen_label.text = _MCSTypes.get_generation_name(generation)
 	gen_label.custom_minimum_size = Vector2(80, 0)
 	gen_label.modulate = _get_generation_color(generation)
 	hbox.add_child(gen_label)
 
 	var specialty_label = Label.new()
-	specialty_label.text = MCSTypes.get_specialty_name(colonist.get("specialty", 0))
+	specialty_label.text = _MCSTypes.get_specialty_name(colonist.get("specialty", 0))
 	specialty_label.custom_minimum_size = Vector2(80, 0)
 	hbox.add_child(specialty_label)
 
@@ -540,10 +627,10 @@ func _create_colonist_entry(colonist: Dictionary) -> Control:
 
 func _get_generation_color(generation: int) -> Color:
 	match generation:
-		MCSTypes.Generation.EARTH_BORN: return Color.GOLD
-		MCSTypes.Generation.FIRST_GEN: return Color.CYAN
-		MCSTypes.Generation.SECOND_GEN: return Color.GREEN
-		MCSTypes.Generation.THIRD_GEN_PLUS: return Color.YELLOW
+		_MCSTypes.Generation.EARTH_BORN: return Color.GOLD
+		_MCSTypes.Generation.FIRST_GEN: return Color.CYAN
+		_MCSTypes.Generation.SECOND_GEN: return Color.GREEN
+		_MCSTypes.Generation.THIRD_GEN_PLUS: return Color.YELLOW
 		_: return Color.WHITE
 
 func _update_statistics(state: Dictionary):
@@ -556,16 +643,16 @@ func _update_statistics(state: Dictionary):
 	var text = "[b]Population Breakdown[/b]\n\n"
 
 	text += "[u]By Generation:[/u]\n"
-	for gen in MCSTypes.Generation.values():
+	for gen in _MCSTypes.Generation.values():
 		var count = gen_breakdown.get(gen, 0)
 		if count > 0:
-			text += "  %s: %d\n" % [MCSTypes.get_generation_name(gen), count]
+			text += "  %s: %d\n" % [_MCSTypes.get_generation_name(gen), count]
 
 	text += "\n[u]By Faction:[/u]\n"
-	for faction in MCSTypes.Faction.values():
+	for faction in _MCSTypes.Faction.values():
 		var count = faction_breakdown.get(faction, 0)
 		if count > 0:
-			text += "  %s: %d\n" % [MCSTypes.get_faction_name(faction), count]
+			text += "  %s: %d\n" % [_MCSTypes.get_faction_name(faction), count]
 
 	text += "\n[u]Workforce:[/u]\n"
 	var workforce = _colony_store.get_workforce()
@@ -575,9 +662,9 @@ func _update_statistics(state: Dictionary):
 	var elderly = 0
 	var colonists = state.get("colonists", [])
 	for c in colonists:
-		if c.get("life_stage", -1) == MCSTypes.LifeStage.CHILD:
+		if c.get("life_stage", -1) == _MCSTypes.LifeStage.CHILD:
 			children += 1
-		elif c.get("life_stage", -1) == MCSTypes.LifeStage.ELDER:
+		elif c.get("life_stage", -1) == _MCSTypes.LifeStage.ELDER:
 			elderly += 1
 	text += "  Children: %d\n" % children
 	text += "  Elderly: %d\n" % elderly
@@ -594,21 +681,21 @@ func _update_politics(state: Dictionary):
 
 	var text = "[b]Political Overview[/b]\n\n"
 
-	text += "[u]Government:[/u] %s\n" % MCSTypes.get_political_system_name(pol.get("system", 0))
+	text += "[u]Government:[/u] %s\n" % _MCSTypes.get_political_system_name(pol.get("system", 0))
 	text += "[u]Stability:[/u] %.0f%%\n" % pol.get("stability", 75.0)
 	text += "[u]Independence:[/u] %.0f%%\n\n" % pol.get("independence_sentiment", 0.0)
 
 	if pol.get("current_leader", ""):
 		text += "[u]Leader:[/u] %s\n" % pol.current_leader
 	if pol.get("ruling_faction", -1) >= 0:
-		text += "[u]Ruling Faction:[/u] %s\n\n" % MCSTypes.get_faction_name(pol.ruling_faction)
+		text += "[u]Ruling Faction:[/u] %s\n\n" % _MCSTypes.get_faction_name(pol.ruling_faction)
 
 	text += "[u]Faction Support:[/u]\n"
 	var faction_standings = pol.get("faction_standings", {})
-	for faction in MCSTypes.Faction.values():
+	for faction in _MCSTypes.Faction.values():
 		var support = faction_standings.get(faction, 0.0)
 		if support > 0:
-			text += "  %s: %.0f%%\n" % [MCSTypes.get_faction_name(faction), support * 100]
+			text += "  %s: %.0f%%\n" % [_MCSTypes.get_faction_name(faction), support * 100]
 
 	politics_label.text = text
 
@@ -892,7 +979,7 @@ func _on_advance_5_years():
 
 func _on_auto_toggled(toggled: bool):
 	_auto_advance = toggled
-	_auto_advance_timer = 0.0
+	# Time continues from where it left off (no reset needed)
 
 func _on_ai_toggled(toggled: bool):
 	set_ai_enabled(toggled)
@@ -935,8 +1022,10 @@ func _on_ai_personality_changed(index: int):
 		})
 
 func _on_speed_changed(value: float):
-	_auto_advance_speed = 1.0 / value
-	speed_label.text = "%dx" % int(value)
+	# Time scale: 1x = 2 weeks/sec (~26 sec/year), 10x = 20 weeks/sec (~2.6 sec/year)
+	_time_scale = 2.0 * value
+	if speed_label:
+		speed_label.text = "%dx" % int(value)
 
 func _on_auto_assign_workers():
 	_colony_store.auto_assign_workers()
@@ -952,7 +1041,9 @@ func _on_menu():
 func _on_restart():
 	game_over_overlay.visible = false
 	_peak_population = 0
-	_colony_store.start_new_colony(12)
+	_game_weeks = 0.0
+	_last_processed_week = 1
+	_colony_store.start_new_colony(24)  # EPIC: 24 founders for faster progression!
 	colony_log.clear()
 	_init_log()
 	_sync_ui()
@@ -974,6 +1065,20 @@ func _on_repair_pressed():
 		var building = buildings[_selected_building_idx]
 		_colony_store.repair_building(building.id)
 
+func _on_auto_repair_pressed():
+	"""Repair all broken buildings automatically"""
+	_auto_repair_all()
+	_sync_ui()
+
+func _auto_repair_all():
+	"""Silent auto-repair for idle mode"""
+	if not _colony_store:
+		return
+	var buildings = _colony_store.get_buildings()
+	for building in buildings:
+		if not building.get("is_operational", true) and building.get("construction_progress", 1.0) >= 1.0:
+			_colony_store.repair_building(building.id)
+
 func _on_build_type_selected(index: int):
 	_selected_build_type = index
 	_update_build_cost()
@@ -984,7 +1089,7 @@ func _on_build_cancel():
 
 func _on_build_confirm():
 	if _selected_build_type >= 0:
-		var building_types = MCSTypes.BuildingType.values()
+		var building_types = _MCSTypes.BuildingType.values()
 		if _selected_build_type < building_types.size():
 			_colony_store.start_construction(building_types[_selected_build_type])
 	build_dialog.visible = false
@@ -992,8 +1097,8 @@ func _on_build_confirm():
 
 func _populate_build_types():
 	build_type_list.clear()
-	for building_type in MCSTypes.BuildingType.values():
-		build_type_list.add_item(MCSTypes.get_building_name(building_type))
+	for building_type in _MCSTypes.BuildingType.values():
+		build_type_list.add_item(_MCSTypes.get_building_name(building_type))
 
 func _update_build_cost():
 	if _selected_build_type < 0:
@@ -1002,23 +1107,23 @@ func _update_build_cost():
 
 	# Building costs (simplified)
 	var costs = {
-		MCSTypes.BuildingType.HAB_POD: {"materials": 50, "power": 10},
-		MCSTypes.BuildingType.APARTMENT_BLOCK: {"materials": 100, "power": 25},
-		MCSTypes.BuildingType.GREENHOUSE: {"materials": 40, "power": 15},
-		MCSTypes.BuildingType.HYDROPONICS: {"materials": 60, "power": 20},
-		MCSTypes.BuildingType.SOLAR_ARRAY: {"materials": 30, "power": 0},
-		MCSTypes.BuildingType.FISSION_REACTOR: {"materials": 150, "power": 0},
-		MCSTypes.BuildingType.WATER_EXTRACTOR: {"materials": 60, "power": 20},
-		MCSTypes.BuildingType.WORKSHOP: {"materials": 70, "power": 15},
-		MCSTypes.BuildingType.FACTORY: {"materials": 120, "power": 30},
-		MCSTypes.BuildingType.MEDICAL_BAY: {"materials": 100, "power": 20},
-		MCSTypes.BuildingType.SCHOOL: {"materials": 60, "power": 10},
-		MCSTypes.BuildingType.LAB: {"materials": 90, "power": 25},
-		MCSTypes.BuildingType.GOVERNMENT_HALL: {"materials": 120, "power": 30},
-		MCSTypes.BuildingType.LANDING_PAD: {"materials": 200, "power": 50},
+		_MCSTypes.BuildingType.HAB_POD: {"materials": 50, "power": 10},
+		_MCSTypes.BuildingType.APARTMENT_BLOCK: {"materials": 100, "power": 25},
+		_MCSTypes.BuildingType.GREENHOUSE: {"materials": 40, "power": 15},
+		_MCSTypes.BuildingType.HYDROPONICS: {"materials": 60, "power": 20},
+		_MCSTypes.BuildingType.SOLAR_ARRAY: {"materials": 30, "power": 0},
+		_MCSTypes.BuildingType.FISSION_REACTOR: {"materials": 150, "power": 0},
+		_MCSTypes.BuildingType.WATER_EXTRACTOR: {"materials": 60, "power": 20},
+		_MCSTypes.BuildingType.WORKSHOP: {"materials": 70, "power": 15},
+		_MCSTypes.BuildingType.FACTORY: {"materials": 120, "power": 30},
+		_MCSTypes.BuildingType.MEDICAL_BAY: {"materials": 100, "power": 20},
+		_MCSTypes.BuildingType.SCHOOL: {"materials": 60, "power": 10},
+		_MCSTypes.BuildingType.LAB: {"materials": 90, "power": 25},
+		_MCSTypes.BuildingType.GOVERNMENT_HALL: {"materials": 120, "power": 30},
+		_MCSTypes.BuildingType.LANDING_PAD: {"materials": 200, "power": 50},
 	}
 
-	var building_types = MCSTypes.BuildingType.values()
+	var building_types = _MCSTypes.BuildingType.values()
 	if _selected_build_type < building_types.size():
 		var type = building_types[_selected_build_type]
 		var cost = costs.get(type, {"materials": 50, "power": 10})
@@ -1080,7 +1185,7 @@ func _ai_maybe_build():
 		if _colony_store.start_construction(building_type):
 			_add_log_entry({
 				"year": _colony_store.get_year(),
-				"message": "AI built: %s" % MCSTypes.get_building_name(building_type),
+				"message": "AI built: %s" % _MCSTypes.get_building_name(building_type),
 				"log_type": "info"
 			})
 

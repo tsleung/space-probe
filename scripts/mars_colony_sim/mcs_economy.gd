@@ -5,6 +5,10 @@ class_name MCSEconomy
 ## Pure functions for resource production, consumption, and building operations
 ## All functions are static and deterministic
 
+# Preload dependencies
+const _MCSTypes = preload("res://scripts/mars_colony_sim/mcs_types.gd")
+const _MCSPopulation = preload("res://scripts/mars_colony_sim/mcs_population.gd")
+
 # ============================================================================
 # CONSTANTS
 # ============================================================================
@@ -28,7 +32,7 @@ static func calc_yearly_production(buildings: Array, colonists: Array, _resource
 			continue
 
 		var efficiency = calc_building_efficiency(building, colonists)
-		var building_def = MCSTypes.get_building_definition(building.type)
+		var building_def = _MCSTypes.get_building_definition(building.type)
 
 		var produces = building_def.get("produces", {})
 		for resource_name in produces:
@@ -65,7 +69,7 @@ static func calc_yearly_consumption(colonists_or_buildings, buildings_or_none = 
 	var consumption: Dictionary = {}
 
 	# Colonist consumption
-	var alive_count = MCSPopulation.count_alive(colonists)
+	var alive_count = _MCSPopulation.count_alive(colonists)
 	consumption["food"] = alive_count * FOOD_PER_COLONIST
 	consumption["water"] = alive_count * WATER_PER_COLONIST
 	consumption["oxygen"] = alive_count * OXYGEN_PER_COLONIST
@@ -75,7 +79,7 @@ static func calc_yearly_consumption(colonists_or_buildings, buildings_or_none = 
 	for building in buildings:
 		if not building.is_operational or building.is_under_construction:
 			continue
-		var building_def = MCSTypes.get_building_definition(building.type)
+		var building_def = _MCSTypes.get_building_definition(building.type)
 		total_power += building_def.get("power_consumption", 0.0)
 
 	consumption["power"] = total_power
@@ -119,7 +123,7 @@ static func calc_building_efficiency(building: Dictionary, colonists: Array) -> 
 	var efficiency = building.condition / 100.0
 
 	# Worker staffing
-	var building_def = MCSTypes.get_building_definition(building.type)
+	var building_def = _MCSTypes.get_building_definition(building.type)
 	var required = building_def.get("required_workers", 0)
 
 	if required > 0:
@@ -155,7 +159,7 @@ static func apply_building_maintenance(buildings: Array, resources: Dictionary, 
 			# Check for failure
 			if updated.condition < 30 and rand < 0.3:
 				updated.is_operational = false
-				breakdowns.append(MCSTypes.get_building_name(building.type))
+				breakdowns.append(_MCSTypes.get_building_name(building.type))
 
 		new_buildings.append(updated)
 
@@ -180,8 +184,8 @@ static func start_construction(buildings: Array, resources: Dictionary, building
 		new_resources[resource_name] -= build_cost[resource_name]
 
 	# Create building
-	var building_def = MCSTypes.get_building_definition(building_type)
-	var new_building = MCSTypes.create_building({
+	var building_def = _MCSTypes.get_building_definition(building_type)
+	var new_building = _MCSTypes.create_building({
 		"type": building_type,
 		"is_operational": false,
 		"is_under_construction": true,
@@ -224,7 +228,7 @@ static func auto_assign_workers(colonists: Array, buildings: Array) -> Dictionar
 	var available_workers: Array = []
 
 	for c in colonists:
-		if c.is_alive and c.life_stage == MCSTypes.LifeStage.ADULT and c.health >= 40:
+		if c.is_alive and c.life_stage == _MCSTypes.LifeStage.ADULT and c.health >= 40:
 			available_workers.append(c)
 
 	var new_buildings: Array = []
@@ -234,7 +238,7 @@ static func auto_assign_workers(colonists: Array, buildings: Array) -> Dictionar
 			new_buildings.append(building)
 			continue
 
-		var building_def = MCSTypes.get_building_definition(building.type)
+		var building_def = _MCSTypes.get_building_definition(building.type)
 		var required = building_def.get("required_workers", 0)
 
 		if required == 0 or available_workers.is_empty():
@@ -246,7 +250,7 @@ static func auto_assign_workers(colonists: Array, buildings: Array) -> Dictionar
 			assigned.append(available_workers[i].id)
 
 		available_workers = available_workers.slice(assigned.size())
-		new_buildings.append(MCSTypes.with_field(building, "assigned_workers", assigned))
+		new_buildings.append(_MCSTypes.with_field(building, "assigned_workers", assigned))
 
 	return {
 		"buildings": new_buildings,
@@ -260,12 +264,12 @@ static func auto_assign_workers(colonists: Array, buildings: Array) -> Dictionar
 ## Calculate power balance
 static func calc_power_balance(buildings: Array, colonists: Array) -> Dictionary:
 	var generation = 0.0
-	var consumption = MCSPopulation.count_alive(colonists) * POWER_PER_COLONIST
+	var consumption = _MCSPopulation.count_alive(colonists) * POWER_PER_COLONIST
 
 	for building in buildings:
 		if not building.is_operational or building.is_under_construction:
 			continue
-		var building_def = MCSTypes.get_building_definition(building.type)
+		var building_def = _MCSTypes.get_building_definition(building.type)
 		generation += building_def.get("power_generation", 0.0) * calc_building_efficiency(building, colonists)
 		consumption += building_def.get("power_consumption", 0.0)
 
@@ -282,7 +286,7 @@ static func calc_housing_balance(buildings: Array, colonists: Array) -> Dictiona
 		if building.is_operational and not building.is_under_construction:
 			capacity += building.housing_capacity
 
-	var population = MCSPopulation.count_alive(colonists)
+	var population = _MCSPopulation.count_alive(colonists)
 	return {
 		"capacity": capacity,
 		"used": population,
@@ -295,13 +299,13 @@ static func calc_housing_balance(buildings: Array, colonists: Array) -> Dictiona
 
 static func _get_construction_cost(building_type: int) -> Dictionary:
 	match building_type:
-		MCSTypes.BuildingType.HAB_POD:
+		_MCSTypes.BuildingType.HAB_POD:
 			return {"building_materials": 50, "machine_parts": 10}
-		MCSTypes.BuildingType.GREENHOUSE:
+		_MCSTypes.BuildingType.GREENHOUSE:
 			return {"building_materials": 100, "machine_parts": 20}
-		MCSTypes.BuildingType.SOLAR_ARRAY:
+		_MCSTypes.BuildingType.SOLAR_ARRAY:
 			return {"building_materials": 50}
-		MCSTypes.BuildingType.MEDICAL_BAY:
+		_MCSTypes.BuildingType.MEDICAL_BAY:
 			return {"building_materials": 80, "machine_parts": 30}
 		_:
 			return {"building_materials": 100, "machine_parts": 20}

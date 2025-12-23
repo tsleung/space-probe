@@ -5,6 +5,9 @@ class_name MCSPolitics
 ## Only handles stability and basic faction standings
 ## All functions are static and deterministic
 
+# Preload dependencies
+const _MCSTypes = preload("res://scripts/mars_colony_sim/mcs_types.gd")
+
 # ============================================================================
 # CONSTANTS
 # ============================================================================
@@ -23,7 +26,7 @@ static func update_faction_standings(politics: Dictionary, colonists: Array, res
 	# Simple drift based on resource state
 	var food = resources.get("food", 0.0)
 	if food < 100:
-		standings[MCSTypes.Faction.PRAGMATISTS] = minf(100, standings.get(MCSTypes.Faction.PRAGMATISTS, 50) + 2.0)
+		standings[_MCSTypes.Faction.PRAGMATISTS] = minf(100, standings.get(_MCSTypes.Faction.PRAGMATISTS, 50) + 2.0)
 
 	# Mars-born influence grows over time
 	var mars_born = 0
@@ -31,13 +34,13 @@ static func update_faction_standings(politics: Dictionary, colonists: Array, res
 	for c in colonists:
 		if c.is_alive:
 			total += 1
-			if c.generation != MCSTypes.Generation.EARTH_BORN:
+			if c.generation != _MCSTypes.Generation.EARTH_BORN:
 				mars_born += 1
 
 	if total > 0 and float(mars_born) / float(total) > 0.5:
-		standings[MCSTypes.Faction.MARTIANS] = minf(100, standings.get(MCSTypes.Faction.MARTIANS, 50) + 1.0)
+		standings[_MCSTypes.Faction.MARTIANS] = minf(100, standings.get(_MCSTypes.Faction.MARTIANS, 50) + 1.0)
 
-	return MCSTypes.with_field(politics, "faction_standings", standings)
+	return _MCSTypes.with_field(politics, "faction_standings", standings)
 
 # ============================================================================
 # STABILITY (simplified)
@@ -70,14 +73,14 @@ static func update_stability(politics: Dictionary, colonists_or_change = null, r
 			change -= 3.0
 
 	var new_stability = clampf(politics.get("stability", 75.0) + change, 0.0, 100.0)
-	return MCSTypes.with_field(politics, "stability", new_stability)
+	return _MCSTypes.with_field(politics, "stability", new_stability)
 
 static func _calc_average_morale(colonists: Array) -> float:
 	var total = 0.0
 	var count = 0
 
 	for c in colonists:
-		if c.is_alive and c.life_stage == MCSTypes.LifeStage.ADULT:
+		if c.is_alive and c.life_stage == _MCSTypes.LifeStage.ADULT:
 			total += c.morale
 			count += 1
 
@@ -106,9 +109,9 @@ static func hold_independence_vote(politics: Dictionary, colonists: Array, rando
 	var mars_born = 0
 	var total = 0
 	for c in colonists:
-		if c.is_alive and c.life_stage == MCSTypes.LifeStage.ADULT:
+		if c.is_alive and c.life_stage == _MCSTypes.LifeStage.ADULT:
 			total += 1
-			if c.generation != MCSTypes.Generation.EARTH_BORN:
+			if c.generation != _MCSTypes.Generation.EARTH_BORN:
 				mars_born += 1
 
 	var mars_ratio = float(mars_born) / maxf(float(total), 1.0)
@@ -124,16 +127,16 @@ static func hold_independence_vote(politics: Dictionary, colonists: Array, rando
 	}
 
 ## Get system name (for display)
-static func get_system_name(system: MCSTypes.PoliticalSystem) -> String:
+static func get_system_name(system: _MCSTypes.PoliticalSystem) -> String:
 	match system:
-		MCSTypes.PoliticalSystem.MISSION_COMMAND:
+		_MCSTypes.PoliticalSystem.MISSION_COMMAND:
 			return "Mission Command"
-		MCSTypes.PoliticalSystem.ADVISORY_COUNCIL:
+		_MCSTypes.PoliticalSystem.ADVISORY_COUNCIL:
 			return "Advisory Council"
-		MCSTypes.PoliticalSystem.REPRESENTATIVE:
+		_MCSTypes.PoliticalSystem.REPRESENTATIVE:
 			return "Representative Government"
-		MCSTypes.PoliticalSystem.CONSTITUTIONAL:
+		_MCSTypes.PoliticalSystem.CONSTITUTIONAL:
 			return "Constitutional Government"
-		MCSTypes.PoliticalSystem.INDEPENDENT_STATE:
+		_MCSTypes.PoliticalSystem.INDEPENDENT_STATE:
 			return "Independent State"
 	return "Unknown"

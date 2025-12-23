@@ -5,6 +5,9 @@ class_name MCSPopulation
 ## Pure functions for colonist simulation: aging, birth, death, relationships
 ## All functions are static and deterministic (random values passed in)
 
+# Preload dependencies
+const _MCSTypes = preload("res://scripts/mars_colony_sim/mcs_types.gd")
+
 # ============================================================================
 # CONSTANTS
 # ============================================================================
@@ -53,7 +56,7 @@ static func advance_year(colonists: Array, year: int, resources: Dictionary, bui
 		var updated = _age_colonist(colonist, year, rand)
 
 		# Check for coming of age (adolescent -> adult)
-		if old_stage == MCSTypes.LifeStage.ADOLESCENT and updated.life_stage == MCSTypes.LifeStage.ADULT:
+		if old_stage == _MCSTypes.LifeStage.ADOLESCENT and updated.life_stage == _MCSTypes.LifeStage.ADULT:
 			new_adults.append(updated)
 			events.append({
 				"type": "coming_of_age",
@@ -68,7 +71,7 @@ static func advance_year(colonists: Array, year: int, resources: Dictionary, bui
 		var death_result = _check_death(updated, year, death_rand)
 
 		if death_result.died:
-			updated = MCSTypes.with_fields(updated, {
+			updated = _MCSTypes.with_fields(updated, {
 				"is_alive": false,
 				"death_year": year,
 				"death_cause": death_result.cause
@@ -89,14 +92,14 @@ static func advance_year(colonists: Array, year: int, resources: Dictionary, bui
 
 		# Check for pregnancy progression
 		if updated.is_pregnant:
-			updated = MCSTypes.with_field(updated, "pregnancy_months", updated.pregnancy_months + 12)
+			updated = _MCSTypes.with_field(updated, "pregnancy_months", updated.pregnancy_months + 12)
 			if updated.pregnancy_months >= PREGNANCY_MONTHS:
 				# Birth!
 				var birth_rand = _get_random(random_values, random_idx)
 				random_idx += 1
 				var child = _create_child(updated, colonists, year, birth_rand)
 				births.append(child)
-				updated = MCSTypes.with_fields(updated, {
+				updated = _MCSTypes.with_fields(updated, {
 					"is_pregnant": false,
 					"pregnancy_months": 0,
 					"child_ids": updated.child_ids + [child.id]
@@ -130,7 +133,7 @@ static func advance_year(colonists: Array, year: int, resources: Dictionary, bui
 
 static func _age_colonist(colonist: Dictionary, year: int, rand: float) -> Dictionary:
 	var new_age = colonist.age + 1
-	var new_stage = MCSTypes._calc_life_stage(new_age)
+	var new_stage = _MCSTypes._calc_life_stage(new_age)
 
 	var updates = {
 		"age": new_age,
@@ -138,23 +141,23 @@ static func _age_colonist(colonist: Dictionary, year: int, rand: float) -> Dicti
 	}
 
 	# Stat changes based on age
-	if new_stage == MCSTypes.LifeStage.ELDER:
+	if new_stage == _MCSTypes.LifeStage.ELDER:
 		# Elders have declining health
 		updates["health"] = maxf(0, colonist.health - 2.0 - rand * 3.0)
-	elif new_stage == MCSTypes.LifeStage.CHILD:
+	elif new_stage == _MCSTypes.LifeStage.CHILD:
 		# Children grow healthier (usually)
 		updates["health"] = minf(100, colonist.health + 1.0)
 		# Children learn faster
 		updates["skill_level"] = minf(100, colonist.skill_level + 2.0 + rand * 3.0)
 
 	# Skill growth for working adults
-	if new_stage == MCSTypes.LifeStage.ADULT and colonist.is_working:
+	if new_stage == _MCSTypes.LifeStage.ADULT and colonist.is_working:
 		updates["skill_level"] = minf(100, colonist.skill_level + 1.0 + rand * 2.0)
 
 	# Radiation accumulates
 	updates["radiation_exposure"] = colonist.radiation_exposure + 0.5 + rand * 0.5
 
-	return MCSTypes.with_fields(colonist, updates)
+	return _MCSTypes.with_fields(colonist, updates)
 
 static func _check_death(colonist: Dictionary, year: int, rand: float) -> Dictionary:
 	var death_chance = 0.0
@@ -164,10 +167,10 @@ static func _check_death(colonist: Dictionary, year: int, rand: float) -> Dictio
 	if colonist.age >= MAX_AGE:
 		death_chance = 1.0
 		cause = "old age"
-	elif colonist.life_stage == MCSTypes.LifeStage.ELDER:
+	elif colonist.life_stage == _MCSTypes.LifeStage.ELDER:
 		death_chance = ELDER_MORTALITY_BASE * (1.0 + (colonist.age - 60) * 0.05)
 		cause = "natural causes"
-	elif colonist.life_stage == MCSTypes.LifeStage.INFANT or colonist.life_stage == MCSTypes.LifeStage.CHILD:
+	elif colonist.life_stage == _MCSTypes.LifeStage.INFANT or colonist.life_stage == _MCSTypes.LifeStage.CHILD:
 		death_chance = CHILD_MORTALITY_RATE
 		cause = "childhood illness"
 
@@ -244,7 +247,7 @@ static func _check_pregnancies(colonists: Array, year: int, random_values: Array
 		random_idx += 1
 
 		if rand2 < fertility_chance:
-			updated = MCSTypes.with_fields(updated, {
+			updated = _MCSTypes.with_fields(updated, {
 				"is_pregnant": true,
 				"pregnancy_months": 0
 			})
@@ -308,14 +311,14 @@ static func _create_child(mother: Dictionary, all_colonists: Array, year: int, r
 	var last_name = mother.get("last_name", "Unknown")
 
 	# Generate child
-	var child = MCSTypes.create_colonist({
+	var child = _MCSTypes.create_colonist({
 		"first_name": first_name,
 		"last_name": last_name,
 		"display_name": "%s %s" % [first_name, last_name],
 		"age": 0,
 		"birth_year": year,
 		"generation": _calc_child_generation(mother, father),
-		"life_stage": MCSTypes.LifeStage.INFANT,
+		"life_stage": _MCSTypes.LifeStage.INFANT,
 		"health": 70.0 + rand * 20.0,
 		"morale": 80.0,
 		"fatigue": 10.0,
@@ -325,22 +328,22 @@ static func _create_child(mother: Dictionary, all_colonists: Array, year: int, r
 	})
 
 	if father:
-		child = MCSTypes.with_field(child, "parent_ids", [mother.id, father.id])
+		child = _MCSTypes.with_field(child, "parent_ids", [mother.id, father.id])
 
 	return child
 
-static func _calc_child_generation(mother: Dictionary, father: Dictionary) -> MCSTypes.Generation:
+static func _calc_child_generation(mother: Dictionary, father: Dictionary) -> _MCSTypes.Generation:
 	var parent_gen = mother.generation
 	if father:
 		parent_gen = maxi(mother.generation, father.generation)
 
 	match parent_gen:
-		MCSTypes.Generation.EARTH_BORN:
-			return MCSTypes.Generation.FIRST_GEN
-		MCSTypes.Generation.FIRST_GEN:
-			return MCSTypes.Generation.SECOND_GEN
+		_MCSTypes.Generation.EARTH_BORN:
+			return _MCSTypes.Generation.FIRST_GEN
+		_MCSTypes.Generation.FIRST_GEN:
+			return _MCSTypes.Generation.SECOND_GEN
 		_:
-			return MCSTypes.Generation.THIRD_GEN_PLUS
+			return _MCSTypes.Generation.THIRD_GEN_PLUS
 
 static func _inherit_traits(mother: Dictionary, father: Dictionary, rand: float) -> Array:
 	var traits: Array = []
@@ -364,8 +367,8 @@ static func _inherit_traits(mother: Dictionary, father: Dictionary, rand: float)
 
 	# Mars-born children get Mars-adapted trait chance
 	if rand < 0.3:
-		if MCSTypes.ColonistTrait.MARS_ADAPTED not in traits:
-			traits.append(MCSTypes.ColonistTrait.MARS_ADAPTED)
+		if _MCSTypes.ColonistTrait.MARS_ADAPTED not in traits:
+			traits.append(_MCSTypes.ColonistTrait.MARS_ADAPTED)
 
 	# Limit traits
 	while traits.size() > 5:
@@ -373,8 +376,8 @@ static func _inherit_traits(mother: Dictionary, father: Dictionary, rand: float)
 
 	return traits
 
-static func _random_trait(rand: float) -> MCSTypes.ColonistTrait:
-	var trait_values = MCSTypes.ColonistTrait.values()
+static func _random_trait(rand: float) -> _MCSTypes.ColonistTrait:
+	var trait_values = _MCSTypes.ColonistTrait.values()
 	var idx = int(rand * trait_values.size()) % trait_values.size()
 	return trait_values[idx]
 
@@ -407,7 +410,7 @@ static func update_relationships(colonists: Array, year: int, random_values: Arr
 			var drift = _calc_relationship_drift(colonist, other, rand)
 			new_relationships[other.id] = clampf(current + drift, -100.0, 100.0)
 
-		updated.append(MCSTypes.with_field(colonist, "relationships", new_relationships))
+		updated.append(_MCSTypes.with_field(colonist, "relationships", new_relationships))
 
 	return updated
 
@@ -419,11 +422,11 @@ static func _calc_relationship_drift(a: Dictionary, b: Dictionary, rand: float) 
 	drift += compatibility * (rand - 0.5) * 5.0
 
 	# Same faction = bonus
-	if a.faction == b.faction and a.faction != MCSTypes.Faction.NONE:
+	if a.faction == b.faction and a.faction != _MCSTypes.Faction.NONE:
 		drift += 2.0
 
 	# Different faction = friction
-	if a.faction != b.faction and a.faction != MCSTypes.Faction.NONE and b.faction != MCSTypes.Faction.NONE:
+	if a.faction != b.faction and a.faction != _MCSTypes.Faction.NONE and b.faction != _MCSTypes.Faction.NONE:
 		drift -= 1.0
 
 	# Family bonds
@@ -439,9 +442,9 @@ static func _calc_trait_compatibility(traits_a: Array, traits_b: Array) -> float
 
 	# Complementary traits
 	var complementary = [
-		[MCSTypes.ColonistTrait.OPTIMIST, MCSTypes.ColonistTrait.PESSIMIST],  # Balance
-		[MCSTypes.ColonistTrait.EXTROVERT, MCSTypes.ColonistTrait.INTROVERT],  # Some friction
-		[MCSTypes.ColonistTrait.CREATIVE, MCSTypes.ColonistTrait.METHODICAL],  # Some friction
+		[_MCSTypes.ColonistTrait.OPTIMIST, _MCSTypes.ColonistTrait.PESSIMIST],  # Balance
+		[_MCSTypes.ColonistTrait.EXTROVERT, _MCSTypes.ColonistTrait.INTROVERT],  # Some friction
+		[_MCSTypes.ColonistTrait.CREATIVE, _MCSTypes.ColonistTrait.METHODICAL],  # Some friction
 	]
 
 	# Same traits = good
@@ -469,14 +472,14 @@ static func check_romance(colonists: Array, year: int, random_values: Array) -> 
 		var a = updated[i]
 		if not a.is_alive or not a.spouse_id.is_empty():
 			continue
-		if a.life_stage != MCSTypes.LifeStage.ADULT:
+		if a.life_stage != _MCSTypes.LifeStage.ADULT:
 			continue
 
 		for j in range(i + 1, updated.size()):
 			var b = updated[j]
 			if not b.is_alive or not b.spouse_id.is_empty():
 				continue
-			if b.life_stage != MCSTypes.LifeStage.ADULT:
+			if b.life_stage != _MCSTypes.LifeStage.ADULT:
 				continue
 
 			var relationship_a_to_b = a.relationships.get(b.id, 0.0)
@@ -488,8 +491,8 @@ static func check_romance(colonists: Array, year: int, random_values: Array) -> 
 
 				if rand < 0.2:  # 20% chance per year if compatible
 					# Marriage!
-					updated[i] = MCSTypes.with_field(a, "spouse_id", b.id)
-					updated[j] = MCSTypes.with_field(b, "spouse_id", a.id)
+					updated[i] = _MCSTypes.with_field(a, "spouse_id", b.id)
+					updated[j] = _MCSTypes.with_field(b, "spouse_id", a.id)
 					events.append({
 						"type": "marriage",
 						"colonist_a_id": a.id,
@@ -514,9 +517,9 @@ static func calc_effectiveness(colonist: Dictionary) -> float:
 	if not colonist.is_alive:
 		return 0.0
 
-	if colonist.life_stage == MCSTypes.LifeStage.INFANT:
+	if colonist.life_stage == _MCSTypes.LifeStage.INFANT:
 		return 0.0
-	if colonist.life_stage == MCSTypes.LifeStage.CHILD:
+	if colonist.life_stage == _MCSTypes.LifeStage.CHILD:
 		return 0.0
 
 	var health_factor = colonist.health / 100.0
@@ -526,22 +529,22 @@ static func calc_effectiveness(colonist: Dictionary) -> float:
 
 	# Life stage modifier
 	var stage_mod = 1.0
-	if colonist.life_stage == MCSTypes.LifeStage.ADOLESCENT:
+	if colonist.life_stage == _MCSTypes.LifeStage.ADOLESCENT:
 		stage_mod = 0.6
-	elif colonist.life_stage == MCSTypes.LifeStage.ELDER:
+	elif colonist.life_stage == _MCSTypes.LifeStage.ELDER:
 		stage_mod = 0.7
 
 	# Trait modifiers
 	var trait_mod = 1.0
 	for t in colonist.traits:
 		match t:
-			MCSTypes.ColonistTrait.OPTIMIST:
+			_MCSTypes.ColonistTrait.OPTIMIST:
 				trait_mod *= 1.1
-			MCSTypes.ColonistTrait.PESSIMIST:
+			_MCSTypes.ColonistTrait.PESSIMIST:
 				trait_mod *= 0.95
-			MCSTypes.ColonistTrait.PERFECTIONIST:
+			_MCSTypes.ColonistTrait.PERFECTIONIST:
 				trait_mod *= 1.15
-			MCSTypes.ColonistTrait.STEADY_HANDS:
+			_MCSTypes.ColonistTrait.STEADY_HANDS:
 				trait_mod *= 1.1
 
 	var base = health_factor * 0.3 + morale_factor * 0.3 + fatigue_factor * 0.2 + skill_factor * 0.2
@@ -592,20 +595,20 @@ static func update_morale(colonists: Array, conditions: Dictionary, random_value
 		# Trait-based morale
 		for t in colonist.traits:
 			match t:
-				MCSTypes.ColonistTrait.OPTIMIST:
+				_MCSTypes.ColonistTrait.OPTIMIST:
 					morale_change += 2.0
-				MCSTypes.ColonistTrait.PESSIMIST:
+				_MCSTypes.ColonistTrait.PESSIMIST:
 					morale_change -= 1.0
-				MCSTypes.ColonistTrait.EARTH_LONGING:
+				_MCSTypes.ColonistTrait.EARTH_LONGING:
 					morale_change -= 1.5
-				MCSTypes.ColonistTrait.MARS_ADAPTED:
+				_MCSTypes.ColonistTrait.MARS_ADAPTED:
 					morale_change += 1.0
 
 		# Random variance
 		morale_change += (rand - 0.5) * 4.0
 
 		var new_morale = clampf(colonist.morale + morale_change, 0.0, 100.0)
-		updated.append(MCSTypes.with_field(colonist, "morale", new_morale))
+		updated.append(_MCSTypes.with_field(colonist, "morale", new_morale))
 
 	return updated
 
@@ -619,7 +622,7 @@ static func get_workforce(colonists: Array) -> Array:
 	for colonist in colonists:
 		if not colonist.is_alive:
 			continue
-		if colonist.life_stage != MCSTypes.LifeStage.ADULT:
+		if colonist.life_stage != _MCSTypes.LifeStage.ADULT:
 			continue
 		if colonist.health >= 40:
 			workers.append(colonist)
@@ -633,13 +636,13 @@ static func get_workforce_summary(colonists: Array) -> Dictionary:
 		"by_specialty": {}
 	}
 
-	for spec in MCSTypes.Specialty.values():
+	for spec in _MCSTypes.Specialty.values():
 		summary.by_specialty[spec] = 0
 
 	for colonist in colonists:
 		if not colonist.is_alive:
 			continue
-		if colonist.life_stage != MCSTypes.LifeStage.ADULT:
+		if colonist.life_stage != _MCSTypes.LifeStage.ADULT:
 			continue
 
 		summary.total_working_age += 1
@@ -651,14 +654,14 @@ static func get_workforce_summary(colonists: Array) -> Dictionary:
 	return summary
 
 ## Get the best colonist for a job
-static func get_best_worker_for_specialty(colonists: Array, specialty: MCSTypes.Specialty) -> Dictionary:
+static func get_best_worker_for_specialty(colonists: Array, specialty: _MCSTypes.Specialty) -> Dictionary:
 	var best = {}
 	var best_score = -1.0
 
 	for colonist in colonists:
 		if not colonist.is_alive or not colonist.is_working:
 			continue
-		if colonist.life_stage != MCSTypes.LifeStage.ADULT:
+		if colonist.life_stage != _MCSTypes.LifeStage.ADULT:
 			continue
 
 		var score = calc_effectiveness(colonist)
@@ -706,10 +709,10 @@ static func count_alive(colonists: Array) -> int:
 
 static func count_by_generation(colonists: Array) -> Dictionary:
 	var counts = {
-		MCSTypes.Generation.EARTH_BORN: 0,
-		MCSTypes.Generation.FIRST_GEN: 0,
-		MCSTypes.Generation.SECOND_GEN: 0,
-		MCSTypes.Generation.THIRD_GEN_PLUS: 0
+		_MCSTypes.Generation.EARTH_BORN: 0,
+		_MCSTypes.Generation.FIRST_GEN: 0,
+		_MCSTypes.Generation.SECOND_GEN: 0,
+		_MCSTypes.Generation.THIRD_GEN_PLUS: 0
 	}
 
 	for c in colonists:

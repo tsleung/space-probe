@@ -1,6 +1,7 @@
 extends Node
 
 const VnpTypes = preload("res://scripts/von_neumann_probe/vnp_types.gd")
+const VnpSystems = preload("res://scripts/von_neumann_probe/vnp_systems.gd")
 
 var store = null
 var base_positions = {}
@@ -192,7 +193,8 @@ func _analyze_enemy_weapons(team: int, state: Dictionary) -> Dictionary:
 		if ship.team != team:
 			var ship_stats = VnpTypes.SHIP_STATS.get(ship.type, {})
 			var weapon = ship_stats.get("weapon", null)
-			if weapon != null:
+			# Only count standard combat weapons (GUN, LASER, MISSILE)
+			if weapon != null and weapon_counts.has(weapon):
 				weapon_counts[weapon] += 1
 
 	return weapon_counts
@@ -254,37 +256,29 @@ func get_adherence(team: int) -> int:
 
 
 func get_fleet_center(team: int) -> Vector2:
-	"""Get center of gravity for a team's fleet, weighted by base in defensive mode"""
+	"""Get center of gravity for a team's fleet, biased toward rally point for attack-move"""
 	var state = store.get_state()
 	var formation = get_formation(team)
 	var base_pos = base_positions.get(team, Vector2.ZERO)
+	var rally_point = get_rally_point(team)
+	var include_base_anchor = formation == VnpTypes.FleetFormation.DEFENSIVE
 
-	var positions = []
-	var total_weight = 0.0
+	# Use pure function from VnpSystems
+	return VnpSystems.calculate_fleet_center(
+		team, state.ships, base_pos, rally_point, include_base_anchor
+	)
 
-	# In defensive formation, the home base acts as an anchor
-	# This keeps small fleets near home, but as fleet grows the center shifts toward battle
-	if formation == VnpTypes.FleetFormation.DEFENSIVE:
-		var base_weight = 3.0  # Base counts as 3 "ships" worth of weight
-		positions.append({"pos": base_pos, "weight": base_weight})
-		total_weight += base_weight
 
-	for ship_id in state.ships:
-		var ship = state.ships[ship_id]
-		if ship.team == team:
-			# Weight by ship health/importance - larger ships anchor the fleet
-			var ship_stats = VnpTypes.SHIP_STATS.get(ship.type, {})
-			var weight = ship_stats.get("health", 100) / 100.0
-			positions.append({"pos": ship.position, "weight": weight})
-			total_weight += weight
-
-	if positions.is_empty():
-		return base_pos
-
-	var center = Vector2.ZERO
-	for p in positions:
-		center += p.pos * p.weight
-	return center / total_weight
+func get_rally_point(team: int) -> Vector2:
+	"""Get rally point for a team from state"""
+	var state = store.get_state()
+	if not state.teams.has(team):
+		return Vector2.ZERO
+	var team_data = state.teams[team]
+	var rally = team_data.get("rally_point", null)
+	if rally is Vector2:
+		return rally
+	return Vector2.ZERO
 
 
 func get_fleet_front_line(team: int) -> Vector2:

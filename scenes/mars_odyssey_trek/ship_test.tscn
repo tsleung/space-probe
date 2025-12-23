@@ -1,0 +1,91 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/ship_view.gd" id="1_ship"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/ship_test_controller.gd" id="2_controller"]
+
+[node name="ShipTest" type="Node2D"]
+
+[node name="Background" type="ColorRect" parent="."]
+offset_right = 800.0
+offset_bottom = 600.0
+color = Color(0.08, 0.08, 0.12, 1)
+
+[node name="ShipView" type="Node2D" parent="."]
+script = ExtResource("1_ship")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="Controls" type="VBoxContainer" parent="UI"]
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 200.0
+offset_bottom = 300.0
+
+[node name="Title" type="Label" parent="UI/Controls"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "SHIP TEST"
+
+[node name="Sep1" type="HSeparator" parent="UI/Controls"]
+layout_mode = 2
+
+[node name="DamageLabel" type="Label" parent="UI/Controls"]
+layout_mode = 2
+text = "Damage Room:"
+
+[node name="DamageBridge" type="Button" parent="UI/Controls"]
+layout_mode = 2
+text = "Damage Bridge"
+
+[node name="DamageCargo" type="Button" parent="UI/Controls"]
+layout_mode = 2
+text = "Damage Cargo Bay"
+
+[node name="DamageEngineering" type="Button" parent="UI/Controls"]
+layout_mode = 2
+text = "Damage Engineering"
+
+[node name="Sep2" type="HSeparator" parent="UI/Controls"]
+layout_mode = 2
+
+[node name="SendLabel" type="Label" parent="UI/Controls"]
+layout_mode = 2
+text = "Send Crew:"
+
+[node name="SendEngineerCargo" type="Button" parent="UI/Controls"]
+layout_mode = 2
+text = "Engineer → Cargo"
+
+[node name="SendMedicalBridge" type="Button" parent="UI/Controls"]
+layout_mode = 2
+text = "Medical → Bridge"
+
+[node name="SendNearest" type="Button" parent="UI/Controls"]
+layout_mode = 2
+text = "Nearest → Cargo (Emergency)"
+
+[node name="Sep3" type="HSeparator" parent="UI/Controls"]
+layout_mode = 2
+
+[node name="RepairAll" type="Button" parent="UI/Controls"]
+layout_mode = 2
+text = "Repair All Rooms"
+
+[node name="CrewStatus" type="VBoxContainer" parent="UI"]
+offset_left = 600.0
+offset_top = 20.0
+offset_right = 780.0
+offset_bottom = 200.0
+
+[node name="StatusTitle" type="Label" parent="UI/CrewStatus"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "CREW STATUS"
+
+[node name="StatusText" type="Label" parent="UI/CrewStatus"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "Loading..."
+
+[node name="TestController" type="Node" parent="."]
+script = ExtResource("2_controller")

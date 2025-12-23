@@ -1,73 +1,84 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
 
   "starting_conditions": {
-    "initial_colonists": 12,
+    "initial_colonists": 24,
     "starting_resources": {
-      "food": 3000,
-      "water": 1500,
-      "oxygen": 800,
-      "building_materials": 500,
-      "machine_parts": 100,
-      "medicine": 50,
-      "fuel": 200
+      "food": 8000,
+      "water": 4000,
+      "oxygen": 2000,
+      "building_materials": 2000,
+      "machine_parts": 500,
+      "medicine": 150,
+      "fuel": 600
     },
     "starting_buildings": [
-      {"type": "HAB_POD", "count": 3},
-      {"type": "GREENHOUSE", "count": 1},
-      {"type": "SOLAR_ARRAY", "count": 2},
-      {"type": "WATER_EXTRACTOR", "count": 1}
+      {"type": "HAB_POD", "count": 4},
+      {"type": "GREENHOUSE", "count": 2},
+      {"type": "SOLAR_ARRAY", "count": 3},
+      {"type": "WATER_EXTRACTOR", "count": 2},
+      {"type": "WORKSHOP", "count": 1}
     ]
   },
 
   "consumption": {
-    "food_per_colonist_per_year": 730,
-    "water_per_colonist_per_year": 180,
-    "oxygen_per_colonist_per_year": 36.5,
-    "power_per_colonist": 5.0
+    "food_per_colonist_per_year": 600,
+    "water_per_colonist_per_year": 150,
+    "oxygen_per_colonist_per_year": 30,
+    "power_per_colonist": 4.0
   },
 
   "population": {
-    "base_fertility_rate": 0.025,
+    "base_fertility_rate": 0.08,
     "fertile_age_min": 18,
-    "fertile_age_max": 45,
-    "child_mortality_rate": 0.01,
-    "elder_mortality_base": 0.02,
+    "fertile_age_max": 50,
+    "child_mortality_rate": 0.005,
+    "elder_mortality_base": 0.015,
     "max_age": 95,
     "pregnancy_months": 9
   },
 
   "buildings": {
-    "degradation_min_per_year": 2.0,
-    "degradation_max_per_year": 5.0,
-    "failure_threshold": 30,
-    "failure_chance_below_threshold": 0.3
+    "degradation_min_per_year": 1.5,
+    "degradation_max_per_year": 4.0,
+    "failure_threshold": 25,
+    "failure_chance_below_threshold": 0.2
   },
 
   "politics": {
-    "stability_decay_rate": 2.0,
-    "stability_recovery_rate": 5.0,
-    "council_formation_min_pop": 25,
-    "independence_min_year": 20,
-    "independence_min_sentiment": 50
+    "stability_decay_rate": 1.5,
+    "stability_recovery_rate": 8.0,
+    "council_formation_min_pop": 20,
+    "independence_min_year": 15,
+    "independence_min_sentiment": 40
   },
 
   "events": {
-    "max_events_per_year": 2,
-    "event_boost_after_years": 5,
-    "event_boost_multiplier": 1.5
+    "max_events_per_year": 3,
+    "event_boost_after_years": 3,
+    "event_boost_multiplier": 1.8
   },
 
   "victory_conditions": {
     "survival_years": 100,
-    "self_sufficiency_pop": 100,
-    "independence_available_year": 50
+    "self_sufficiency_pop": 80,
+    "independence_available_year": 40
   },
 
   "defeat_conditions": {
     "extinction": 0,
-    "min_stability": 5,
+    "min_stability": 3,
     "starvation_threshold": 0
+  },
+
+  "ai_spectate": {
+    "building_chance_per_year": 0.85,
+    "min_buildings_per_year": 1,
+    "max_buildings_per_year": 4,
+    "expansion_aggression": 2.0,
+    "prefer_variety": true,
+    "mega_building_year": 30,
+    "default_speed": 5.0
   },
 
   "ai_personalities": {
@@ -94,6 +105,72 @@
       "stability_weight": 4.0,
       "resource_weight": 1.5,
       "risk_penalty": 3.0
+    }
+  },
+
+  "visual_progression": {
+    "advancement_weights": {
+      "buildings": 0.45,
+      "year": 0.15,
+      "population": 0.25,
+      "stability": 0.08,
+      "resources": 0.07
+    },
+    "tier_thresholds": [0.0, 0.08, 0.18, 0.32, 0.50, 0.70, 0.88],
+    "tier_names": ["Survival", "Bunkers", "Outpost", "Settlement", "Metropolis", "Megacity", "Transcendence"],
+    "era_names": ["The Landing", "First Steps", "Taking Root", "Rising Domes", "Towers of Mars", "The Gleaming City", "Beyond Earth"],
+
+    "storm": {
+      "chance_range": [0.35, 0.02],
+      "intensity_range": [1.0, 0.10],
+      "particle_range": [120, 15],
+      "duration_range": [10.0, 3.0]
+    },
+
+    "robots": {
+      "count_range": [5, 100],
+      "speed_range": [20, 180],
+      "size_range": [7, 2],
+      "swarm_threshold": 0.5
+    },
+
+    "buildings": {
+      "scale_range": [0.7, 1.4],
+      "brightness_range": [0.3, 1.2],
+      "flicker_chance_tier_0": 0.02,
+      "glow_tier_threshold": 3,
+      "skyscraper_min_tier": 4,
+      "mega_structure_min_tier": 5
+    },
+
+    "colonists": {
+      "visibility_range": [0.3, 0.98],
+      "speed_range": [50, 15]
+    },
+
+    "dome": {
+      "tier_threshold": 3,
+      "hex_size": 18,
+      "fill_alpha": 0.10,
+      "edge_alpha": 0.30,
+      "shimmer_speed": 0.6
+    },
+
+    "megastructures": {
+      "space_elevator_min_tier": 5,
+      "orbital_ring_min_tier": 6,
+      "superhighway_min_tier": 4,
+      "arcology_min_tier": 5,
+      "launch_loop_min_tier": 6,
+      "atmospheric_processor_min_tier": 5
+    },
+
+    "epic_effects": {
+      "aurora_chance_night": 0.6,
+      "orbital_traffic_min_tier": 4,
+      "terraforming_visual_tier": 5,
+      "city_glow_intensity": 1.5,
+      "neon_accent_colors": true
     }
   }
 }

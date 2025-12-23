@@ -247,118 +247,64 @@ func _process(delta: float) -> void:
 	# Cinematic camera changes
 	_update_cinematics(delta)
 
+	# Apply pressure in final phase to ensure predetermined outcome
+	_apply_final_phase_pressure()
+
+	# End battle if time's up and one side is eliminated (or force end)
 	if _battle_time >= _battle_duration and not _outcome_decided:
+		_force_battle_conclusion()
 		_end_battle()
 
 	queue_redraw()
 
 func _update_combat_phase() -> void:
-	## EU4-style combat phase system - dice roll casualties each phase
+	## Real combat simulation - no dice rolls, weapons actually kill ships
+	## Phases are now just for UI/narrative tracking, not for arbitrary casualties
 	if _phase_timer >= _phase_duration:
 		_phase_timer = 0.0
 		_combat_phase += 1
 
-		# === EU4-STYLE DICE ROLL CASUALTIES ===
-		# Each phase, both sides roll for casualties based on relative strength
-		# The side that will lose takes heavier casualties over time
-
-		var active_player: Array = []
-		var active_herald: Array = []
-		for ship in _player_ships:
-			if not ship.is_destroyed:
-				active_player.append(ship)
-		for ship in _herald_ships:
-			if not ship.is_destroyed:
-				active_herald.append(ship)
-
+		# Count active ships (actual state from combat simulation)
+		var active_player = _player_ships.filter(func(s): return not s.is_destroyed)
+		var active_herald = _herald_ships.filter(func(s): return not s.is_destroyed)
 		var current_player = active_player.size()
 		var current_herald = active_herald.size()
 
-		# Dice roll for casualties this phase
-		var player_casualties_this_phase = 0
-		var herald_casualties_this_phase = 0
+		# Update loss counts from actual combat
+		_player_losses = _starting_player_ships - current_player
+		_herald_losses = _starting_herald_ships - current_herald
 
-		if current_player > 0 and current_herald > 0:
-			# Base casualty chance increases as battle progresses
-			var battle_progress = minf(_battle_time / _battle_duration, 1.0)
-			var base_casualty_chance = 0.15 + battle_progress * 0.25  # 15% early, up to 40% late
-
-			# Determine who takes more casualties based on predetermined outcome
-			var player_advantage = 1.0 if _player_won else 0.6
-			var herald_advantage = 0.6 if _player_won else 1.0
-
-			# Roll for each player ship
-			for ship in active_player:
-				var roll = randf()
-				var threshold = base_casualty_chance / player_advantage
-				# Ships under 50% health are more likely to die
-				if ship.health < 0.5:
-					threshold *= 1.5
-				if roll < threshold and current_player - player_casualties_this_phase > 0:
-					# Ship destroyed this phase!
-					_destroy_human(ship)
-					player_casualties_this_phase += 1
-					# Don't wipe everyone in one phase
-					if player_casualties_this_phase >= ceili(current_player * 0.4):
-						break
-
-			# Roll for each herald ship
-			for ship in active_herald:
-				var roll = randf()
-				var threshold = base_casualty_chance / herald_advantage
-				if ship.health < 0.5:
-					threshold *= 1.5
-				if roll < threshold and current_herald - herald_casualties_this_phase > 0:
-					_destroy_herald(ship)
-					herald_casualties_this_phase += 1
-					if herald_casualties_this_phase >= ceili(current_herald * 0.4):
-						break
-
-		# Update loss counts
-		var final_player = 0
-		var final_herald = 0
-		for ship in _player_ships:
-			if not ship.is_destroyed:
-				final_player += 1
-		for ship in _herald_ships:
-			if not ship.is_destroyed:
-				final_herald += 1
-
-		_player_losses = _starting_player_ships - final_player
-		_herald_losses = _starting_herald_ships - final_herald
-
-		# Phase announcements - EU4 style casualty reports
+		# Phase announcements based on REAL combat state
 		var announcement = ""
 		if _combat_phase == 1:
-			announcement = "[COMBAT] Phase %d - Engagement begun!" % _combat_phase
-		elif player_casualties_this_phase > 0 and herald_casualties_this_phase > 0:
-			announcement = "[PHASE %d] Heavy fighting! Lost %d, destroyed %d enemy" % [_combat_phase, player_casualties_this_phase, herald_casualties_this_phase]
-		elif player_casualties_this_phase > 0:
-			announcement = "[PHASE %d] We lost %d ships!" % [_combat_phase, player_casualties_this_phase]
-		elif herald_casualties_this_phase > 0:
-			announcement = "[PHASE %d] Destroyed %d enemy ships" % [_combat_phase, herald_casualties_this_phase]
+			announcement = "[COMBAT] Weapons hot - all batteries engaging!"
 		else:
-			# Stalemate phase - rare if battles are working
-			var stalemate_msgs = [
-				"[PHASE %d] Exchange of fire continues...",
-				"[PHASE %d] Both sides holding position",
-				"[PHASE %d] Intensive combat, shields holding",
-			]
-			announcement = stalemate_msgs[_combat_phase % stalemate_msgs.size()] % _combat_phase
+			# Narrative based on actual battle state
+			var player_pct = float(current_player) / maxf(_starting_player_ships, 1)
+			var herald_pct = float(current_herald) / maxf(_starting_herald_ships, 1)
 
-		if announcement != _last_phase_announcement:
+			if current_player == 0:
+				announcement = "[COMMAND] All ships lost!"
+			elif current_herald == 0:
+				announcement = "[TACTICAL] All enemy contacts destroyed!"
+			elif player_pct < 0.3 and _player_losses > 0:
+				announcement = "[MAYDAY] Fleet critically damaged!"
+			elif herald_pct < 0.3 and _herald_losses > 0:
+				announcement = "[TACTICAL] Enemy fleet breaking apart!"
+			elif _player_losses > 0 or _herald_losses > 0:
+				var combat_msgs = [
+					"[PHASE %d] Heavy exchange of fire",
+					"[PHASE %d] Combat continues",
+					"[PHASE %d] Weapons free, all batteries",
+				]
+				announcement = combat_msgs[_combat_phase % combat_msgs.size()] % _combat_phase
+
+		if not announcement.is_empty() and announcement != _last_phase_announcement:
 			_transmissions.append(announcement)
 			_last_phase_announcement = announcement
 
-		# Major battle milestones
-		if _is_major_battle:
-			var player_remaining_pct = float(final_player) / maxf(_starting_player_ships, 1) * 100
-			var herald_remaining_pct = float(final_herald) / maxf(_starting_herald_ships, 1) * 100
-
-			if player_remaining_pct < 30 and _player_losses > 3:
-				_transmissions.append("[COMMAND] Fleet taking catastrophic losses!")
-			elif herald_remaining_pct < 30 and _herald_losses > 3:
-				_transmissions.append("[TACTICAL] Enemy fleet breaking apart!")
+		# Check for battle conclusion conditions
+		_check_battle_conclusion(current_player, current_herald)
 
 func _draw() -> void:
 	# Ensure minimum size for drawing
@@ -1648,9 +1594,12 @@ func _spawn_swarm_drones(ship: BattleShip, count: int) -> void:
 # ============================================================================
 
 func _hit_herald(ship: BattleShip, damage: float, hit_pos: Vector2) -> void:
+	# Apply damage multiplier based on predetermined outcome (player attacking)
+	var biased_damage = damage * _get_damage_multiplier(true)
+
 	# Shield absorbs first
 	if ship.shields > 0:
-		ship.shields -= damage * 2
+		ship.shields -= biased_damage * 2
 		var shield_hit = ShieldHit.new()
 		shield_hit.pos = hit_pos
 		shield_hit.normal = (hit_pos - ship.pos).normalized()
@@ -1660,20 +1609,33 @@ func _hit_herald(ship: BattleShip, damage: float, hit_pos: Vector2) -> void:
 			_transmissions.append("[TACTICAL] Herald shields down!")
 		return
 
-	ship.health -= damage
+	ship.health -= biased_damage
 	ship.damage_flicker = 1.0
 	_shake_intensity = maxf(_shake_intensity, 2)
 
-	if ship.health <= 0 and not ship.is_destroyed:
-		_destroy_herald(ship)
+	# Check for death - but protect last ship until final phase
+	if ship.health <= 0:
+		if _should_protect_ship(ship):
+			ship.health = 0.05  # Keep barely alive
+			ship.damage_flicker = 1.0
+		elif not ship.is_destroyed:
+			_destroy_herald(ship)
 
 func _hit_human(ship: BattleShip, damage: float, hit_pos: Vector2) -> void:
-	ship.health -= damage
+	# Apply damage multiplier based on predetermined outcome (herald attacking)
+	var biased_damage = damage * _get_damage_multiplier(false)
+
+	ship.health -= biased_damage
 	ship.damage_flicker = 1.0
 	_shake_intensity = maxf(_shake_intensity, 3)
 
-	if ship.health <= 0 and not ship.is_destroyed:
-		_destroy_human(ship)
+	# Check for death - but protect last ship until final phase
+	if ship.health <= 0:
+		if _should_protect_ship(ship):
+			ship.health = 0.05  # Keep barely alive
+			ship.damage_flicker = 1.0
+		elif not ship.is_destroyed:
+			_destroy_human(ship)
 
 func _destroy_herald(ship: BattleShip) -> void:
 	ship.is_destroyed = true
@@ -1767,6 +1729,159 @@ func _point_to_line_dist(point: Vector2, line_start: Vector2, line_end: Vector2)
 	return point.distance_to(projection)
 
 # ============================================================================
+# BATTLE CONCLUSION - Ensures predetermined outcome through biased combat
+# ============================================================================
+
+var _in_final_phase: bool = false  # When true, last ships can die
+
+func _check_battle_conclusion(current_player: int, current_herald: int) -> void:
+	## Check if battle should conclude and manage the final phase
+	var battle_progress = _battle_time / _battle_duration
+
+	# Early battle - keep at least 1 ship on each side for drama
+	if battle_progress < 0.7:
+		return
+
+	# Near end of battle - enter final phase where last ships can die
+	if battle_progress > 0.85 and not _in_final_phase:
+		_in_final_phase = true
+		if _player_won:
+			_transmissions.append("[TACTICAL] Enemy retreat detected - press the attack!")
+		else:
+			_transmissions.append("[COMMAND] All ships, fighting withdrawal!")
+
+	# Check for natural conclusion (one side eliminated)
+	if current_player == 0 or current_herald == 0:
+		if not _outcome_decided:
+			_end_battle()
+
+func _get_damage_multiplier(attacker_is_player: bool) -> float:
+	## Returns damage multiplier based on predetermined outcome
+	## CRITICAL: Winners ALWAYS do more damage from the start
+	## The battle must never show the wrong side winning
+	var battle_progress = _battle_time / _battle_duration
+
+	# Strong initial bias that increases over time
+	# Start at 1.3x advantage, grow to 2.0x by end
+	var base_advantage = 1.3
+	var scaling_advantage = battle_progress * 0.7  # Additional 0.7x by end
+	var winner_mult = base_advantage + scaling_advantage
+
+	# Losers do reduced damage from the start
+	var loser_mult = 0.6 - battle_progress * 0.2  # 0.6x down to 0.4x
+
+	if attacker_is_player:
+		# Player attacking herald
+		return winner_mult if _player_won else loser_mult
+	else:
+		# Herald attacking player
+		return winner_mult if not _player_won else loser_mult
+
+func _should_protect_ship(ship: BattleShip) -> bool:
+	## Returns true if this ship should be protected from death
+	## CRITICAL: Winning side's ships are ALWAYS protected until final phase
+	## Losing side only protected if they're the last ship (for drama)
+	if _in_final_phase:
+		return false  # No protection in final phase - let battle conclude
+
+	var is_on_winning_side = (ship.is_player and _player_won) or (not ship.is_player and not _player_won)
+
+	if is_on_winning_side:
+		# ALWAYS protect winning side ships until final phase
+		# They must never all die before the battle ends correctly
+		var active_same_side = 0
+		if ship.is_player:
+			for s in _player_ships:
+				if not s.is_destroyed:
+					active_same_side += 1
+		else:
+			for s in _herald_ships:
+				if not s.is_destroyed:
+					active_same_side += 1
+		# Protect if this would be less than 2 ships (keep drama)
+		return active_same_side <= 2
+	else:
+		# Losing side - only protect the very last ship for dramatic final stand
+		var active_same_side = 0
+		if ship.is_player:
+			for s in _player_ships:
+				if not s.is_destroyed:
+					active_same_side += 1
+		else:
+			for s in _herald_ships:
+				if not s.is_destroyed:
+					active_same_side += 1
+		return active_same_side <= 1
+
+func _apply_final_phase_pressure() -> void:
+	## In final phase, aggressively ensure the correct side wins
+	## This is called every frame, so use small increments
+	if not _in_final_phase:
+		# Even before final phase, apply light attrition to losing side
+		_apply_losing_side_attrition()
+		return
+
+	var active_player = _player_ships.filter(func(s): return not s.is_destroyed)
+	var active_herald = _herald_ships.filter(func(s): return not s.is_destroyed)
+
+	# Aggressive drain in final phase - battle must end correctly
+	var drain_rate = 0.02  # 2% per frame = fast
+
+	if _player_won:
+		# Pressure herald ships to die
+		for ship in active_herald:
+			ship.health -= drain_rate
+			ship.damage_flicker = maxf(ship.damage_flicker, 0.3)
+			if ship.health <= 0 and not ship.is_destroyed:
+				_destroy_herald(ship)
+	else:
+		# Pressure player ships to die
+		for ship in active_player:
+			ship.health -= drain_rate
+			ship.damage_flicker = maxf(ship.damage_flicker, 0.3)
+			if ship.health <= 0 and not ship.is_destroyed:
+				_destroy_human(ship)
+
+func _apply_losing_side_attrition() -> void:
+	## Constant light attrition on losing side to ensure they're always behind
+	## Called every frame before final phase
+	var battle_progress = _battle_time / _battle_duration
+
+	# Attrition increases as battle progresses
+	var attrition_rate = 0.001 + battle_progress * 0.003  # 0.1% to 0.4% per frame
+
+	if _player_won:
+		# Herald is losing - apply attrition
+		for ship in _herald_ships:
+			if not ship.is_destroyed and not _should_protect_ship(ship):
+				ship.health -= attrition_rate
+				if ship.health <= 0:
+					_destroy_herald(ship)
+	else:
+		# Player is losing - apply attrition
+		for ship in _player_ships:
+			if not ship.is_destroyed and not _should_protect_ship(ship):
+				ship.health -= attrition_rate
+				if ship.health <= 0:
+					_destroy_human(ship)
+
+func _force_battle_conclusion() -> void:
+	## Called when battle time is up - ensure the correct side wins
+	## This is the "director's cut" - make sure the story ends right
+	var active_player = _player_ships.filter(func(s): return not s.is_destroyed)
+	var active_herald = _herald_ships.filter(func(s): return not s.is_destroyed)
+
+	if _player_won:
+		# Player should win - destroy remaining herald ships
+		for ship in active_herald:
+			_destroy_herald(ship)
+			_transmissions.append("[TACTICAL] Final enemy contact destroyed!")
+	else:
+		# Herald should win - destroy remaining player ships
+		for ship in active_player:
+			_destroy_human(ship)
+
+# ============================================================================
 # PUBLIC API
 # ============================================================================
 
@@ -1787,6 +1902,7 @@ func start_battle(zone_name: String, player_ships: Array, herald_count: int, wil
 	_combat_phase = 0
 	_phase_timer = 0.0
 	_last_phase_announcement = ""
+	_in_final_phase = false  # Reset final phase flag
 
 	# Determine if this is a major battle (epic length)
 	_is_major_battle = total_ships >= 8 or herald_count >= 6 or zone_name in ["Jupiter", "Saturn", "Earth", "Mars"]

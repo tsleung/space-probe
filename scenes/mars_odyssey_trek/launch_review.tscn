@@ -1,0 +1,140 @@
+[gd_scene load_steps=2 format=3 uid="uid://cmotlaunchreview"]
+
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/launch_review.gd" id="1_review"]
+
+[node name="LaunchReview" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_review")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.06, 0.06, 0.1, 1)
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 50
+theme_override_constants/margin_top = 30
+theme_override_constants/margin_right = 50
+theme_override_constants/margin_bottom = 30
+
+[node name="MainLayout" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 25
+
+[node name="Header" type="VBoxContainer" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+theme_override_constants/separation = 5
+
+[node name="TitleHeader" type="Label" parent="MarginContainer/MainLayout/Header"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "MISSION REVIEW"
+horizontal_alignment = 1
+
+[node name="SubtitleLabel" type="Label" parent="MarginContainer/MainLayout/Header"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "Review your mission configuration"
+horizontal_alignment = 1
+
+[node name="ContentPanel" type="PanelContainer" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ContentMargin" type="MarginContainer" parent="MarginContainer/MainLayout/ContentPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 30
+theme_override_constants/margin_top = 25
+theme_override_constants/margin_right = 30
+theme_override_constants/margin_bottom = 25
+
+[node name="HBox" type="HBoxContainer" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin"]
+layout_mode = 2
+theme_override_constants/separation = 40
+
+[node name="LeftColumn" type="VBoxContainer" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="SummaryTitle" type="Label" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox/LeftColumn"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Mission Configuration"
+
+[node name="Separator" type="HSeparator" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox/LeftColumn"]
+layout_mode = 2
+
+[node name="SummaryContainer" type="VBoxContainer" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox/LeftColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="RightColumn" type="VBoxContainer" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 0.6
+theme_override_constants/separation = 15
+
+[node name="StatsTitle" type="Label" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox/RightColumn"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Mission Statistics"
+
+[node name="Separator" type="HSeparator" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox/RightColumn"]
+layout_mode = 2
+
+[node name="ReliabilityLabel" type="Label" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox/RightColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Mission Reliability: --%"
+
+[node name="BudgetLabel" type="Label" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox/RightColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Budget: $--M / $--M"
+
+[node name="Spacer" type="Control" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox/RightColumn"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="IssuesLabel" type="Label" parent="MarginContainer/MainLayout/ContentPanel/ContentMargin/HBox/RightColumn"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Checking mission readiness..."
+autowrap_mode = 2
+
+[node name="LaunchPanel" type="PanelContainer" parent="MarginContainer/MainLayout"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 100)
+
+[node name="LaunchContent" type="VBoxContainer" parent="MarginContainer/MainLayout/LaunchPanel"]
+layout_mode = 2
+alignment = 1
+
+[node name="LaunchButton" type="Button" parent="MarginContainer/MainLayout/LaunchPanel/LaunchContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(300, 60)
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_font_sizes/font_size = 24
+text = "LAUNCH MISSION"

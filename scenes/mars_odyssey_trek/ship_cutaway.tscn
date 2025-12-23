@@ -1,0 +1,81 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/space_background.gd" id="1_space"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/ship_hull.gd" id="2_hull"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/ship_view.gd" id="3_ship"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/journey_indicator.gd" id="4_journey"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/ship_game_controller.gd" id="5_controller"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/ship_game_hud.gd" id="6_hud"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/ship_auto_ui.gd" id="7_ui"]
+
+[node name="ShipCutaway" type="Node2D"]
+
+[node name="SpaceBackground" type="Node2D" parent="."]
+z_index = -10
+script = ExtResource("1_space")
+star_count_far = 100
+star_count_mid = 50
+star_count_near = 25
+scroll_speed = 15.0
+
+[node name="ShipHull" type="Node2D" parent="."]
+z_index = -1
+script = ExtResource("2_hull")
+
+[node name="ShipView" type="Node2D" parent="."]
+z_index = 0
+script = ExtResource("3_ship")
+layout_center = Vector2(400, 270)
+
+[node name="JourneyIndicator" type="Node2D" parent="."]
+z_index = 5
+script = ExtResource("4_journey")
+journey_y = 555.0
+earth_x = 60.0
+mars_x = 740.0
+
+[node name="GameController" type="Node" parent="."]
+script = ExtResource("5_controller")
+ship_view_path = NodePath("../ShipView")
+seconds_per_day = 6.0
+event_chance_per_day = 0.5
+crisis_time_limit = 12.0
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("6_hud")
+game_controller_path = NodePath("../GameController")
+ship_view_path = NodePath("../ShipView")
+journey_indicator_path = NodePath("../JourneyIndicator")
+
+[node name="SpeedControls" type="HBoxContainer" parent="."]
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 350.0
+offset_bottom = 45.0
+
+[node name="Speed1" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "1x"
+
+[node name="Speed2" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "2x"
+
+[node name="Speed5" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "5x"
+
+[node name="Pause" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "Pause"
+
+[node name="Restart" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "Restart"
+
+[node name="Back" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "← Menu"
+
+[node name="UIController" type="Node" parent="."]
+script = ExtResource("7_ui")

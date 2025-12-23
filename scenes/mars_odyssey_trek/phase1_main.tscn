@@ -1,0 +1,94 @@
+[gd_scene load_steps=2 format=3 uid="uid://dmot1phase1main"]
+
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/mot_main.gd" id="1_main"]
+
+[node name="Phase1Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_main")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.08, 0.08, 0.12, 1)
+
+[node name="MainLayout" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 0
+
+[node name="Header" type="PanelContainer" parent="MainLayout"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 60)
+
+[node name="HeaderContent" type="HBoxContainer" parent="MainLayout/Header"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="MenuButton" type="Button" parent="MainLayout/Header/HeaderContent"]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Menu"
+
+[node name="Title" type="Label" parent="MainLayout/Header/HeaderContent"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 24
+text = "MARS ODYSSEY TREK"
+vertical_alignment = 1
+
+[node name="BudgetLabel" type="Label" parent="MainLayout/Header/HeaderContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "$650M / $650M"
+vertical_alignment = 1
+
+[node name="StepIndicator" type="HBoxContainer" parent="MainLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+custom_minimum_size = Vector2(0, 50)
+alignment = 1
+theme_override_constants/separation = 30
+
+[node name="SceneContainer" type="Control" parent="MainLayout"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Footer" type="PanelContainer" parent="MainLayout"]
+layout_mode = 2
+custom_minimum_size = Vector2(0, 60)
+
+[node name="FooterContent" type="HBoxContainer" parent="MainLayout/Footer"]
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 20
+
+[node name="PrevButton" type="Button" parent="MainLayout/Footer/FooterContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 40)
+layout_mode = 2
+text = "< Back"
+
+[node name="Spacer" type="Control" parent="MainLayout/Footer/FooterContent"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="NextButton" type="Button" parent="MainLayout/Footer/FooterContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120, 40)
+layout_mode = 2
+text = "Next >"

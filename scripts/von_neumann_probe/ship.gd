@@ -2,8 +2,12 @@ extends CharacterBody2D
 
 const VnpTypes = preload("res://scripts/von_neumann_probe/vnp_types.gd")
 const VnpSystems = preload("res://scripts/von_neumann_probe/vnp_systems.gd")
-const ProjectileScene = preload("res://scenes/von_neumann_probe/projectile.tscn")
 const ImpactFxScene = preload("res://scenes/von_neumann_probe/impact_fx.tscn")
+# ProjectileScene removed - using vnp_main.get_projectile() pool instead
+
+# Static cached textures (shared across all ships)
+static var _cached_circle_texture_small: GradientTexture2D = null
+static var _cached_circle_texture_medium: GradientTexture2D = null
 
 var store = null
 var vnp_main = null  # Reference to VnpMain for screen shake
@@ -19,7 +23,7 @@ var sound_manager = null  # Reference for playing weapon sounds
 @onready var selection_indicator = $SelectionIndicator
 
 # Engine trail particle system
-var engine_trail: GPUParticles2D = null
+var engine_trail: Line2D = null
 var muzzle_flash: Polygon2D = null
 var side_thruster_left: GPUParticles2D = null
 var side_thruster_right: GPUParticles2D = null
@@ -46,6 +50,16 @@ var pdc_sweep_angle: float = 0.0
 var last_state_change_time: float = 0.0
 const STATE_CHANGE_COOLDOWN: float = 0.1  # 100ms between state changes
 
+# Position sync throttling - don't dispatch every frame
+var last_position_sync_time: float = 0.0
+const POSITION_SYNC_INTERVAL: float = 0.5  # Sync position every 500ms
+var last_synced_position: Vector2 = Vector2.ZERO
+
+# Target caching - don't search every frame
+var cached_target_id: int = -1
+var target_cache_timer: float = 0.0
+const TARGET_CACHE_DURATION: float = 0.3  # Re-evaluate targets every 300ms
+
 # Strafing for small ships
 var strafe_angle: float = 0.0
 var strafe_direction: int = 1  # 1 or -1
@@ -59,6 +73,9 @@ var threat_assessment_cooldown: float = 0.0
 var current_velocity: Vector2 = Vector2.ZERO
 const SPACE_DRAG: float = 0.3  # Slight drag to prevent infinite drift
 const THRUST_MULTIPLIER: float = 2.5  # How responsive thrust feels
+
+# Convergence pull tracking
+var convergence_pull_applied: bool = false  # Track if pull was applied this frame
 
 func init(vnp_store, initial_data, controller = null, snd_manager = null, main_ref = null):
 	self.store = vnp_store
@@ -93,92 +110,46 @@ func init(vnp_store, initial_data, controller = null, snd_manager = null, main_r
 		fire_rate_timer.connect("timeout", Callable(self, "_on_fire_rate_timer_timeout"))
 
 func _setup_engine_trail():
-	engine_trail = GPUParticles2D.new()
-	engine_trail.name = "EngineTrail"
-
-	var ship_size = VnpTypes.get_ship_size(ship_data.type)
+	# Simple line trail + spark for performance
 	var team_color = VnpTypes.get_team_color(ship_data.team)
+	var ship_size = VnpTypes.get_ship_size(ship_data.type)
 
-	# Ship-type specific trail configs - BOOSTED for visibility
-	var trail_config = {
-		VnpTypes.ShipType.FRIGATE: {
-			"offset": -8, "amount": 35, "lifetime": 0.4,
-			"velocity_min": 100.0, "velocity_max": 150.0,  # Fast, aggressive
-			"scale_min": 1.2, "scale_max": 2.5, "spread": 15.0,
-			"mesh_size": 4.0
-		},
-		VnpTypes.ShipType.DESTROYER: {
-			"offset": -12, "amount": 40, "lifetime": 0.55,
-			"velocity_min": 80.0, "velocity_max": 120.0,  # Steady, precise
-			"scale_min": 1.5, "scale_max": 3.0, "spread": 12.0,
-			"mesh_size": 4.5
-		},
-		VnpTypes.ShipType.CRUISER: {
-			"offset": -14, "amount": 55, "lifetime": 0.75,
-			"velocity_min": 60.0, "velocity_max": 100.0,  # Heavy, powerful
-			"scale_min": 2.0, "scale_max": 4.5, "spread": 22.0,
-			"mesh_size": 6.0
-		},
-		VnpTypes.ShipType.DEFENDER: {
-			"offset": -10, "amount": 35, "lifetime": 0.5,
-			"velocity_min": 70.0, "velocity_max": 110.0,
-			"scale_min": 1.3, "scale_max": 2.8, "spread": 16.0,
-			"mesh_size": 4.0
-		},
-		VnpTypes.ShipType.SHIELDER: {
-			"offset": -10, "amount": 30, "lifetime": 0.55,
-			"velocity_min": 60.0, "velocity_max": 100.0,
-			"scale_min": 1.5, "scale_max": 3.2, "spread": 20.0,
-			"mesh_size": 4.5
-		},
-		VnpTypes.ShipType.GRAVITON: {
-			"offset": -16, "amount": 45, "lifetime": 0.65,
-			"velocity_min": 50.0, "velocity_max": 80.0,  # Slow, ominous
-			"scale_min": 2.0, "scale_max": 4.0, "spread": 28.0,
-			"mesh_size": 5.5
-		},
-		VnpTypes.ShipType.HARVESTER: {
-			"offset": -10, "amount": 25, "lifetime": 0.45,
-			"velocity_min": 65.0, "velocity_max": 95.0,
-			"scale_min": 1.0, "scale_max": 2.2, "spread": 16.0,
-			"mesh_size": 3.5
-		},
+	# Trail length based on ship size
+	var trail_lengths = {
+		VnpTypes.ShipType.FRIGATE: 20,
+		VnpTypes.ShipType.DESTROYER: 28,
+		VnpTypes.ShipType.CRUISER: 35,
+		VnpTypes.ShipType.DEFENDER: 22,
+		VnpTypes.ShipType.SHIELDER: 22,
+		VnpTypes.ShipType.GRAVITON: 30,
+		VnpTypes.ShipType.HARVESTER: 18,
 	}
+	var trail_length = trail_lengths.get(ship_data.type, 20)
 
-	var config = trail_config.get(ship_data.type, trail_config[VnpTypes.ShipType.FRIGATE])
+	# Simple line for exhaust
+	engine_trail = Line2D.new()
+	engine_trail.name = "EngineTrail"
+	engine_trail.width = 3.0 if ship_size >= VnpTypes.ShipSize.LARGE else 2.0
+	engine_trail.default_color = team_color.lightened(0.3)
+	engine_trail.add_point(Vector2(-6, 0))
+	engine_trail.add_point(Vector2(-6 - trail_length, 0))
 
-	engine_trail.position = Vector2(config.offset, 0)
-	engine_trail.amount = config.amount
-	engine_trail.lifetime = config.lifetime
-	engine_trail.explosiveness = 0.0
-	engine_trail.emitting = true
-
-	# Create process material
-	var material = ParticleProcessMaterial.new()
-	material.direction = Vector3(-1, 0, 0)  # Emit backwards
-	material.spread = config.spread
-	material.initial_velocity_min = config.velocity_min
-	material.initial_velocity_max = config.velocity_max
-	material.damping_min = 25.0
-	material.damping_max = 40.0
-	material.scale_min = config.scale_min
-	material.scale_max = config.scale_max
-	material.color = team_color.lightened(0.5)
-
-	# Brighter, more visible gradient
-	var gradient = Gradient.new()
-	gradient.set_color(0, Color.WHITE.lerp(team_color, 0.3))  # Start almost white
-	gradient.add_point(0.2, team_color.lightened(0.5))
-	gradient.add_point(0.5, team_color.lightened(0.2))
-	gradient.set_color(1, Color(team_color.r * 0.2, team_color.g * 0.2, team_color.b * 0.2, 0))
-	var gradient_texture = GradientTexture1D.new()
-	gradient_texture.gradient = gradient
-	material.color_ramp = gradient_texture
-
-	engine_trail.process_material = material
-	engine_trail.draw_pass_1 = _create_circle_mesh(config.mesh_size)
+	# Gradient fade
+	var grad = Gradient.new()
+	grad.set_color(0, team_color)
+	grad.set_color(1, Color(team_color.r, team_color.g, team_color.b, 0))
+	engine_trail.gradient = grad
 
 	add_child(engine_trail)
+
+	# Single spark at exhaust point
+	var spark = Polygon2D.new()
+	spark.name = "ExhaustSpark"
+	spark.polygon = PackedVector2Array([
+		Vector2(-4, 0), Vector2(-8, -2), Vector2(-6, 0), Vector2(-8, 2)
+	])
+	spark.color = team_color.lightened(0.5)
+	add_child(spark)
 
 func _setup_muzzle_flash():
 	muzzle_flash = Polygon2D.new()
@@ -286,8 +257,7 @@ func _create_side_thruster(color: Color, config: Dictionary) -> GPUParticles2D:
 	mat.color_ramp = tex
 
 	thruster.process_material = mat
-	thruster.draw_pass_1 = QuadMesh.new()
-	thruster.draw_pass_1.size = Vector2(config.size, config.size)
+	thruster.texture = _create_circle_texture(config.size)
 
 	return thruster
 
@@ -316,111 +286,59 @@ func _fire_side_thrusters(lateral_direction: float):
 			side_thruster_right.emitting = true
 
 
-func _create_circle_mesh(radius: float) -> QuadMesh:
-	var mesh = QuadMesh.new()
-	mesh.size = Vector2(radius * 2, radius * 2)
-	return mesh
+func _create_circle_texture(radius: float) -> GradientTexture2D:
+	# Use cached textures to avoid creating new ones constantly
+	if radius <= 2.0:
+		if _cached_circle_texture_small == null:
+			_cached_circle_texture_small = _make_circle_texture(2.0)
+		return _cached_circle_texture_small
+	else:
+		if _cached_circle_texture_medium == null:
+			_cached_circle_texture_medium = _make_circle_texture(3.0)
+		return _cached_circle_texture_medium
+
+
+static func _make_circle_texture(radius: float) -> GradientTexture2D:
+	# Create a radial gradient texture for particle
+	var texture = GradientTexture2D.new()
+	texture.width = int(radius * 4)
+	texture.height = int(radius * 4)
+	texture.fill = GradientTexture2D.FILL_RADIAL
+	texture.fill_from = Vector2(0.5, 0.5)
+	texture.fill_to = Vector2(0.5, 0.0)
+
+	var gradient = Gradient.new()
+	gradient.set_color(0, Color.WHITE)
+	gradient.set_color(1, Color(1, 1, 1, 0))
+	texture.gradient = gradient
+
+	return texture
 
 
 func _setup_pdc_kill_zone():
+	# Simplified PDC - just a simple range ring
 	var pdc_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.PDC)
 	var pdc_range = ship_stats.get("range", 250)
 
-	# Container for all PDC visuals
 	pdc_kill_zone = Node2D.new()
 	pdc_kill_zone.name = "PDCKillZone"
 	add_child(pdc_kill_zone)
 
-	# Outer range ring - dashed/segmented for "danger zone" feel
+	# Simple range ring
 	pdc_range_ring = Line2D.new()
 	pdc_range_ring.name = "RangeRing"
-	pdc_range_ring.width = 2.0
-	pdc_range_ring.default_color = Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.3)
-
-	# Create segmented ring (dashes)
+	pdc_range_ring.width = 1.5
+	pdc_range_ring.default_color = Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.25)
 	var ring_points = []
-	var segments = 24
-	for i in range(segments + 1):
-		var angle = i * (PI * 2 / segments)
-		# Skip every other segment for dashed effect
-		if i % 2 == 0:
-			ring_points.append(Vector2(cos(angle), sin(angle)) * pdc_range)
-		else:
-			ring_points.append(Vector2(cos(angle), sin(angle)) * pdc_range)
+	for i in range(17):
+		var angle = i * (PI * 2 / 16)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * pdc_range)
 	pdc_range_ring.points = PackedVector2Array(ring_points)
-	pdc_range_ring.antialiased = true
 	pdc_kill_zone.add_child(pdc_range_ring)
-
-	# Inner targeting ring
-	var inner_ring = Line2D.new()
-	inner_ring.name = "InnerRing"
-	inner_ring.width = 1.5
-	inner_ring.default_color = Color(pdc_color.r * 0.7, pdc_color.g * 0.7, pdc_color.b * 0.7, 0.25)
-	var inner_points = []
-	for i in range(33):
-		var angle = i * (PI * 2 / 32)
-		inner_points.append(Vector2(cos(angle), sin(angle)) * (pdc_range * 0.6))
-	inner_ring.points = PackedVector2Array(inner_points)
-	pdc_kill_zone.add_child(inner_ring)
-
-	# Sweeping radar line - rotates continuously
-	pdc_sweep_line = Line2D.new()
-	pdc_sweep_line.name = "SweepLine"
-	pdc_sweep_line.width = 3.0
-	pdc_sweep_line.default_color = Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.6)
-	pdc_sweep_line.add_point(Vector2.ZERO)
-	pdc_sweep_line.add_point(Vector2(pdc_range, 0))
-	pdc_sweep_line.antialiased = true
-	pdc_kill_zone.add_child(pdc_sweep_line)
-
-	# Sweep trail (fading arc behind the sweep line)
-	var sweep_trail = Polygon2D.new()
-	sweep_trail.name = "SweepTrail"
-	var trail_points = [Vector2.ZERO]
-	var trail_arc = 0.4  # Radians of trail
-	for i in range(9):
-		var angle = -trail_arc + (trail_arc * i / 8)
-		trail_points.append(Vector2(cos(angle), sin(angle)) * pdc_range)
-	sweep_trail.polygon = PackedVector2Array(trail_points)
-	sweep_trail.color = Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.15)
-	pdc_kill_zone.add_child(sweep_trail)
-
-	# Cross-hairs at center
-	var crosshair_h = Line2D.new()
-	crosshair_h.width = 1.0
-	crosshair_h.default_color = Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.4)
-	crosshair_h.add_point(Vector2(-15, 0))
-	crosshair_h.add_point(Vector2(15, 0))
-	pdc_kill_zone.add_child(crosshair_h)
-
-	var crosshair_v = Line2D.new()
-	crosshair_v.width = 1.0
-	crosshair_v.default_color = Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.4)
-	crosshair_v.add_point(Vector2(0, -15))
-	crosshair_v.add_point(Vector2(0, 15))
-	pdc_kill_zone.add_child(crosshair_v)
-
-	# Start sweep animation
-	_animate_pdc_sweep()
 
 
 func _animate_pdc_sweep():
-	if not is_instance_valid(pdc_sweep_line):
-		return
-
-	# Continuous rotation
-	var tween = create_tween()
-	tween.set_loops()
-	tween.tween_property(pdc_sweep_line, "rotation", TAU, 2.0).from(0.0)
-
-	# Also rotate the trail
-	var trail = pdc_kill_zone.get_node_or_null("SweepTrail")
-	if trail:
-		var trail_tween = create_tween()
-		trail_tween.set_loops()
-		trail_tween.tween_property(trail, "rotation", TAU, 2.0).from(0.0)
-
-	# Pulse the range ring
+	# No animation needed - simplified
 	var pulse_tween = create_tween()
 	pulse_tween.set_loops()
 	pulse_tween.tween_property(pdc_range_ring, "modulate:a", 0.5, 1.0).set_trans(Tween.TRANS_SINE)
@@ -428,166 +346,71 @@ func _animate_pdc_sweep():
 
 
 func _setup_shield_bubble():
+	# Simplified shield - just a simple ring
 	shield_bubble = Line2D.new()
 	shield_bubble.name = "ShieldBubble"
 
 	var shield_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.SHIELD)
 	var radius = ship_stats.get("shield_radius", 120)
 
-	# Main shield ring - brighter, thicker
-	shield_bubble.default_color = Color(shield_color.r, shield_color.g, shield_color.b, 0.6)
-	shield_bubble.width = 4.0
+	shield_bubble.default_color = Color(shield_color.r, shield_color.g, shield_color.b, 0.4)
+	shield_bubble.width = 2.0
 
 	var points = []
-	for i in range(49):  # More points for smoother circle
-		var angle = i * (PI * 2 / 48)
+	for i in range(17):
+		var angle = i * (PI * 2 / 16)
 		points.append(Vector2(cos(angle), sin(angle)) * radius)
 	shield_bubble.points = PackedVector2Array(points)
-	shield_bubble.antialiased = true
 	add_child(shield_bubble)
-
-	# Inner glow ring - softer, larger
-	var inner_glow = Line2D.new()
-	inner_glow.name = "ShieldInnerGlow"
-	inner_glow.default_color = Color(shield_color.r, shield_color.g, shield_color.b, 0.25)
-	inner_glow.width = 12.0
-	inner_glow.points = shield_bubble.points
-	inner_glow.antialiased = true
-	add_child(inner_glow)
-
-	# Hexagonal pattern overlay for tech feel
-	var hex_pattern = Line2D.new()
-	hex_pattern.name = "ShieldHexPattern"
-	hex_pattern.default_color = Color(shield_color.r * 1.2, shield_color.g * 1.2, shield_color.b * 1.2, 0.3)
-	hex_pattern.width = 1.5
-	var hex_points = []
-	for i in range(7):  # Hexagon
-		var angle = i * (PI * 2 / 6)
-		hex_points.append(Vector2(cos(angle), sin(angle)) * (radius * 0.7))
-	hex_pattern.points = PackedVector2Array(hex_points)
-	add_child(hex_pattern)
-
-	# Pulse animation
-	_animate_shield_pulse()
 
 
 func _animate_shield_pulse():
 	if not is_instance_valid(shield_bubble):
 		return
-
-	var tween = create_tween()
-	tween.set_loops()
-	tween.tween_property(shield_bubble, "modulate:a", 0.3, 1.0).set_trans(Tween.TRANS_SINE)
-	tween.tween_property(shield_bubble, "modulate:a", 0.7, 1.0).set_trans(Tween.TRANS_SINE)
+	# Simple pulse - no complex animation
+	pass
 
 
 func _setup_gravity_well():
+	# Simplified gravity well - just two rings, no particles
 	var gravity_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.GRAVITY)
 	var gravity_radius = ship_stats.get("gravity_radius", 140)
 
-	# Container for all gravity well elements
 	gravity_well = Node2D.new()
 	gravity_well.name = "GravityWell"
 	add_child(gravity_well)
 
-	# Dark void center - smaller, tighter core
-	var void_center = Polygon2D.new()
-	var void_points = []
-	for i in range(25):
-		var angle = i * (PI * 2 / 24)
-		void_points.append(Vector2(cos(angle), sin(angle)) * 22)  # Smaller void
-	void_center.polygon = PackedVector2Array(void_points)
-	void_center.color = Color(0, 0, 0, 0.6)
-	gravity_well.add_child(void_center)
-
-	# Outer ring - slowly rotating, subtler
+	# Outer ring
 	gravity_ring_outer = Line2D.new()
 	gravity_ring_outer.name = "OuterRing"
-	gravity_ring_outer.width = 3.0  # Thinner
-	gravity_ring_outer.default_color = Color(gravity_color.r * 0.5, gravity_color.g * 0.5, gravity_color.b * 0.5, 0.4)
+	gravity_ring_outer.width = 2.0
+	gravity_ring_outer.default_color = Color(gravity_color.r, gravity_color.g, gravity_color.b, 0.3)
 	var outer_points = []
-	for i in range(49):
-		var angle = i * (PI * 2 / 48)
+	for i in range(17):
+		var angle = i * (PI * 2 / 16)
 		outer_points.append(Vector2(cos(angle), sin(angle)) * gravity_radius)
 	gravity_ring_outer.points = PackedVector2Array(outer_points)
-	gravity_ring_outer.antialiased = true
 	gravity_well.add_child(gravity_ring_outer)
 
-	# Inner ring - faster rotating, brighter but smaller
+	# Inner ring
 	gravity_ring_inner = Line2D.new()
 	gravity_ring_inner.name = "InnerRing"
-	gravity_ring_inner.width = 2.5  # Thinner
-	gravity_ring_inner.default_color = Color(gravity_color.r, gravity_color.g, gravity_color.b, 0.6)
+	gravity_ring_inner.width = 1.5
+	gravity_ring_inner.default_color = Color(gravity_color.r, gravity_color.g, gravity_color.b, 0.5)
 	var inner_points = []
-	for i in range(33):
-		var angle = i * (PI * 2 / 32)
-		inner_points.append(Vector2(cos(angle), sin(angle)) * (gravity_radius * 0.55))
+	for i in range(13):
+		var angle = i * (PI * 2 / 12)
+		inner_points.append(Vector2(cos(angle), sin(angle)) * (gravity_radius * 0.5))
 	gravity_ring_inner.points = PackedVector2Array(inner_points)
-	gravity_ring_inner.antialiased = true
 	gravity_well.add_child(gravity_ring_inner)
-
-	# Swirling vortex particles - fewer, tighter spiral
-	gravity_vortex_particles = GPUParticles2D.new()
-	gravity_vortex_particles.name = "VortexParticles"
-	gravity_vortex_particles.amount = 30  # Reduced from 60
-	gravity_vortex_particles.lifetime = 1.5
-	gravity_vortex_particles.emitting = true
-
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_RING
-	mat.emission_ring_radius = gravity_radius
-	mat.emission_ring_inner_radius = gravity_radius * 0.75
-	mat.emission_ring_height = 0.0
-
-	# Particles spiral inward - tighter spiral
-	mat.radial_accel_min = -120.0
-	mat.radial_accel_max = -160.0
-	mat.tangential_accel_min = 60.0
-	mat.tangential_accel_max = 100.0
-	mat.initial_velocity_min = 15.0
-	mat.initial_velocity_max = 30.0
-	mat.scale_min = 1.0
-	mat.scale_max = 2.0
-
-	# Color gradient - bright at edge, fade as pulled in
-	var grad = Gradient.new()
-	grad.set_color(0, Color(gravity_color.r * 1.3, gravity_color.g * 1.3, gravity_color.b * 1.3, 0.7))
-	grad.add_point(0.5, gravity_color)
-	grad.set_color(1, Color(0, 0, 0, 0))
-	var grad_tex = GradientTexture1D.new()
-	grad_tex.gradient = grad
-	mat.color_ramp = grad_tex
-
-	gravity_vortex_particles.process_material = mat
-	gravity_vortex_particles.draw_pass_1 = QuadMesh.new()
-	gravity_vortex_particles.draw_pass_1.size = Vector2(3, 3)  # Smaller particles
-	gravity_well.add_child(gravity_vortex_particles)
-
-	# Animate rings rotation
-	_animate_gravity_well()
 
 	# Add ship to graviton group for projectile detection
 	add_to_group("gravitons")
 
 
 func _animate_gravity_well():
-	if not is_instance_valid(gravity_ring_outer) or not is_instance_valid(gravity_ring_inner):
-		return
-
-	# Continuous rotation animation
-	var outer_tween = create_tween()
-	outer_tween.set_loops()
-	outer_tween.tween_property(gravity_ring_outer, "rotation", TAU, 8.0).from(0.0)
-
-	var inner_tween = create_tween()
-	inner_tween.set_loops()
-	inner_tween.tween_property(gravity_ring_inner, "rotation", -TAU, 4.0).from(0.0)  # Counter-rotate
-
-	# Pulsing intensity
-	var pulse_tween = create_tween()
-	pulse_tween.set_loops()
-	pulse_tween.tween_property(gravity_well, "modulate:a", 0.6, 1.5).set_trans(Tween.TRANS_SINE)
-	pulse_tween.tween_property(gravity_well, "modulate:a", 1.0, 1.5).set_trans(Tween.TRANS_SINE)
+	# Simplified - no animation needed
+	pass
 
 
 func _setup_starbase_visuals():
@@ -716,72 +539,52 @@ func _setup_turret_visuals():
 func _show_muzzle_flash():
 	muzzle_flash.visible = true
 	muzzle_flash.modulate = Color.WHITE
+	muzzle_flash.scale = Vector2(1.5, 1.5)  # Start bigger
 
 	var tween = create_tween()
-	tween.tween_property(muzzle_flash, "modulate:a", 0.0, 0.1)
-	tween.tween_callback(func(): muzzle_flash.visible = false)
+	tween.set_parallel(true)
+	tween.tween_property(muzzle_flash, "modulate:a", 0.0, 0.08)
+	tween.tween_property(muzzle_flash, "scale", Vector2(0.5, 0.5), 0.08)
+	tween.tween_callback(func():
+		muzzle_flash.visible = false
+		muzzle_flash.scale = Vector2.ONE
+	)
 
 
 func _show_railgun_power_surge():
-	# Dramatic muzzle blast particles for railgun
-	var blast = GPUParticles2D.new()
-	blast.amount = 25
-	blast.lifetime = 0.25
-	blast.one_shot = true
-	blast.explosiveness = 1.0
-	blast.emitting = true
-
-	var mat = ParticleProcessMaterial.new()
-	mat.direction = Vector3(1, 0, 0)  # Forward
-	mat.spread = 35.0
-	mat.initial_velocity_min = 150.0
-	mat.initial_velocity_max = 300.0
-	mat.damping_min = 100.0
-	mat.damping_max = 150.0
-	mat.scale_min = 1.5
-	mat.scale_max = 3.0
-
-	# Bright flash color based on team
+	# Cool expanding ring effect - no particles
 	var flash_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.GUN)
-	var grad = Gradient.new()
-	grad.set_color(0, Color.WHITE)
-	grad.add_point(0.2, flash_color.lightened(0.5))
-	grad.set_color(1, Color(flash_color.r, flash_color.g, flash_color.b, 0))
-	var grad_tex = GradientTexture1D.new()
-	grad_tex.gradient = grad
-	mat.color_ramp = grad_tex
 
-	blast.process_material = mat
-	blast.draw_pass_1 = QuadMesh.new()
-	blast.draw_pass_1.size = Vector2(4, 4)
+	# Bright core flash
+	var core = Polygon2D.new()
+	core.polygon = PackedVector2Array([
+		Vector2(-3, -6), Vector2(12, 0), Vector2(-3, 6)
+	])
+	core.color = Color.WHITE
+	core.position = muzzle_flash.position
+	add_child(core)
 
-	# Position at muzzle
-	blast.position = muzzle_flash.position
-	add_child(blast)
-
-	# Recoil flash ring
+	# Expanding ring
 	var ring = Line2D.new()
-	ring.width = 4.0
-	ring.default_color = flash_color.lightened(0.3)
+	ring.width = 3.0
+	ring.default_color = flash_color.lightened(0.4)
 	var ring_points = []
-	for i in range(17):
-		var angle = i * (PI * 2 / 16)
-		ring_points.append(Vector2(cos(angle), sin(angle)) * 8)
+	for i in range(13):
+		var angle = i * (PI * 2 / 12)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 6)
 	ring.points = PackedVector2Array(ring_points)
 	ring.position = muzzle_flash.position
 	add_child(ring)
 
-	# Animate ring expansion
-	var ring_tween = create_tween()
-	ring_tween.set_parallel(true)
-	ring_tween.tween_property(ring, "scale", Vector2(3.5, 3.5), 0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	ring_tween.tween_property(ring, "modulate:a", 0.0, 0.15)
-	ring_tween.tween_callback(func(): ring.queue_free())
-
-	# Cleanup blast after particles finish
-	get_tree().create_timer(0.5).timeout.connect(func():
-		if is_instance_valid(blast):
-			blast.queue_free()
+	# Animate
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(ring, "scale", Vector2(4, 4), 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(ring, "modulate:a", 0.0, 0.12)
+	tween.tween_property(core, "modulate:a", 0.0, 0.08)
+	tween.tween_callback(func():
+		ring.queue_free()
+		core.queue_free()
 	)
 
 func select():
@@ -791,6 +594,10 @@ func deselect():
 	selection_indicator.visible = false
 
 func _physics_process(delta):
+	# Decrement target cache timer
+	if target_cache_timer > 0:
+		target_cache_timer -= delta
+
 	var current_state = store.get_state()
 	if not current_state.ships.has(ship_data.id):
 		queue_free()
@@ -874,7 +681,12 @@ func _physics_process(delta):
 					var target_id = _find_nearest_enemy(current_state)
 					var enemy_in_range = false
 					if target_id != -1 and current_state.ships.has(target_id):
+						# Use real position from ship node if available (state may be stale)
 						var enemy_pos = current_state.ships[target_id].position
+						if vnp_main and vnp_main.ship_nodes.has(target_id):
+							var enemy_node = vnp_main.ship_nodes[target_id]
+							if is_instance_valid(enemy_node):
+								enemy_pos = enemy_node.global_position
 						var dist = position.distance_to(enemy_pos)
 						if dist < ship_stats.get("range", 300) * 2.5:
 							enemy_in_range = true
@@ -1006,12 +818,18 @@ func _physics_process(delta):
 				if fire_rate_timer.is_stopped():
 					fire_rate_timer.start()
 
-	if self.position != my_current_data.position:
-		store.dispatch({
-			"type": "UPDATE_SHIP_POSITION",
-			"ship_id": ship_data.id,
-			"position": self.position
-		})
+	# Throttled position sync - only update state every POSITION_SYNC_INTERVAL
+	# This reduces dispatch spam from 60/sec to 2/sec per ship
+	var current_time = Time.get_ticks_msec() / 1000.0
+	if current_time - last_position_sync_time >= POSITION_SYNC_INTERVAL:
+		if self.position.distance_squared_to(last_synced_position) > 100:  # Only if moved >10 units
+			last_position_sync_time = current_time
+			last_synced_position = self.position
+			store.dispatch({
+				"type": "UPDATE_SHIP_POSITION",
+				"ship_id": ship_data.id,
+				"position": self.position
+			})
 
 func _move_to(target_position):
 	# Asteroids-style thrust movement
@@ -1020,6 +838,9 @@ func _move_to(target_position):
 
 	# Apply thrust as acceleration
 	current_velocity += thrust_force * get_physics_process_delta_time()
+
+	# Apply convergence pull (The Progenitor's gravity)
+	_apply_convergence_pull(get_physics_process_delta_time())
 
 	# Clamp to max speed
 	var max_speed = ship_stats.speed * 1.2  # Slight overspeed allowed with momentum
@@ -1031,6 +852,50 @@ func _move_to(target_position):
 
 	velocity = current_velocity
 	move_and_slide()
+
+
+func _apply_convergence_pull(delta: float):
+	"""Apply gravitational pull toward The Progenitor's convergence point"""
+	if not vnp_main:
+		return
+
+	var current_state = store.get_state()
+	if not current_state.has("convergence"):
+		return
+
+	var convergence = current_state.convergence
+	var phase = convergence.get("phase", VnpTypes.ConvergencePhase.DORMANT)
+
+	# No pull during dormant, whispers, or contact phases
+	if phase < VnpTypes.ConvergencePhase.EMERGENCE:
+		return
+
+	var pull_strength = convergence.get("pull_strength", 0.0)
+	if pull_strength <= 0:
+		return
+
+	var convergence_center = convergence.get("center", Vector2.ZERO)
+	var absorption_radius = convergence.get("absorption_radius", 1000.0)
+
+	# Calculate pull direction and distance
+	var to_center = convergence_center - global_position
+	var distance = to_center.length()
+
+	if distance < 10:
+		return  # Already at center
+
+	var direction = to_center.normalized()
+
+	# Pull gets STRONGER near the edge (inverse relationship)
+	# At center: minimal pull. At edge: maximum pull.
+	var edge_factor = distance / absorption_radius
+	edge_factor = clamp(edge_factor, 0.2, 1.5)  # 0.2 at center, up to 1.5 at edge
+
+	# Calculate pull force
+	var pull_force = direction * pull_strength * edge_factor * delta
+
+	# Ships can resist with thrust, but the pull is always there
+	current_velocity += pull_force
 
 	# Rotate to face movement direction (with smooth turning)
 	if current_velocity.length() > 10:
@@ -1049,6 +914,9 @@ func _rush_target(target_pos: Vector2, delta: float):
 	# Apply aggressive thrust (burst speed when rushing)
 	var rush_thrust = thrust_dir * ship_stats.speed * THRUST_MULTIPLIER * 1.3
 	current_velocity += rush_thrust * delta
+
+	# Apply convergence pull (The Progenitor's gravity)
+	_apply_convergence_pull(delta)
 
 	# Higher max speed when rushing
 	var max_speed = ship_stats.speed * 1.4
@@ -1098,6 +966,9 @@ func _strafe_around_target(target_pos: Vector2, delta: float):
 	# Apply thrust
 	var strafe_thrust = thrust_dir * ship_stats.speed * THRUST_MULTIPLIER
 	current_velocity += strafe_thrust * delta
+
+	# Apply convergence pull (The Progenitor's gravity)
+	_apply_convergence_pull(delta)
 
 	# Max speed
 	if current_velocity.length() > ship_stats.speed * 1.2:
@@ -1163,6 +1034,9 @@ func _strafe_around_target_tactical(target_pos: Vector2, delta: float, tactics: 
 	var strafe_thrust = thrust_dir * ship_stats.speed * THRUST_MULTIPLIER
 	current_velocity += strafe_thrust * delta
 
+	# Apply convergence pull (The Progenitor's gravity)
+	_apply_convergence_pull(delta)
+
 	# Max speed
 	if current_velocity.length() > ship_stats.speed * 1.2:
 		current_velocity = current_velocity.normalized() * ship_stats.speed * 1.2
@@ -1175,8 +1049,8 @@ func _strafe_around_target_tactical(target_pos: Vector2, delta: float, tactics: 
 	move_and_slide()
 
 	# Face target
-	var to_target = target_pos - position
-	var target_angle = to_target.angle()
+	var to_target_dir = target_pos - position
+	var target_angle = to_target_dir.angle()
 	rotation = lerp_angle(rotation, target_angle, 6.0 * delta)
 
 	var facing_dir = Vector2.RIGHT.rotated(rotation)
@@ -1243,6 +1117,9 @@ func _orbit_target(target_pos: Vector2, delta: float, speed_mult: float = 0.5):
 	var thrust_dir = (desired_pos - position).normalized()
 	var orbit_thrust = thrust_dir * ship_stats.speed * THRUST_MULTIPLIER * speed_mult
 	current_velocity += orbit_thrust * delta
+
+	# Apply convergence pull (The Progenitor's gravity)
+	_apply_convergence_pull(delta)
 
 	# Max speed for orbit (slower than strafing)
 	var max_speed = ship_stats.speed * speed_mult * 1.2
@@ -1513,17 +1390,32 @@ func _dispatch_state_change(new_state: String, target = null):
 	return true
 
 func _find_nearest_enemy(state):
-	# Use pure function from VnpSystems for targeting
+	# Use cached target if still valid
+	if cached_target_id != -1 and target_cache_timer > 0:
+		if state.ships.has(cached_target_id):
+			return cached_target_id
+		else:
+			# Target died, clear cache
+			cached_target_id = -1
+
+	# Cache expired or no cached target - search for new one
 	var rally_point = _get_rally_point(state)
 	var weapon_range = ship_stats.get("range", 300)
 
-	return VnpSystems.find_best_target(
+	var target_id = VnpSystems.find_best_target(
 		position,
 		ship_data.team,
 		weapon_range,
 		rally_point,
 		state.ships
 	)
+
+	# Cache the result
+	if target_id != -1:
+		cached_target_id = target_id
+		target_cache_timer = TARGET_CACHE_DURATION
+
+	return target_id
 
 
 func _find_uncaptured_planet(state):
@@ -1552,7 +1444,9 @@ func _on_fire_rate_timer_timeout():
 	if current_state.ships.has(target_id):
 		var target_data = current_state.ships[target_id]
 		var target_stats = VnpTypes.SHIP_STATS[target_data.type]
-		var damage_multiplier = VnpTypes.DAMAGE_MULTIPLIERS[ship_stats.weapon].get(target_stats.weapon, 1.0)
+		# Get damage multiplier safely - some weapons (PDC, TURBOLASER, etc) don't have multipliers
+		var weapon_multipliers = VnpTypes.DAMAGE_MULTIPLIERS.get(ship_stats.weapon, {})
+		var damage_multiplier = weapon_multipliers.get(target_stats.get("weapon", -1), 1.0)
 
 		# Apply damage bonus from controlled strategic points (e.g., Command Center)
 		var point_damage_bonus = _get_strategic_point_damage_bonus(current_state, ship_data.team)
@@ -1613,8 +1507,7 @@ func _on_fire_rate_timer_timeout():
 			VnpTypes.WeaponType.GUN:
 				# RAILGUN: Punchy power surge + piercing projectile
 				_show_railgun_power_surge()
-				var projectile = ProjectileScene.instantiate()
-				get_tree().root.add_child(projectile)
+				var projectile = vnp_main.get_projectile()
 				projectile.init({
 					"team": ship_data.team,
 					"weapon_type": ship_stats.weapon,
@@ -1633,11 +1526,11 @@ func _on_fire_rate_timer_timeout():
 					# Stagger launch slightly for shower effect
 					var delay = i * 0.08
 					var spread_index = i
+					var main_ref = vnp_main  # Capture reference for lambda
 					get_tree().create_timer(delay).timeout.connect(func():
 						if not is_instance_valid(self):
 							return
-						var m_projectile = ProjectileScene.instantiate()
-						get_tree().root.add_child(m_projectile)
+						var m_projectile = main_ref.get_projectile()
 						# Spread missiles with different arc offsets
 						m_projectile.init({
 							"team": ship_data.team,
@@ -1648,7 +1541,7 @@ func _on_fire_rate_timer_timeout():
 							"target_id": target_id,
 							"arc_height_mult": 0.4 + randf() * 0.35,  # Varied arc heights
 							"store": store,
-							"vnp_main": vnp_main,
+							"vnp_main": main_ref,
 						})
 					)
 
@@ -1656,8 +1549,7 @@ func _on_fire_rate_timer_timeout():
 				# TURBOLASER: Slow but devastating projectile - Star Destroyer style
 				# Easy for small fast ships to dodge, deadly to capitals
 				_show_turbolaser_charge()
-				var turbo_projectile = ProjectileScene.instantiate()
-				get_tree().root.add_child(turbo_projectile)
+				var turbo_projectile = vnp_main.get_projectile()
 				turbo_projectile.init({
 					"team": ship_data.team,
 					"weapon_type": VnpTypes.WeaponType.TURBOLASER,
@@ -1867,104 +1759,56 @@ func _fire_pdc_burst(target_pos: Vector2):
 
 	var pdc_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.PDC)
 
-	# Create 5-8 tracer lines for intimidating bullet wall
-	var tracer_count = randi_range(5, 8)
+	# Create 3-4 tracer lines (reduced for performance)
+	var tracer_count = randi_range(3, 4)
 	for i in range(tracer_count):
 		var tracer = Line2D.new()
 		tracer.width = 2.5  # Thicker tracers
 		tracer.default_color = pdc_color
 
-		# Wider spread pattern
-		var spread = Vector2(randf_range(-25, 25), randf_range(-25, 25))
+		# Spread pattern
+		var spread = Vector2(randf_range(-20, 20), randf_range(-20, 20))
 		var end_pos = target_pos + spread
 
-		# Staggered start points for "wall of lead" effect
-		var start_offset = Vector2(randf_range(-8, 8), randf_range(-8, 8))
-
-		tracer.add_point(global_position + start_offset)
+		tracer.add_point(global_position)
 		tracer.add_point(end_pos)
-		tracer.antialiased = true
 		get_tree().root.add_child(tracer)
 
-		# Slightly longer fade for visibility
+		# Quick fade
 		var tween = get_tree().create_tween()
-		tween.tween_property(tracer, "modulate:a", 0.0, 0.12)
+		tween.tween_property(tracer, "modulate:a", 0.0, 0.1)
 		tween.tween_callback(func(): tracer.queue_free())
 
-	# Add small tracer sparks at origin
-	var sparks = GPUParticles2D.new()
-	sparks.global_position = global_position
-	sparks.amount = 8
-	sparks.lifetime = 0.15
-	sparks.one_shot = true
-	sparks.explosiveness = 1.0
-	sparks.emitting = true
-
-	var mat = ParticleProcessMaterial.new()
-	var to_target = (target_pos - global_position).normalized()
-	mat.direction = Vector3(to_target.x, to_target.y, 0)
-	mat.spread = 30.0
-	mat.initial_velocity_min = 150.0
-	mat.initial_velocity_max = 250.0
-	mat.scale_min = 0.8
-	mat.scale_max = 1.5
-	mat.color = pdc_color.lightened(0.3)
-
-	sparks.process_material = mat
-	sparks.draw_pass_1 = QuadMesh.new()
-	sparks.draw_pass_1.size = Vector2(2, 2)
-	get_tree().root.add_child(sparks)
-
-	get_tree().create_timer(0.3).timeout.connect(func():
-		if is_instance_valid(sparks):
-			sparks.queue_free()
-	)
-
-	# Muzzle flash
+	# Skip GPU particles for PDC - too expensive for high fire rate
+	# Just use the muzzle flash instead
 	_show_muzzle_flash()
 
 
 func _intercept_missile(missile_node):
-	# Create interception explosion
+	# Create interception explosion - simplified using Line2D ring
 	var intercept_pos = missile_node.global_position
-
-	# Small bright explosion
-	var particles = GPUParticles2D.new()
-	particles.global_position = intercept_pos
-	particles.amount = 15
-	particles.lifetime = 0.2
-	particles.one_shot = true
-	particles.explosiveness = 1.0
-	particles.emitting = true
-
-	var mat = ParticleProcessMaterial.new()
-	mat.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_SPHERE
-	mat.emission_sphere_radius = 3.0
-	mat.spread = 180.0
-	mat.initial_velocity_min = 80.0
-	mat.initial_velocity_max = 150.0
-	mat.scale_min = 1.0
-	mat.scale_max = 2.0
-
 	var pdc_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.PDC)
-	var grad = Gradient.new()
-	grad.set_color(0, Color.WHITE)
-	grad.set_color(1, Color(pdc_color.r, pdc_color.g, pdc_color.b, 0))
-	var tex = GradientTexture1D.new()
-	tex.gradient = grad
-	mat.color_ramp = tex
 
-	particles.process_material = mat
-	particles.draw_pass_1 = QuadMesh.new()
-	particles.draw_pass_1.size = Vector2(3, 3)
+	# Expanding ring effect (no GPU particles)
+	var ring = Line2D.new()
+	ring.global_position = intercept_pos
+	ring.width = 4.0
+	ring.default_color = Color(1.0, 1.0, 1.0, 0.9)
 
-	get_tree().root.add_child(particles)
+	var ring_points = []
+	for i in range(13):
+		var angle = i * (PI * 2 / 12)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 8)
+	ring.points = PackedVector2Array(ring_points)
+	get_tree().root.add_child(ring)
 
-	# Cleanup
-	get_tree().create_timer(0.5).timeout.connect(func():
-		if is_instance_valid(particles):
-			particles.queue_free()
-	)
+	# Expand and fade
+	var tween = get_tree().create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(ring, "scale", Vector2(5, 5), 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(ring, "modulate:a", 0.0, 0.2)
+	tween.tween_property(ring, "default_color", pdc_color, 0.1)
+	tween.tween_callback(func(): ring.queue_free())
 
 	# Destroy the missile
 	missile_node.queue_free()

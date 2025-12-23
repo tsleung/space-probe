@@ -76,6 +76,13 @@ The game should be interesting even at 4x speed with AI playing. The visual lang
 ### "Spartans Never Die"
 Not victims, but heroes buying time. Every life saved matters. The tone is tragic then DEFIANT - emphasize courage, sacrifice, and hope.
 
+### "Every Moment Matters"
+The weeks march as inevitability - futility, hopelessness, dread. You are trading off what little remains for even less in the future. But you are NOT a victim to operational structure. You can make decisions at any moment, not just at turn boundaries. The player has continuous agency to respond to the unfolding crisis.
+
+This matters because: if tradeoffs are so crucial, you wouldn't wait a week before changing course. Every hour counts. The clock shows hours, days, weeks - all ticking relentlessly. The player should FEEL this weight. When they see "WEEK 4, DAY 3 - 14:00", they should feel the Herald getting closer, the resources dwindling, the window closing.
+
+The discrete time events (hourly ticks, daily updates, weekly phases) create the rhythm of dread. The continuous player agency creates the desperate scramble to respond. Together they produce the core emotional experience: watching doom approach while frantically trying to save what you can.
+
 ---
 
 ## Game Mechanics
@@ -135,26 +142,58 @@ Not victims, but heroes buying time. Every life saved matters. The tone is tragi
    - Herald strength scales up
 ```
 
-### Continuous Time System
+### Time System Architecture
 
-The game features continuous time progression between turns:
+FCW uses a **discrete simulation with visual interpolation**:
 
+**Time Hierarchy:**
+- **Hour** = Base simulation tick (finest granularity, game logic runs here)
+- **Day** = 24 hours (production updates, daily events)
+- **Week** = 7 days / 168 hours (major phases, Herald milestones)
+
+**Single Source of Truth:**
+```gdscript
+game_time: float  # Hours since game start
+
+# Derived values
+var current_hour = int(game_time) % 24
+var current_day = int(game_time / 24) % 7 + 1  # 1-7
+var current_week = int(game_time / 168) + 1
 ```
-Time Display: "WEEK X, DAY Y - HH:00"
 
-Speed Multipliers:
-- PAUSED: 0x (game stopped)
-- SLOW: 0.5x (16 seconds/week)
-- NORMAL: 1x (8 seconds/week)
-- FAST: 2x (4 seconds/week)
-- VERY FAST: 4x (2 seconds/week)
+**Discrete Simulation Layer:**
+- Game logic advances in 1-hour ticks
+- Entity positions update: `position += velocity * 1_hour`
+- Detection rolls, events, combat resolution happen at tick boundaries
+- Pausing stops ticks from advancing
 
-Within each week:
-- 7 days, 24 hours/day
-- Clock visibly ticks
-- Fleet positions interpolate smoothly
-- No instant teleportation
+**Visual Interpolation Layer:**
+- `tick_progress: 0.0 → 1.0` tracks progress to next hour tick
+- All rendered positions: `lerp(pos_at_tick_N, pos_at_tick_N+1, tick_progress)`
+- Creates smooth animation between discrete states
+- Pausing freezes `tick_progress`, visuals freeze
+
+**Player Agency:**
+- Decisions can be made at ANY time (real-time)
+- Orders queue and execute at next tick, or immediately where appropriate
+- Clock marches regardless - you react to it, not wait for it
+
+**Speed Multipliers:**
 ```
+- PAUSED: 0 ticks/sec (game stopped)
+- SLOW: 0.5 ticks/sec (1 hour = 2 real seconds)
+- NORMAL: 1 tick/sec (1 hour = 1 real second)
+- FAST: 2 ticks/sec (1 hour = 0.5 real seconds)
+- VERY FAST: 4 ticks/sec (1 hour = 0.25 real seconds)
+```
+
+**Time Display:** `"WEEK X, DAY Y - HH:00"`
+
+**Battle Replays:**
+- Battles have their own independent timeline
+- Main game clock can be paused while battle plays
+- A 1-hour battle in game time can replay over several minutes
+- Battle outcome is pre-calculated; replay is just visualization
 
 ### Zone System (6 Zones)
 
@@ -696,15 +735,23 @@ The AI plays automatically when enabled:
 
 ## Recent Changes (December 2025)
 
-### Continuous Time System
+### Time System Refactor (In Progress)
 
-**Problem:** Discrete turn jumps felt jarring; players couldn't see time passing.
+**Problem:** Original continuous time system had three unsynchronized time layers:
+1. Discrete `state.game_time` (updated at turn boundaries)
+2. Continuous `_week_progress` (UI interpolation)
+3. Orbital calculations (using stale game_time)
 
-**Solution:** Implemented continuous time flow:
-- Visible clock: "WEEK X, DAY Y - HH:00"
-- Time flows smoothly between weeks
-- All ship movements interpolate based on time progress
-- Speed controls: Paused / Slow / Normal / Fast / Very Fast
+This caused entities to lag behind the displayed clock by up to 1 week, Herald AI making decisions with stale position data, and pause not properly freezing all systems.
+
+**Solution:** Unified time architecture with discrete simulation + visual interpolation:
+- Single source of truth: `game_time` in hours
+- Simulation advances in 1-hour ticks (discrete)
+- Visual layer interpolates between ticks (continuous appearance)
+- Pause stops both tick advancement AND visual interpolation
+- Player can make decisions at any time (real-time agency)
+
+**Key Insight:** The game is NOT turn-based in the traditional sense. Players have continuous agency to respond to the unfolding crisis. The discrete ticks create the rhythm; the interpolation creates the smoothness; the player agency creates the desperate scramble to respond.
 
 ### Herald Travel Time
 
@@ -759,6 +806,387 @@ Also boosted Carrier evacuation multiplier to 8x, making them strategically esse
 - **Sins of a Solar Empire:** Fleet allocation, zone strategy
 - **Star Wars Rebellion:** Multi-level zoom, strategic map
 - **FTL:** Roguelite tragedy, meaningful failure
+
+---
+
+## Movement Refactor (December 2025 - In Progress)
+
+### Vision Statement
+
+Transform FCW from zone-based fleet management into **space chess** where position, velocity, and time are everything. Inspired by Bobiverse, The Expanse, and real orbital mechanics.
+
+> **Core thesis**: Desperation comes from physics. You can SEE the Herald coming. You can CALCULATE when they arrive. You know where your ships CAN'T be in time. The clock isn't abstract - it's orbital mechanics.
+
+### Design Principles
+
+#### "Movement IS the game"
+
+> "This is a game of tradeoffs til numbers go down, figuring out numbers go down, and which ones you decide to prioritize. It can be evacuating civilians, evacuating military, saving ships, doing damage."
+
+Every decision involves position, time, and speed:
+- Where ships are matters more than how many
+- Time windows open and close as planets move
+- Desperation = watching the clock, knowing what you can't do in time
+
+#### "Unified Entity System"
+
+> "We need a general refactoring so all elements, transport or combat ships, are subject to the same mechanics. This sounds complicated but it also simplifies - there are less types and special cases. This is good because then we can get emergent narratives when systems mix together."
+
+All movable things follow the same rules:
+- Combat ships, transports, weapons - all entities
+- Same physics, same detection, same intercept rules
+- Emergent gameplay from consistent systems
+
+#### "Detection Creates the Drama"
+
+> "There can be even a detection mechanic where if ships move between star systems creates an observable traffic link, so if we have an armada at a place, we don't want to send it because it will reveal that link."
+
+Herald is observation-limited:
+- Only sees what's near it (local observation radius)
+- Follows activity (responds to detected burns)
+- Doesn't care about planets - only human signatures
+- **Critical**: If you don't fly to/from Earth, Herald doesn't know it's there
+
+#### "The Earth Dilemma"
+
+> "This allows an emergent realization the player will find as they replay FCW, that ultimately to save everyone on earth, you may need to abandon everyone else out there and keep earth dark - and that's not even guaranteed, just your best hope probabilistically."
+
+The central tragic choice:
+- Help outer colonies = Activity draws Herald toward inner system
+- Go dark = Abandon everyone, but Herald might not find Earth
+- Evacuate = Massive activity, definitely draws Herald
+
+### Core Mechanics
+
+#### Physics-Based Movement
+
+> "If we know a ship accelerates and decelerates, figuring out where they can accelerate to for gravity assist and how they will slow down will create known intercept points. This should change as orbital bodies move relative to each other."
+
+Ships have:
+- **Position** (continuous, in AU)
+- **Velocity** (direction + speed)
+- **Acceleration** (thrust capability)
+
+Movement creates signatures:
+- **Burning** = High signature, visible across system
+- **Coasting** = Low signature, nearly invisible
+- **Deceleration burns** reveal destination (you MUST slow down)
+
+#### Gravity Assists
+
+> "Let's make movement the core game mechanic - we have tradeoffs to make so everything we do is related to speed and time."
+
+Orbital bodies create:
+- Slingshot opportunities (faster travel, predictable path)
+- Known intercept points (we know where they'll be)
+- Orbital windows (travel costs change as planets move)
+
+#### Attack Vectors
+
+> "I'm inspired by the Bobiverse near lightspeed attack. Even in the Expanse attack vectors matter a lot. Even in traditional air combat if you get behind release and evade, the target can't escape."
+
+Combat depends on:
+- Intercept geometry (can you match their trajectory?)
+- Closing velocity (high = devastating kinetic damage)
+- Aspect angle (behind them with thrust advantage = checkmate)
+
+#### Weapons as Entities
+
+> "This allows conventional mass weapons to have massive impact. Bombers can slingshot torpedoes without power and stealth, then activate burns to track targets."
+
+Torpedoes follow same physics:
+- **Unpowered launch**: Inherit launcher velocity, coast silently
+- **Terminal burn**: High signature, homing capability
+- Kinetic damage scales with closing velocity
+
+#### Decoy Tactics
+
+> "We introduce the decoy mechanic as emergent where we have a fleet with large mass of ships fly near the herald and try to lead it away, or at least distract it which buys time."
+
+Split fleet feature:
+- Send part of fleet as decoy
+- Creates burn signature Herald follows
+- Buys time for evacuation or repositioning
+
+#### Herald Drones
+
+> "We need the herald, like in Bobiverse, have the ability to release very fast drones which shows how outmatched humanity is anyway. This helps remove the 'hope' from playing."
+
+Herald capabilities:
+- Can release fast hunter-killer drones
+- Shows technological superiority
+- Reinforces "managing decline" theme
+
+### Detection System
+
+#### Probability Visualization
+
+> "We need the user to see detection probability. Let's show a 'zone' (maybe its slight shading, maybe its a dotted line boundary) which shows standard deviation detection or some sort of probability in a transparent way per time (0.1% per day, 1% per day, 10% per day or something increasing given the activity of a trafficked lane)."
+
+Detection rates:
+- **IDLE**: 0.1% per day (minimal background)
+- **LOW**: 1% per day (occasional traffic)
+- **MEDIUM**: 5% per day (regular traffic)
+- **HIGH**: 10% per day (heavy traffic)
+- **BURNING**: 50% per day (active burn in range)
+
+#### Traffic Accumulation
+
+Routes become "known" over time:
+- Each transit adds to route traffic level
+- Traffic decays slowly without activity
+- High-traffic routes become danger zones
+
+#### Herald Introduction
+
+> "We can additionally introduce the herald because they follow a ship into the system! We see the tendril mechanic directly occurring and the user goes from seeing normal traffic to an ominous herald colored detection network, then the herald comes."
+
+Herald enters by following activity:
+1. Player sees normal civilian traffic
+2. Herald's detection tendrils spread (ominous visualization)
+3. Herald fleet arrives, following the activity
+
+### Technical Implementation
+
+#### New Files
+
+| File | Purpose |
+|------|---------|
+| `fcw_orbital.gd` | Route calculation, orbital positions, gravity assists |
+| `fcw_herald_ai.gd` | Detection logic, pattern tracking, response behavior (planned) |
+
+#### Modified Files
+
+| File | Changes |
+|------|---------|
+| `fcw_types.gd` | EntityType/Faction/MovementState enums, entity factory functions, orbital data, detection constants |
+| `fcw_store.gd` | Entity signals, entity getters, zone position helpers |
+| `fcw_reducer.gd` | Entity movement processing, detection processing, intercept resolution, traffic decay |
+
+#### Entity System
+
+```gdscript
+# All entities share this structure
+var entity = {
+    "id": String,
+    "entity_type": EntityType,  # WARSHIP, TRANSPORT, WEAPON, HERALD_SHIP
+    "faction": Faction,         # HUMAN, HERALD
+
+    # Physics
+    "position": Vector2,        # AU coordinates
+    "velocity": Vector2,        # AU/week
+    "acceleration": float,      # Max thrust
+
+    # Detection
+    "signature": float,         # 0 = dark, 1 = burning
+    "movement_state": MovementState,  # BURNING, COASTING, ORBITING, DESTROYED
+
+    # Payload
+    "combat_power": float,
+    "cargo": Dictionary,        # souls, resources
+
+    # Orders
+    "destination": int,         # Zone ID
+    "route": Array,             # Waypoints
+    "eta": float
+}
+```
+
+#### Turn Processing (Updated)
+
+```
+1. Production
+2. Ship construction
+3. Fleet transit (legacy)
+3b. Entity movement (NEW)
+4. Herald transit
+4b. Detection update (NEW)
+5. Combat
+5b. Entity intercepts (NEW)
+6. Herald advance
+7. Evacuation
+8. Colony ships (legacy)
+9. Game over check
+10. Advance turn + game_time
+11. Traffic decay (NEW)
+```
+
+### UI Changes (Planned)
+
+#### Solar Map
+
+- Render entities at continuous positions (not zone-locked)
+- Draw trajectory curves (projected paths)
+- Animate burn states (engine glow)
+- Show detection zones with probability shading
+- Visualize Herald observation radius
+
+#### Planet View
+
+> "Given we already have a planet view, we can make it smaller so that we are seeing orbital trajectories and gravity assists occurring in a close up view that the solar view doesn't show."
+
+Close-up view showing:
+- Detailed trajectory curves
+- Gravity assist maneuvers
+- Intercept geometries
+
+#### Route Selection
+
+When entity selected:
+1. Destinations light up with travel times
+2. Show route options (direct, coast, gravity assist)
+3. Display detection exposure for each route
+4. Can split fleet mid-transit
+
+### Migration Strategy
+
+The new entity system runs parallel to legacy systems:
+1. Legacy `fleets_in_transit` and `colony_ships` still work
+2. New `entities` array processes alongside
+3. Gradual migration of features to entity system
+4. Eventually remove legacy arrays
+
+---
+
+## Current Implementation Status (December 2025)
+
+### What's Working ✅
+
+#### Core Game Loop
+- **Turn processing**: Full week-based structure with production, combat, evacuation
+- **Time system**: Discrete 1-hour ticks with visual interpolation
+- **Speed control**: 5 speeds (Paused, Slow, Normal, Fast, Very Fast) fully synced
+- **Pause system**: Freezes ALL animations including visual effects and transports
+
+#### Combat & Defense
+- **Zone defense calculation**: Ship combat power with carrier bonuses
+- **Herald strength scaling**: Progressive difficulty over 25 turns
+- **Combat resolution**: Variance rolls (0.8-1.2x), zone holds or falls
+- **Fleet assignment**: Ships can be sent to zones for defense
+
+#### Evacuation
+- **Carrier-based evacuation**: 8x multiplier makes carriers essential
+- **Victory tiers**: 5 outcomes properly calculated
+- **Population tracking**: Lives evacuated/lost/intercepted
+
+#### Visual Systems
+- **Solar map**: Fully procedural, 24+ render layers, no textures
+- **Zone rendering**: Color-coded planets with staging areas
+- **Fleet visualization**: Triangles (human) vs diamonds (Herald)
+- **Ships in transit**: Bezier curve paths with smooth interpolation
+- **Combat effects**: Lasers, explosions, warp flashes, screen shake
+- **Herald mothership**: Multi-section design with energy tendrils
+
+#### Spectator Features
+- **Auto-pause on major events**: Game pauses when zones fall or battles occur
+- **Battle view**: Corner cinematic window showing ship-to-ship combat
+- **Planet view PiP**: Picture-in-picture zoom on threatened zones
+- **Transmissions**: Typewriter-effect narrative overlays
+- **Cinematic camera**: AI-driven zoom and focus decisions
+
+#### AI System
+- **Auto-play mode**: AI plays the game autonomously
+- **Ship building**: Smart priorities (Dreadnoughts late-game, Carriers for evacuation)
+- **Emergency response**: Scrambles ships to critical zones
+- **Mars blockade**: Establishes chokepoint defense
+- **Evacuation fleet**: Keeps carriers at Earth
+
+#### Entity System (Partial)
+- **Entity data structures**: Position, velocity, movement state defined
+- **Entity movement processing**: Hourly position updates
+- **Herald as entity**: Travels with realistic time between zones
+- **Entity signals**: Spawned, destroyed, arrived, intercepted
+
+### What's In Progress 🟡
+
+#### Entity System Migration (~60%)
+- Legacy `fleets_in_transit` still primary for player fleets
+- New entity system runs in parallel
+- Detection and intercept mechanics implemented but not fully integrated
+- UI doesn't expose entity-level controls yet
+
+#### Herald AI
+- Detection probability calculation implemented
+- Drone spawning scaffolded but incomplete
+- Pattern learning (traffic routes) partially implemented
+- Needs tuning and testing
+
+#### Route Selection
+- Route calculation (direct, coast, gravity assist) implemented in `fcw_orbital.gd`
+- UI to select routes not implemented
+- Player can't choose stealth vs speed tradeoffs yet
+
+### Known Issues ❌
+
+#### AI Gaps ✅ FIXED
+All major AI gaps have been addressed:
+1. ~~`_ai_redistribute_fleet` is empty~~ → Now actually moves ships from safe zones to threatened zones
+2. ~~Emergency response workaround~~ → Uses new `RECALL_FLEET` action to reassign ships
+3. ~~No carrier escort logic~~ → Carriers get 2 escorts each (frigates or cruisers)
+4. ~~Time-based building~~ → Now need-based: prioritizes defense, evacuation, reserves
+
+#### Entity System Gaps
+1. **UI for entity control**: No player interface to select entities and set destinations
+2. **Route visualization**: Trajectory curves not rendered on solar map
+3. **Detection zone shading**: Probability visualization not implemented
+4. **Entity-based evacuation**: Still uses legacy colony ship system
+
+#### Balance/Tuning
+1. **Defense ratios**: 0.8 critical / 1.2 marginal thresholds need validation
+2. **Travel times**: Zone ID mapping was fixed but needs gameplay testing
+3. **Resource generation**: May be too generous or too sparse
+
+### Recent Infrastructure Fixes (This Session)
+
+| Fix | File | Issue |
+|-----|------|-------|
+| Zone ID mapping | `fcw_time.gd` | Travel table used wrong zone IDs |
+| Entity signals | `fcw_store.gd` | Added spawned/destroyed/arrived/intercept signals |
+| Tick events | `fcw_types.gd`, `fcw_reducer.gd` | Track intercepts for signal emission |
+| Entity dispatch helpers | `fcw_store.gd` | Added convenience methods for entity actions |
+| Detection consolidation | `fcw_types.gd` | Removed duplicate, use `FCWHeraldAI.calc_detection_probability()` |
+| Pause freeze | `fcw_solar_map.gd` | Moved `_global_time` update after pause check |
+| Speed sync | `fcw_solar_map.gd`, `fcw_main.gd` | Visual animations now scale with game speed |
+| Explicit preloads | `fcw_main.gd` | Added FCWTypes/FCWSolarMap preloads for reliability |
+| RECALL_FLEET action | `fcw_reducer.gd`, `fcw_store.gd` | New action to move ships between zones |
+| AI redistribute fleet | `fcw_main.gd` | Actually pulls ships from safe zones to threatened zones |
+| AI need-based building | `fcw_main.gd` | Prioritizes defense, evacuation, reserves instead of turn modulo |
+| AI carrier escorts | `fcw_main.gd` | Assigns 2 escorts per carrier at Earth |
+| AI emergency response | `fcw_main.gd` | Uses recall_fleet to properly reassign ships in crisis |
+
+### Recommended Improvements
+
+#### Priority 1: AI Completion ✅ DONE
+All AI improvements implemented:
+- `RECALL_FLEET` action enables moving ships between zones
+- `_ai_redistribute_fleet` now pulls ships from safe zones
+- Need-based building responds to defense deficit and evacuation needs
+- Carrier escort logic ensures transports are protected
+- Emergency response uses proper fleet reassignment
+
+#### Priority 2: Entity System (Next)
+1. Add route selection UI when clicking entities
+2. Visualize entity trajectories on solar map
+3. Show detection probability zones
+4. Migrate colony ships to entity system
+
+#### Priority 3: Polish
+1. Tune defense ratio thresholds (0.8 critical / 1.2 marginal)
+2. Balance resource generation rates
+3. Add more narrative transmissions for key events
+4. Improve Herald drone behavior (pursuit logic, lifetime)
+
+---
+
+## Architecture Reference
+
+For detailed technical architecture including:
+- Complete state shape
+- Signal flow diagrams
+- Module dependencies
+- Data flow patterns
+
+See: `docs/expansions/fcw-architecture.md`
 
 ---
 
