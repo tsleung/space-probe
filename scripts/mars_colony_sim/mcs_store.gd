@@ -234,6 +234,9 @@ func demolish_building(building_id: String) -> void:
 func repair_building(building_id: String) -> void:
 	dispatch(_MCSReducer.action_repair_building(building_id))
 
+func upgrade_building(building_id: String) -> void:
+	dispatch(_MCSReducer.action_upgrade_building(building_id))
+
 func assign_worker(colonist_id: String, building_id: String) -> void:
 	dispatch(_MCSReducer.action_assign_worker(colonist_id, building_id))
 

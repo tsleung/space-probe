@@ -24,11 +24,15 @@ signal damage_repaired()
 var crew_inside: Array[Node2D] = []
 var is_damaged: bool = false
 var damage_severity: float = 0.0
+var repair_in_progress: bool = false
+var repair_progress: float = 0.0
 
 # Visuals
 var floor_rect: ColorRect
 var label: Label
 var damage_overlay: ColorRect
+var repair_bar_bg: ColorRect
+var repair_bar_fill: ColorRect
 var work_position_marker: Marker2D
 
 # ============================================================================
@@ -72,6 +76,24 @@ func _setup_visuals() -> void:
 	damage_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(damage_overlay)
 
+	# Repair progress bar (initially hidden)
+	var bar_width = room_size.x * 0.7
+	var bar_height = 6.0
+
+	repair_bar_bg = ColorRect.new()
+	repair_bar_bg.size = Vector2(bar_width, bar_height)
+	repair_bar_bg.position = Vector2(-bar_width / 2, room_size.y / 2 - bar_height - 4)
+	repair_bar_bg.color = Color(0.2, 0.2, 0.2, 0.8)
+	repair_bar_bg.visible = false
+	add_child(repair_bar_bg)
+
+	repair_bar_fill = ColorRect.new()
+	repair_bar_fill.size = Vector2(0, bar_height - 2)
+	repair_bar_fill.position = repair_bar_bg.position + Vector2(1, 1)
+	repair_bar_fill.color = Color(0.3, 0.8, 0.3)
+	repair_bar_fill.visible = false
+	add_child(repair_bar_fill)
+
 	# Work position (center of room)
 	work_position_marker = Marker2D.new()
 	work_position_marker.position = Vector2.ZERO
@@ -113,7 +135,41 @@ func apply_damage(severity: float) -> void:
 func repair_damage() -> void:
 	is_damaged = false
 	damage_severity = 0.0
+	repair_in_progress = false
+	repair_progress = 0.0
+	hide_repair_progress()
 	damage_repaired.emit()
+
+# ============================================================================
+# REPAIR PROGRESS VISUALIZATION
+# ============================================================================
+
+func show_repair_progress(progress: float) -> void:
+	## Show repair progress bar (0.0 to 1.0)
+	repair_in_progress = true
+	repair_progress = clamp(progress, 0.0, 1.0)
+
+	repair_bar_bg.visible = true
+	repair_bar_fill.visible = true
+
+	# Update fill width based on progress
+	var max_width = repair_bar_bg.size.x - 2
+	repair_bar_fill.size.x = max_width * repair_progress
+
+	# Color transitions: red → yellow → green
+	if repair_progress < 0.5:
+		var t = repair_progress * 2.0
+		repair_bar_fill.color = Color(1.0, t, 0.0)  # Red to yellow
+	else:
+		var t = (repair_progress - 0.5) * 2.0
+		repair_bar_fill.color = Color(1.0 - t, 1.0, 0.0)  # Yellow to green
+
+func hide_repair_progress() -> void:
+	## Hide repair progress bar
+	repair_in_progress = false
+	repair_progress = 0.0
+	repair_bar_bg.visible = false
+	repair_bar_fill.visible = false
 
 # ============================================================================
 # CREW TRACKING
@@ -146,3 +202,28 @@ func has_crew_with_role(role: String) -> bool:
 
 func get_crew_count() -> int:
 	return crew_inside.size()
+
+# ============================================================================
+# VISUAL FEEDBACK
+# ============================================================================
+
+var flash_tween: Tween
+var original_color: Color
+
+func flash(color: Color, duration: float = 0.8) -> void:
+	## Flash the room with a color to indicate activity
+	if flash_tween and flash_tween.is_valid():
+		flash_tween.kill()
+
+	original_color = floor_rect.color
+
+	# Create flash effect
+	flash_tween = create_tween()
+	flash_tween.tween_property(floor_rect, "color", color, duration * 0.2)
+	flash_tween.tween_property(floor_rect, "color", original_color, duration * 0.8)
+
+	# Also flash the modulate for extra effect
+	var flash_modulate = Color(1.0 + color.r * 0.5, 1.0 + color.g * 0.5, 1.0 + color.b * 0.5)
+	var mod_tween = create_tween()
+	mod_tween.tween_property(floor_rect, "modulate", flash_modulate, duration * 0.15)
+	mod_tween.tween_property(floor_rect, "modulate", Color.WHITE, duration * 0.85)

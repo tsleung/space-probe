@@ -19,7 +19,7 @@ var far_stars: Array[Dictionary] = []
 var mid_stars: Array[Dictionary] = []
 var near_stars: Array[Dictionary] = []
 
-var viewport_size: Vector2 = Vector2(800, 600)
+var viewport_size: Vector2 = Vector2(1920, 1080)
 var scroll_offset: float = 0.0
 
 # ============================================================================
@@ -27,6 +27,10 @@ var scroll_offset: float = 0.0
 # ============================================================================
 
 func _ready() -> void:
+	# Get actual viewport size
+	viewport_size = get_viewport_rect().size
+	if viewport_size.x < 100:  # Fallback if viewport not ready
+		viewport_size = Vector2(1920, 1080)
 	_generate_stars()
 
 func _generate_stars() -> void:

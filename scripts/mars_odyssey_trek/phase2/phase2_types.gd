@@ -13,7 +13,8 @@ enum Speed {
 	PAUSED,
 	SLOW,
 	NORMAL,
-	FAST
+	FAST,
+	ULTRA
 }
 
 enum ContainerStatus {
@@ -36,7 +37,20 @@ enum EventType {
 	MESSAGE_FROM_EARTH,
 	MICROMETEORITE,
 	CARGO_LOOSE,
-	SECTION_BLOCKAGE
+	SECTION_BLOCKAGE,
+	# New event types
+	CREW_CONFLICT,
+	MEDICAL_EMERGENCY,
+	POWER_SURGE,
+	NAVIGATION_DRIFT,
+	WATER_RECYCLER_ISSUE,
+	OXYGEN_FLUCTUATION,
+	COMMUNICATION_STATIC,
+	MORALE_MILESTONE,
+	# Special events
+	MIDPOINT_CRISIS,
+	MARS_VISIBLE_EVENT,
+	FINAL_APPROACH
 }
 
 enum EventEffectType {
@@ -54,14 +68,28 @@ enum EventEffectType {
 # CONSTANTS
 # ============================================================================
 
+# Time structure
+const HOURS_PER_DAY = 24
 const TOTAL_TRAVEL_DAYS = 183
-const SECONDS_PER_DAY = {
+const TOTAL_TRAVEL_HOURS = TOTAL_TRAVEL_DAYS * HOURS_PER_DAY  # 4392 hours
+
+# Real-time seconds per game hour at each speed
+const SECONDS_PER_HOUR = {
 	Speed.PAUSED: 0.0,
-	Speed.SLOW: 4.0,
-	Speed.NORMAL: 2.0,
-	Speed.FAST: 0.5
+	Speed.SLOW: 0.5,     # 12 seconds per day
+	Speed.NORMAL: 0.2,   # ~5 seconds per day
+	Speed.FAST: 0.05,    # ~1.2 seconds per day
+	Speed.ULTRA: 0.005   # ~0.12 seconds per day (whole journey in ~22 seconds)
 }
 
+# Hourly consumption rates (daily rates / 24)
+const HOURLY_FOOD_PER_CREW = 1.0 / HOURS_PER_DAY      # ~0.042
+const HOURLY_WATER_PER_CREW = 0.5 / HOURS_PER_DAY     # ~0.021
+const HOURLY_OXYGEN_LOSS = 0.1 / HOURS_PER_DAY        # ~0.004
+const HOURLY_MORALE_DECAY = 0.5 / HOURS_PER_DAY       # ~0.021
+const HOURLY_FATIGUE_GAIN = 0.3 / HOURS_PER_DAY       # ~0.012
+
+# Legacy daily rates (for reference)
 const DAILY_FOOD_PER_CREW = 1.0
 const DAILY_WATER_PER_CREW = 0.5
 const DAILY_OXYGEN_LOSS = 0.1
@@ -69,24 +97,36 @@ const DAILY_MORALE_DECAY = 0.5
 const DAILY_FATIGUE_GAIN = 0.3
 
 const MARS_VISIBLE_DAY = 140
+const MARS_VISIBLE_HOUR = MARS_VISIBLE_DAY * HOURS_PER_DAY
 
-# Event chances
-const BASE_EVENT_CHANCE = 0.10
-const EARLY_EVENT_CHANCE = 0.15  # Days 1-10
-const MIDPOINT_EVENT_CHANCE = 0.25  # Around day 90
-const FINAL_EVENT_CHANCE = 0.20  # Last 20 days
+# Event chances (per hour - increased for more action)
+const BASE_EVENT_CHANCE_PER_HOUR = 0.25 / HOURS_PER_DAY      # ~1% per hour
+const EARLY_EVENT_CHANCE_PER_HOUR = 0.35 / HOURS_PER_DAY     # ~1.5% per hour
+const MIDPOINT_EVENT_CHANCE_PER_HOUR = 0.50 / HOURS_PER_DAY  # ~2% per hour
+const FINAL_EVENT_CHANCE_PER_HOUR = 0.40 / HOURS_PER_DAY     # ~1.7% per hour
 const SECTION_BLOCKAGE_CHANCE = 0.15  # Of events that trigger
+
+# Legacy daily event chances
+const BASE_EVENT_CHANCE = 0.10
+const EARLY_EVENT_CHANCE = 0.15
+const MIDPOINT_EVENT_CHANCE = 0.25
+const FINAL_EVENT_CHANCE = 0.20
 
 # EVA success rate
 const EVA_SUCCESS_CHANCE = 0.70
 const EVA_PARTIAL_RETRIEVAL_MIN = 0.30
 const EVA_PARTIAL_RETRIEVAL_MAX = 0.60
 const EVA_INJURY_DAMAGE = 25
+const EVA_DURATION_HOURS = 6  # EVA takes 6 hours
 
-# Repair
+# Repair (in hours instead of days)
+const REPAIR_MIN_HOURS = 48   # 2 days
+const REPAIR_MAX_HOURS = 96   # 4 days
+const REPAIR_FATIGUE_COST = 20
+
+# Legacy repair in days
 const REPAIR_MIN_DAYS = 2
 const REPAIR_MAX_DAYS = 4
-const REPAIR_FATIGUE_COST = 20
 
 # ============================================================================
 # FACTORY FUNCTIONS - Storage Container
@@ -218,7 +258,8 @@ static func create_resources(overrides: Dictionary = {}) -> Dictionary:
 static func create_repair_state(overrides: Dictionary = {}) -> Dictionary:
 	var repair = {
 		"in_progress": false,
-		"days_remaining": 0,
+		"hours_remaining": 0,
+		"days_remaining": 0,  # Legacy, computed from hours
 		"target_container_id": ""
 	}
 
@@ -247,18 +288,46 @@ static func create_event(overrides: Dictionary = {}) -> Dictionary:
 	return event
 
 static func create_event_option(overrides: Dictionary = {}) -> Dictionary:
+	## Create an event option with FTL-style weighted outcomes
+	## Blue options require prerequisites (crew role, resource, or equipment)
 	var option = {
 		"label": "",
+		"description": "",
+		# Weighted outcomes (FTL-style) - if empty, use legacy single effect
+		"outcomes": [],  # Array of {weight, effects[], description}
+		# Legacy single effect (for backwards compatibility)
 		"effect": EventEffectType.MORALE_BOOST,
 		"effect_value": 0,
-		"risk": "low",  # low, medium, high
-		"description": ""
+		# Blue option prerequisites (unlocks special choices)
+		"requires_crew": "",        # CrewRole name: "engineer", "medical", etc.
+		"requires_resource": "",    # Resource: "spare_parts", "medical_supplies"
+		"requires_min": 0,          # Minimum amount of resource
+		"is_blue_option": false     # Visual indicator for special options
 	}
 
 	for key in overrides:
 		option[key] = overrides[key]
 
 	return option
+
+static func create_outcome(weight: float, effects: Array, description: String = "") -> Dictionary:
+	## Create a weighted outcome for an event option
+	## weight: probability (0.0-1.0), effects: array of effect dicts
+	return {
+		"weight": weight,
+		"effects": effects,
+		"description": description
+	}
+
+static func create_effect(effect_type: String, value = 0, target: String = "all") -> Dictionary:
+	## Create a single effect for an outcome
+	## effect_type: "morale", "health", "food", "water", "oxygen", "power", "fuel", "fatigue"
+	## target: "all", "random", "engineer", "medical", etc.
+	return {
+		"type": effect_type,
+		"value": value,
+		"target": target
+	}
 
 # ============================================================================
 # FACTORY FUNCTIONS - Main State
@@ -287,8 +356,10 @@ static func create_phase2_state(overrides: Dictionary = {}) -> Dictionary:
 	resources.water.max = max_water
 
 	var state = {
-		# Time
-		"current_day": 1,
+		# Time (hourly system)
+		"current_hour": 0,         # 0-23 within current day
+		"current_day": 1,          # Day 1 to 183
+		"total_hours": 0,          # Total hours elapsed
 		"total_days": TOTAL_TRAVEL_DAYS,
 		"speed": Speed.NORMAL,
 		"auto_advance": true,
@@ -303,7 +374,7 @@ static func create_phase2_state(overrides: Dictionary = {}) -> Dictionary:
 		# Crew
 		"crew": create_default_crew(),
 
-		# Repair
+		# Repair (now in hours)
 		"repair": create_repair_state(),
 
 		# Events
@@ -356,6 +427,7 @@ static func get_speed_name(speed: Speed) -> String:
 		Speed.SLOW: return "Slow"
 		Speed.NORMAL: return "Normal"
 		Speed.FAST: return "Fast"
+		Speed.ULTRA: return "ULTRA"
 	return "Unknown"
 
 static func get_container_status_name(status: ContainerStatus) -> String:
@@ -438,6 +510,26 @@ static func get_event_chance_for_day(day: int, total_days: int) -> float:
 		return MIDPOINT_EVENT_CHANCE
 	return BASE_EVENT_CHANCE
 
+static func get_event_chance_for_hour(day: int, total_days: int) -> float:
+	## Get hourly event chance based on current journey phase
+	if day < 10:
+		return EARLY_EVENT_CHANCE_PER_HOUR
+	elif day > total_days - 20:
+		return FINAL_EVENT_CHANCE_PER_HOUR
+	elif day > total_days / 2 - 5 and day < total_days / 2 + 5:
+		return MIDPOINT_EVENT_CHANCE_PER_HOUR
+	return BASE_EVENT_CHANCE_PER_HOUR
+
+static func hours_to_day_hour(total_hours: int) -> Dictionary:
+	## Convert total hours to day and hour within day
+	var day = (total_hours / HOURS_PER_DAY) + 1
+	var hour = total_hours % HOURS_PER_DAY
+	return {"day": day, "hour": hour}
+
+static func day_hour_to_total_hours(day: int, hour: int) -> int:
+	## Convert day + hour to total hours elapsed
+	return (day - 1) * HOURS_PER_DAY + hour
+
 static func is_game_over(state: Dictionary) -> bool:
 	# All crew dead
 	var alive_count = 0
@@ -451,4 +543,5 @@ static func is_game_over(state: Dictionary) -> bool:
 	return false
 
 static func has_arrived(state: Dictionary) -> bool:
-	return state.current_day >= state.total_days
+	var total_hours = state.get("total_hours", 0)
+	return total_hours >= TOTAL_TRAVEL_HOURS or state.current_day >= state.total_days

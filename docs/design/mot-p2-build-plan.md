@@ -1,10 +1,33 @@
 # MOT Phase 2: Build Plan
 
+**Document Created:** December 2024
+**Last Updated:** December 22, 2024
+**Status:** FEATURE COMPLETE - Full Polish Pass Done
+
+---
+
 ## The Vision
 
-**One Line:** Overcooked meets Apollo 13 - watch your AI crew frantically keep a ship together while the void tries to kill you.
+**Tagline:** Overcooked meets Apollo 13
+
+**One Line:** Watch your AI crew frantically keep a ship together while the void tries to kill you.
 
 **The Hook:** You're not clicking menus. You're watching crew sprint to a hull breach as oxygen ticks down. You're yelling at your screen. Chat is screaming. They fix it with 30 seconds to spare. THAT'S a clip.
+
+---
+
+## Design Inspirations
+
+| Game/Media | What We're Taking |
+|------------|-------------------|
+| **FTL** | Ship cutaway view, room-based crew management |
+| **Overcooked** | Frantic coordination, visible chaos, streamable moments |
+| **Helldivers 2** | Cooperative chaos, things going wrong spectacularly |
+| **Among Us** | Ship interior, crew running around |
+| **The Martian** | Competence porn, math-is-clear survival, man vs physics |
+| **Apollo 13** | Crew professionalism under pressure, problem-solving cascade |
+| **Oregon Trail** | Resource depletion, random events, "will we make it?" tension |
+| **Darkest Dungeon** | Stress as mechanic, the slow decline, atmosphere |
 
 ---
 
@@ -18,233 +41,307 @@
 
 ---
 
-## MVP Scope
+## Current Status: FEATURE COMPLETE
 
-### The Ship View
+### ✅ COMPLETE: Full Polish Pass (December 22, 2024)
 
-```
-┌─────────────────────────────────────────────────┐
-│                    BRIDGE                        │
-│                   [Controls]                     │
-│                      ●Cmd                        │
-├──────────────┬─────────────────┬────────────────┤
-│   QUARTERS   │   CORRIDOR      │  LIFE SUPPORT  │
-│    ●  ●      │                 │    [O2] [H2O]  │
-│   (rest)     │    ←Eng         │       ●Sci     │
-├──────────────┤                 ├────────────────┤
-│   MEDICAL    │                 │   ENGINEERING  │
-│    [Beds]    │                 │   [Power] [Sys]│
-│      ●Med    │                 │                │
-├──────────────┴─────────────────┴────────────────┤
-│                  CARGO BAY                       │
-│        [Food] [Water] [Parts] [Supplies]        │
-│                    ⚠️ BREACH                     │
-└─────────────────────────────────────────────────┘
-```
+All planned features have been implemented:
 
-- Top-down or isometric view
-- ~6-8 rooms connected by corridors
-- Crew visible as dots/sprites moving between rooms
-- Systems visible in each room (power, O2, cargo, etc.)
+**Main Entry Point:**
+- Menu: "Mars Odyssey Trek: Travel to Mars" → `phase2_integrated.tscn`
 
-### Crew Behavior
+**Visual Components:**
+- `space_background.gd` - Full-screen parallax star field (300/150/60 stars)
+- `ship_hull.gd` - Sleek ship exterior with configurable engines
+- `ship_view.gd` - Interior rooms with crew pathfinding
+- `journey_indicator.gd` - Earth → Mars progress with growing Mars
 
-**Movement:**
-- Crew pathfind between rooms
-- Walking speed, running speed (when urgent)
-- Visible destination (where are they headed?)
+**Game Logic (Store/Reducer):**
+- `phase2_store.gd` - State management, 13 event types, special milestone events
+- `phase2_reducer.gd` - Pure state mutations
+- `phase2_controller.gd` - Input handling, spacebar pause
 
-**States:**
-- Idle at station (monitoring)
-- Moving to task
-- Working on task (progress visible)
-- Resting (in quarters)
-- Emergency response (running)
+**Integration Layer:**
+- `ship_view_bridge.gd` - Connects store signals to visual actions
+- `phase2_integrated_hud.gd` - Combined HUD with resources, events, & arrival ceremony
+- `phase2_integrated_ui.gd` - Speed controls, navigation
 
-**Roles:**
-- Each crew has a home station they return to
-- Commander: Bridge
-- Engineer: Engineering
-- Scientist: Life Support / Sensors
-- Medical: Medical Bay
-
-### Events as Spectacle
-
-**When debris hits:**
-1. Impact sound + screen shake
-2. Sparks fly in affected room
-3. Alarm starts
-4. Crew nearest to breach starts running
-5. Timer appears: "HULL BREACH - 2:00 to seal"
-6. Watch crew work
-7. Success: sparks stop, alarm silences
-8. Failure: room decompresses, door seals
-
-**Visual Feedback:**
-- Sparks for electrical damage
-- Flashing red for critical
-- Flickering lights for power issues
-- Frost for thermal problems
-- Crew animations match urgency
-
-### Player Controls
-
-**Priority System:**
-```
-[1] HULL INTEGRITY  ← Currently selected
-[2] LIFE SUPPORT
-[3] POWER SYSTEMS
-[4] CREW HEALTH
-[5] CONSERVATION MODE
-```
-
-Player selects priority → AI crew responds accordingly
-
-**Direct Orders (Maybe):**
-- Click on crew → Click on room → "Go there"
-- Override AI for specific situations
-- Costs: breaks optimal AI behavior
-
-**Speed Controls:**
-- Pause (for decisions)
-- Normal (watch the action)
-- Fast (routine periods)
-- Events auto-pause
-
-### The HUD
-
-```
-┌────────────────────────────────────────────────┐
-│ DAY 47 / 183                     MARS: 136 DAYS│
-├────────────────────────────────────────────────┤
-│ O2 ████████░░ 78%    FOOD ██████████ 94 DAYS   │
-│ PWR █████████░ 91%   H2O  █████████░ 87 DAYS   │
-├────────────────────────────────────────────────┤
-│ CMD [Monitoring]  ENG [Repairing Hull - 45s]   │
-│ SCI [Analyzing]   MED [Resting]                │
-└────────────────────────────────────────────────┘
-```
-
-- Day counter always visible
-- Resources as bars AND days remaining
-- Crew status at a glance
-- Active tasks with timers
+**New in Polish Pass:**
+- `phase2_sound_manager.gd` - Procedural audio (alarms, footsteps, engine hum)
+- `phase2_effects.gd` - Screen shake, particles, camera focus, arrival ceremony
 
 ---
 
-## Technical Approach
+## Ship Hull Design
 
-### Ship Scene Structure
+### Configurable Engine Types
 
-```
-Phase2Ship (Node2D)
-├── Tilemap or Rooms (visual layout)
-├── NavigationRegion2D (pathfinding)
-├── Rooms/
-│   ├── Bridge
-│   ├── Engineering
-│   ├── LifeSupport
-│   ├── Medical
-│   ├── Quarters
-│   └── CargoBay
-├── Crew/
-│   ├── Commander (CharacterBody2D)
-│   ├── Engineer (CharacterBody2D)
-│   ├── Scientist (CharacterBody2D)
-│   └── Medical (CharacterBody2D)
-├── Systems/
-│   ├── HullSystem
-│   ├── PowerSystem
-│   ├── O2System
-│   └── etc.
-└── EffectsLayer (sparks, alarms, etc.)
-```
-
-### Crew AI (Simple State Machine)
+The ship hull supports 4 engine configurations (can be tied to Phase 1 choices):
 
 ```gdscript
-enum CrewState {
-    IDLE,           # At home station, monitoring
-    MOVING,         # Walking/running to destination
-    WORKING,        # Performing task
-    RESTING,        # In quarters
-    EMERGENCY       # Responding to crisis
+enum EngineConfig {
+    SINGLE_MASSIVE,     # One huge engine - simple, powerful
+    DUAL_SYMMETRIC,     # Two large engines - balanced (default)
+    TRI_CLUSTER,        # Three engines in triangle - versatile
+    QUAD_ARRAY          # Four engines - maximum thrust
 }
 ```
 
-### Event System Integration
+### Visual Features
 
-Current Phase2 events trigger visual responses:
-```gdscript
-# When reducer processes HULL_BREACH action:
-signal hull_breach(room_id: String, severity: float)
+| Feature | Description |
+|---------|-------------|
+| **Sleek Hull** | Curved aerodynamic shape with racing stripe accent |
+| **Engine Glow** | Animated flickering blue engine flames |
+| **Solar Panels** | Top/bottom arrays with grid detail |
+| **Radiator Fins** | Heat dissipation fins on hull |
+| **Bridge Windows** | Glowing observation windows |
+| **Docking Port** | Green indicator on nose |
+| **Antenna** | Communication antenna on nose |
 
-# Ship scene responds:
-func _on_hull_breach(room_id, severity):
-    rooms[room_id].start_breach_effect()
-    alarms.play()
-    crew_ai.dispatch_to_breach(room_id)
-    ui.show_breach_timer(severity)
+### Ship Layout
+
+```
+     ★  ·    ·      ★           ·        ★    [MARS →]
+  ·        ★     ·        ·          ★
+
+      ▲▲▲  [Solar Panels]
+        ╭─────────────────────────────────────────────╮
+   ═══╱  ┌─────┐   ┌─────┐   ┌─────┐                   ╲───●
+  ═══╱   │MED  │───│QUART│───│CORR │───[BRIDGE]         ╲──●
+ ═══╱    └─────┘   └─────┘   └──┬──┘                     ╲─●
+════╲    ┌─────┐   ┌─────┐   ┌──┴──┐                     ╱
+  ═══╲   │CARGO│───│LIFE │───│ ENG │                    ╱
+   ═══╲  └─────┘   └─────┘   └─────┘                   ╱
+        ╰─────────────────────────────────────────────╯
+      ▼▼▼  [Solar Panels]
+
+  ·         ★    ·        ·    ★       ·
+     ★           ·   ★            ★         ·
+[← EARTH]
 ```
 
 ---
 
-## Build Phases
+## Event Visual Feedback System
 
-### Phase 1: The Ship Exists (Week 1)
-- [ ] Create ship tilemap/layout
-- [ ] Add room nodes with collision
-- [ ] Basic navigation mesh
-- [ ] Crew as moving dots
-- [ ] Crew can pathfind between rooms
-- [ ] Camera shows full ship
+### How It Works
 
-### Phase 2: Crew Has Purpose (Week 2)
-- [ ] Crew state machine (idle, moving, working)
-- [ ] Home stations per role
-- [ ] Basic task system (go to room, work, return)
-- [ ] Visual feedback (crew doing something)
+1. **Event Triggers** → Store emits `event_triggered` signal
+2. **Bridge Receives** → `ship_view_bridge.gd` stores event type
+3. **Player Chooses** → HUD shows options, player picks
+4. **Visual Feedback** → Based on event type + choice, crew move and rooms flash
+5. **Return to Stations** → After 1.5s delay, crew return home
 
-### Phase 3: Things Break (Week 3)
-- [ ] Hook events to visual effects
-- [ ] Sparks, alarms, screen shake
-- [ ] Breach timer system
-- [ ] Crew responds to emergencies
-- [ ] Success/failure visual feedback
+### Event-Choice Visual Mapping
 
-### Phase 4: Player Agency (Week 4)
-- [ ] Priority system UI
-- [ ] Crew responds to priorities
-- [ ] Direct order system (maybe)
-- [ ] Speed controls work with new view
+| Event | Choice | Crew Action | Room Flash |
+|-------|--------|-------------|------------|
+| **Solar Flare** | Shelter in cargo | All 4 crew → Cargo Bay | Blue |
+| | Continue with shielding | Stay at stations | Ship flashes yellow |
+| | Emergency power | Engineer → Engineering | Yellow |
+| **Component Malfunction** | Assign engineer | Engineer → Life Support | Green |
+| | Monitor for now | Commander checks bridge | - |
+| **Message from Earth** | Share immediately | 3 crew → Quarters | Blue |
+| | Save for later | Commander → Bridge | - |
+| **Micrometeorite** | Full inspection | Engineer + Scientist inspect | Orange |
+| | Quick check | Engineer → Corridor | - |
+| **Cargo Loose** | Secure everything | Engineer + Scientist → Cargo | Green |
+| | Catch what you can | Random crew → Cargo | - |
+| **Crew Conflict** | Commander intervenes | Commander → Quarters | - |
+| | Let them work it out | Crew separate | - |
+| **Medical Emergency** | Full medical workup | Medical + patient → Medical | Red |
+| **Power Surge** | Reroute/Stabilize | Engineer → Engineering | Yellow |
+| **Midpoint Crisis** | All hands repair | ALL crew scramble + alarm | Red flash |
 
-### Phase 5: Polish (Week 5+)
-- [ ] Sound design (alarms, footsteps, hissing)
-- [ ] Better crew sprites/animations
-- [ ] Room detail art
-- [ ] Camera follow modes
-- [ ] Particle effects
+### Special Milestone Events
+
+| Day | Event | Visual |
+|-----|-------|--------|
+| **90-95** | Midpoint Crisis | Screen shake, alarms, all crew emergency |
+| **140** | Mars Sighted! | All crew gather at bridge windows |
+| **173-176** | Final Approach | Crew to stations, anticipation |
+| **183** | Mars Orbit Achieved | Arrival ceremony with stats |
+
+### Room Flash Effect
+
+Rooms flash with color to indicate activity:
+- Flash in (0.16s): Room brightens to specified color
+- Flash out (0.64s): Room returns to original color
+- Modulate effect: Additional brightness boost
+
+### Sound Design
+
+All sounds are procedurally generated (no audio files needed):
+
+| Sound Type | Trigger |
+|------------|---------|
+| **Ambient hum** | Always playing (engine room noise) |
+| **Engine rumble** | Always playing, intensity varies with speed |
+| **Warning beep** | Solar flare, oxygen issues |
+| **Alarm klaxon** | Midpoint crisis, critical events |
+| **Impact thud** | Micrometeorite |
+| **Malfunction buzz** | Component malfunction |
+| **Radio chime** | Message from Earth |
+| **Click** | UI button press |
+| **Resolution chime** | Event resolved |
+| **Arrival fanfare** | Mars orbit achieved |
+
+### Screen Shake & Effects
+
+| Effect | When Used |
+|--------|-----------|
+| **Light shake (0.3s)** | Micrometeorite impact |
+| **Heavy shake (0.5s)** | Midpoint crisis |
+| **Red flash** | Damage, crisis |
+| **Yellow flash** | Solar flare, power issues |
+| **Sparks** | Damage effects |
+| **Steam** | Life support issues |
+
+### Crew Visual State
+
+Crew appearance changes based on their stats:
+- **Low Health (<60)**: Crew dims by 20%
+- **Low Health (<30)**: Crew dims by 40%
+- **Low Morale (<40)**: Slight blue tint
+- **Resting**: 60% brightness
+- **Emergency**: Red flashing
+- **Working**: Pulse effect
 
 ---
 
-## Key Decisions to Make
+## Controls
 
-1. **Art Style:** Pixel art? Vector? What's achievable?
-2. **Camera:** Fixed top-down? Follow crew? Player controlled?
-3. **Direct Control:** Can player take over a crew member? Or just direct?
-4. **Time Scale:** How fast do days pass? When do events hit?
-5. **Failure States:** What happens when crew can't fix in time?
+| Input | Action |
+|-------|--------|
+| **Spacebar** | Toggle pause |
+| **Escape** | Toggle pause |
+| **1** | Set speed: Slow |
+| **2** | Set speed: Normal |
+| **3** | Set speed: Fast |
+| **UI Buttons** | Slow / Normal / Fast / Pause / ← Menu |
+
+---
+
+## Architecture
+
+```
+phase2_integrated.tscn
+├── Phase2Store (Node) - Game state, 13 event types, signals
+├── Phase2Controller (Node) - Input, timing
+├── SoundManager (Node) - Procedural audio generation
+├── Effects (Node2D) - Screen shake, particles, camera focus
+├── SpaceBackground (Node2D) - z=-10, parallax stars
+├── ShipHull (Node2D) - z=-1, exterior hull + engines
+├── ShipView (Node2D) - z=0, interior rooms + crew
+├── ShipViewBridge (Node) - Store→Visual translation + effects
+├── JourneyIndicator (Node2D) - z=5, progress display + Mars growth
+├── HUD (CanvasLayer) - Resources, crew, events, arrival ceremony
+├── SpeedControls (HBoxContainer) - Bottom buttons
+└── UIController (Node) - Button wiring
+```
+
+### Data Flow
+
+```
+User Input / Time
+       ↓
+Phase2Controller
+       ↓
+Phase2Store.dispatch(action)
+       ↓
+Phase2Reducer.reduce(state, action)
+       ↓
+Phase2Store emits signals
+       ↓
+  ┌────┴────┐
+  ↓         ↓
+ShipViewBridge    HUD
+  ↓               ↓
+ShipView       UI Updates
+(crew move,    (bars, popups)
+rooms flash)
+```
+
+---
+
+## Files
+
+### Integration Layer
+- `scripts/mars_odyssey_trek/phase2/ship_view_bridge.gd` - Store↔Visual bridge + effects
+- `scripts/mars_odyssey_trek/phase2/phase2_integrated_hud.gd` - HUD + arrival ceremony
+- `scripts/mars_odyssey_trek/phase2/phase2_integrated_ui.gd` - UI wiring
+- `scenes/mars_odyssey_trek/phase2_integrated.tscn` - Main scene
+
+### Polish Systems (New)
+- `scripts/mars_odyssey_trek/phase2/phase2_sound_manager.gd` - Procedural audio
+- `scripts/mars_odyssey_trek/phase2/phase2_effects.gd` - Screen shake, particles
+
+### Visual Components
+- `scripts/mars_odyssey_trek/phase2/ship/ship_types.gd` - Enums, constants
+- `scripts/mars_odyssey_trek/phase2/ship/ship_view.gd` - Room orchestrator + EVA
+- `scripts/mars_odyssey_trek/phase2/ship/ship_room.gd` - Individual rooms
+- `scripts/mars_odyssey_trek/phase2/ship/crew_member.gd` - Crew AI + health visuals
+- `scripts/mars_odyssey_trek/phase2/ship/space_background.gd` - Star field
+- `scripts/mars_odyssey_trek/phase2/ship/ship_hull.gd` - Hull + engines
+- `scripts/mars_odyssey_trek/phase2/ship/journey_indicator.gd` - Progress + Mars growth
+
+### Game Logic
+- `scripts/mars_odyssey_trek/phase2/phase2_store.gd` - State + 13 events + milestones
+- `scripts/mars_odyssey_trek/phase2/phase2_reducer.gd` - Pure functions
+- `scripts/mars_odyssey_trek/phase2/phase2_types.gd` - Types + 17 event types
+- `scripts/mars_odyssey_trek/phase2/phase2_controller.gd` - Input
+
+---
+
+## Completed Features
+
+### ✅ Polish (All Complete)
+- [x] Sound design (alarms, footsteps, engine hum, ambient) - procedural audio
+- [x] Screen shake on impacts (micrometeorite, crisis)
+- [x] Particle effects (sparks, steam, debris)
+- [x] Mars growing as approach nears (quadratic growth in journey_indicator)
+
+### ✅ Features (All Complete)
+- [x] EVA retrieval visual - crew exits hull, inspects ship, returns
+- [x] 13 event types with unique visuals
+- [x] Camera follow modes (focus on room, follow crew)
+- [x] Crew health/morale affecting visuals (dim, color shift)
+
+### ✅ Content (All Complete)
+- [x] 8 new event types (crew conflict, medical, power surge, etc.)
+- [x] Special midpoint crisis event (day 90-95)
+- [x] Mars visible celebration event (day 140)
+- [x] Final approach event (last 10 days)
+- [x] Mars arrival ceremony with stats summary
+
+### Remaining Work
+
+### Future Vision
+- [ ] 4-player co-op (each player IS a crew member)
+- [ ] Voice chat chaos coordination
+- [ ] Phase 1 ship building → visual ship configuration
+- [ ] The ultimate "Overcooked in space"
+- [ ] Game over death animations
 
 ---
 
 ## Success Metrics
 
 **It's Working When:**
+- [x] Ship is visible with rooms and crew dots ✅
+- [x] Crew pathfind between rooms ✅
+- [x] Rooms show damage visually ✅
+- [x] Events trigger and resolve ✅
+- [x] Crew responds to choices visually ✅
+- [x] Rooms flash on activity ✅
+- [x] Screen shakes on impacts ✅
+- [x] Sound effects play for events ✅
+- [x] Midpoint crisis creates tension ✅
+- [x] Mars arrival feels triumphant ✅
 - [ ] You watch crew run to a breach and feel tension
 - [ ] You yell at your screen during a close call
-- [ ] You want to show someone what happened
 - [ ] A 5-minute clip would be interesting to watch
-- [ ] You want to try again after failure
 
 **It's NOT Working If:**
 - Crew movement feels random or meaningless
@@ -254,19 +351,12 @@ func _on_hull_breach(room_id, severity):
 
 ---
 
-## Future Vision (Not Now)
+## Key Decisions Made
 
-- 4-player co-op (each player IS a crew member)
-- Voice chat chaos coordination
-- More complex ship layouts
-- Procedural events and runs
-- Leaderboards (furthest with least deaths)
-- The ultimate "Overcooked in space"
-
----
-
-## Next Action
-
-**Start with:** A ship you can see, with 4 dots that move between rooms.
-
-That's it. Get that working. Everything builds from there.
+1. **Art Style:** Minimal colored rectangles (rooms) and dots (crew) - readable, achievable
+2. **Camera:** Fixed showing full ship - can add follow modes later
+3. **Layout:** Horizontal ship, nose toward Mars, cutaway interior
+4. **Time Scale:** ~2 seconds per day (Normal speed), events pause for choices
+5. **Failure States:** Critical resource depletion = game over
+6. **Engine Config:** Dual symmetric default, can be changed in scene
+7. **Visual Feedback:** Every choice shows crew movement + room flash

@@ -1,0 +1,101 @@
+[gd_scene load_steps=13 format=3]
+
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/phase2_store.gd" id="1_store"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/phase2_controller.gd" id="2_controller"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/space_background.gd" id="3_space"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/ship_hull.gd" id="4_hull"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/ship_view.gd" id="5_shipview"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship_view_bridge.gd" id="6_bridge"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/ship/journey_indicator.gd" id="7_journey"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/phase2_integrated_hud.gd" id="8_hud"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/phase2_integrated_ui.gd" id="9_ui"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/phase2_sound_manager.gd" id="10_sound"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/phase2_effects.gd" id="11_effects"]
+[ext_resource type="Script" path="res://scripts/mars_odyssey_trek/phase2/crisis/crisis_controller.gd" id="12_crisis"]
+
+[node name="Phase2Integrated" type="Node2D"]
+
+[node name="Phase2Store" type="Node" parent="."]
+script = ExtResource("1_store")
+
+[node name="Phase2Controller" type="Node" parent="."]
+script = ExtResource("2_controller")
+
+[node name="SoundManager" type="Node" parent="."]
+script = ExtResource("10_sound")
+
+[node name="Effects" type="Node2D" parent="."]
+script = ExtResource("11_effects")
+ship_view_path = NodePath("../ShipView")
+ship_hull_path = NodePath("../ShipHull")
+
+[node name="SpaceBackground" type="Node2D" parent="."]
+z_index = -10
+script = ExtResource("3_space")
+star_count_far = 300
+star_count_mid = 150
+star_count_near = 60
+scroll_speed = 8.0
+
+[node name="ShipHull" type="Node2D" parent="."]
+z_index = -1
+script = ExtResource("4_hull")
+hull_rect = Rect2(720, 280, 480, 360)
+
+[node name="ShipView" type="Node2D" parent="."]
+z_index = 0
+script = ExtResource("5_shipview")
+layout_center = Vector2(960, 430)
+
+[node name="ShipViewBridge" type="Node" parent="."]
+script = ExtResource("6_bridge")
+store_path = NodePath("../Phase2Store")
+ship_view_path = NodePath("../ShipView")
+journey_indicator_path = NodePath("../JourneyIndicator")
+
+[node name="CrisisController" type="Node" parent="."]
+script = ExtResource("12_crisis")
+crisis_mode_enabled = true
+ai_mode_enabled = true
+
+[node name="JourneyIndicator" type="Node2D" parent="."]
+z_index = 5
+script = ExtResource("7_journey")
+journey_y = 1000.0
+earth_x = 100.0
+mars_x = 1820.0
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("8_hud")
+store_path = NodePath("../Phase2Store")
+ship_view_path = NodePath("../ShipView")
+journey_indicator_path = NodePath("../JourneyIndicator")
+
+[node name="SpeedControls" type="HBoxContainer" parent="."]
+offset_left = 760.0
+offset_top = 1030.0
+offset_right = 1160.0
+offset_bottom = 1060.0
+
+[node name="Slow" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "Slow"
+
+[node name="Normal" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "Normal"
+
+[node name="Fast" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "Fast"
+
+[node name="Pause" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "Pause"
+
+[node name="Back" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "← Menu"
+
+[node name="UIController" type="Node" parent="."]
+script = ExtResource("9_ui")

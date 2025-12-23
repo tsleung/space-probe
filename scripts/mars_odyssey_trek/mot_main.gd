@@ -5,6 +5,10 @@ class_name MOTMain
 ## Orchestrates the 7 decision steps of ship preparation
 ## Manages scene transitions, budget display, and readiness state
 
+# Explicit preloads to ensure dependencies are loaded
+const MOTStoreScript = preload("res://scripts/mars_odyssey_trek/mot_store.gd")
+const LaunchAnimationScript = preload("res://scripts/mars_odyssey_trek/launch_animation.gd")
+
 # ============================================================================
 # SIGNALS
 # ============================================================================
@@ -54,7 +58,7 @@ const STEP_SCENES = {
 # STATE
 # ============================================================================
 
-var store: MOTStore
+var store: Node  # MOTStore instance
 var current_step: Step = Step.LAUNCH_WINDOW
 var current_scene: Control = null
 
@@ -324,7 +328,7 @@ func _format_money(amount: int) -> String:
 # STORE ACTION HANDLERS
 # ============================================================================
 
-func _on_launch_window_selected(window: MOTOrbital.LaunchWindow) -> void:
+func _on_launch_window_selected(window: RefCounted) -> void:
 	store.set_launch_window(window)
 
 func _on_construction_selected(approach: int) -> void:

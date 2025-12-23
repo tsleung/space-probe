@@ -12,7 +12,8 @@ const Phase2Types = preload("res://scripts/mars_odyssey_trek/phase2/phase2_types
 # ============================================================================
 
 enum ActionType {
-	ADVANCE_DAY,
+	ADVANCE_HOUR,     # New: advance by one hour
+	ADVANCE_DAY,      # Legacy: still supported for compatibility
 	SET_SPEED,
 	SET_AUTO_ADVANCE,
 	TRIGGER_EVENT,
@@ -27,8 +28,12 @@ enum ActionType {
 # ACTION CREATORS
 # ============================================================================
 
+static func action_advance_hour(random_values: Array) -> Dictionary:
+	## Advance time by 1 hour - the primary time advancement action
+	return {"type": ActionType.ADVANCE_HOUR, "random_values": random_values}
+
 static func action_advance_day(random_values: Array) -> Dictionary:
-	## Advance time by 1 day - the primary time advancement action
+	## Legacy: Advance time by 1 day (now advances 24 hours internally)
 	return {"type": ActionType.ADVANCE_DAY, "random_values": random_values}
 
 static func action_set_speed(speed: int) -> Dictionary:
@@ -69,8 +74,14 @@ static func action_add_log(message: String) -> Dictionary:
 
 static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 	match action.type:
+		ActionType.ADVANCE_HOUR:
+			return _reduce_advance_hour(state, action.random_values)
 		ActionType.ADVANCE_DAY:
-			return _reduce_advance_day(state, action.random_values)
+			# Legacy: advance 24 hours
+			var result = state
+			for i in range(Phase2Types.HOURS_PER_DAY):
+				result = _reduce_advance_hour(result, action.random_values)
+			return result
 		ActionType.SET_SPEED:
 			return _reduce_set_speed(state, action.speed)
 		ActionType.SET_AUTO_ADVANCE:
@@ -82,7 +93,7 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 		ActionType.BLOCK_SECTION:
 			return _reduce_block_section(state, action.container_id, action.status, action.random_value)
 		ActionType.START_REPAIR:
-			return _reduce_start_repair(state, action.container_id, action.repair_days)
+			return _reduce_start_repair(state, action.container_id, action.get("repair_hours", action.get("repair_days", 2) * 24))
 		ActionType.EVA_RETRIEVAL:
 			return _reduce_eva_retrieval(state, action.container_id, action.random_value)
 		ActionType.ADD_LOG:
@@ -91,30 +102,38 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return state
 
 # ============================================================================
-# DAY ADVANCEMENT
+# HOUR ADVANCEMENT
 # ============================================================================
 
-static func _reduce_advance_day(state: Dictionary, random_values: Array) -> Dictionary:
-	## Advance time by 1 day - runs all daily updates
+static func _reduce_advance_hour(state: Dictionary, random_values: Array) -> Dictionary:
+	## Advance time by 1 hour - runs all hourly updates
 	var new_state = state.duplicate(true)
 	var random_idx = 0
 
-	# 1. Increment day
-	new_state.current_day += 1
+	# 1. Increment hour and total hours
+	new_state.current_hour = new_state.get("current_hour", 0) + 1
+	new_state.total_hours = new_state.get("total_hours", 0) + 1
 
-	# 2. Check repair progress
-	new_state = _process_repair_progress(new_state)
+	# 2. Check for day rollover
+	var new_day = false
+	if new_state.current_hour >= Phase2Types.HOURS_PER_DAY:
+		new_state.current_hour = 0
+		new_state.current_day += 1
+		new_day = true
 
-	# 3. Consume resources
-	new_state = _consume_daily_resources(new_state)
+	# 3. Check repair progress (every hour)
+	new_state = _process_repair_progress_hourly(new_state)
 
-	# 4. Update crew stats
-	new_state = _update_crew_daily(new_state)
+	# 4. Consume resources (hourly rates)
+	new_state = _consume_hourly_resources(new_state)
 
-	# 5. Check for random events
+	# 5. Update crew stats (hourly rates)
+	new_state = _update_crew_hourly(new_state)
+
+	# 6. Check for random events (hourly chance)
 	var event_roll = random_values[random_idx] if random_idx < random_values.size() else 0.5
 	random_idx += 1
-	var event_chance = Phase2Types.get_event_chance_for_day(new_state.current_day, new_state.total_days)
+	var event_chance = Phase2Types.get_event_chance_for_hour(new_state.current_day, new_state.total_days)
 
 	if event_roll < event_chance and new_state.active_event.is_empty():
 		# Determine if this is a section blockage or regular event
@@ -130,18 +149,19 @@ static func _reduce_advance_day(state: Dictionary, random_values: Array) -> Dict
 			# Regular event - add to queue for Store to handle
 			new_state.event_queue.append({"type": "random_event", "roll": event_roll})
 
-	# 6. Check Mars visibility milestone
-	if new_state.current_day >= Phase2Types.MARS_VISIBLE_DAY and not new_state.mars_visible:
-		new_state.mars_visible = true
-		new_state = _add_log_entry(new_state, "Mars is now visible as a distinct orange dot.")
+	# 7. Check Mars visibility milestone (at day boundary)
+	if new_day:
+		if new_state.current_day >= Phase2Types.MARS_VISIBLE_DAY and not new_state.mars_visible:
+			new_state.mars_visible = true
+			new_state = _add_log_entry(new_state, "Mars is now visible as a distinct orange dot.")
 
-	# 7. Recompute resource totals
+	# 8. Recompute resource totals
 	new_state.resources = Phase2Types.compute_resource_totals(new_state)
 
 	return new_state
 
 static func _process_repair_progress(state: Dictionary) -> Dictionary:
-	## Check and advance repair progress
+	## Legacy: Check and advance repair progress (daily)
 	var repair = state.repair
 	if not repair.in_progress:
 		return state
@@ -168,6 +188,38 @@ static func _process_repair_progress(state: Dictionary) -> Dictionary:
 		new_state.repair.target_container_id = ""
 	else:
 		new_state = _add_log_entry(new_state, "Repair in progress... %d days remaining." % new_state.repair.days_remaining)
+
+	return new_state
+
+static func _process_repair_progress_hourly(state: Dictionary) -> Dictionary:
+	## Check and advance repair progress (hourly)
+	var repair = state.repair
+	if not repair.in_progress:
+		return state
+
+	var new_state = state.duplicate(true)
+	new_state.repair = repair.duplicate()
+	new_state.repair.hours_remaining = new_state.repair.get("hours_remaining", 0) - 1
+
+	# Update legacy days_remaining for display
+	new_state.repair.days_remaining = int(ceil(float(new_state.repair.hours_remaining) / Phase2Types.HOURS_PER_DAY))
+
+	if new_state.repair.hours_remaining <= 0:
+		# Repair complete!
+		new_state.repair.in_progress = false
+
+		# Find and restore the container
+		var containers = new_state.storage_containers.duplicate()
+		for i in range(containers.size()):
+			if containers[i].id == repair.target_container_id:
+				var container = containers[i].duplicate()
+				container.accessible = true
+				container.status = Phase2Types.ContainerStatus.NOMINAL
+				containers[i] = container
+				new_state = _add_log_entry(new_state, "Repair complete! %s is now accessible." % container.name)
+				break
+		new_state.storage_containers = containers
+		new_state.repair.target_container_id = ""
 
 	return new_state
 
@@ -239,6 +291,51 @@ static func _update_crew_daily(state: Dictionary) -> Dictionary:
 	return new_state
 
 # ============================================================================
+# HOURLY RESOURCE/CREW UPDATES
+# ============================================================================
+
+static func _consume_hourly_resources(state: Dictionary) -> Dictionary:
+	## Consume food, water, oxygen from accessible containers (hourly rates)
+	var new_state = state.duplicate(true)
+	var crew_count = new_state.crew.size()
+	if crew_count == 0:
+		crew_count = 4  # Default
+
+	# Food: hourly consumption per crew
+	var food_needed = float(crew_count) * Phase2Types.HOURLY_FOOD_PER_CREW
+	new_state = _consume_from_containers(new_state, "food", food_needed)
+
+	# Water: hourly consumption per crew (with recycling)
+	var water_needed = float(crew_count) * Phase2Types.HOURLY_WATER_PER_CREW
+	new_state = _consume_from_containers(new_state, "water", water_needed)
+
+	# Oxygen: slight hourly loss from leakage
+	var resources = new_state.resources.duplicate(true)
+	resources.oxygen.current = max(0, resources.oxygen.current - Phase2Types.HOURLY_OXYGEN_LOSS)
+	new_state.resources = resources
+
+	return new_state
+
+static func _update_crew_hourly(state: Dictionary) -> Dictionary:
+	## Update crew morale and fatigue hourly
+	var new_state = state.duplicate(true)
+	var crew = new_state.crew.duplicate()
+
+	for i in range(crew.size()):
+		var member = crew[i].duplicate()
+
+		# Morale decay from isolation (hourly rate)
+		member.morale = max(0, member.morale - Phase2Types.HOURLY_MORALE_DECAY)
+
+		# Fatigue accumulates (hourly rate)
+		member.fatigue = min(100, member.fatigue + Phase2Types.HOURLY_FATIGUE_GAIN)
+
+		crew[i] = member
+
+	new_state.crew = crew
+	return new_state
+
+# ============================================================================
 # SPEED CONTROLS
 # ============================================================================
 
@@ -267,6 +364,7 @@ static func _reduce_trigger_event(state: Dictionary, event: Dictionary) -> Dicti
 
 static func _reduce_resolve_event(state: Dictionary, choice_index: int, random_value: float) -> Dictionary:
 	## Resolve the active event based on player choice
+	## Supports FTL-style weighted outcomes
 	if state.active_event.is_empty():
 		return state
 
@@ -278,14 +376,145 @@ static func _reduce_resolve_event(state: Dictionary, choice_index: int, random_v
 		return state
 
 	var choice = options[choice_index]
-	var effect = choice.get("effect", Phase2Types.EventEffectType.MORALE_BOOST)
 
-	# Apply effect based on type
-	new_state = _apply_event_effect(new_state, effect, choice.get("effect_value", 0), random_value)
+	# Check for FTL-style weighted outcomes
+	var outcomes = choice.get("outcomes", [])
+	if not outcomes.is_empty():
+		# Roll against weighted outcomes
+		var selected_outcome = _select_weighted_outcome(outcomes, random_value)
+		if not selected_outcome.is_empty():
+			# Apply all effects from the outcome
+			for effect_dict in selected_outcome.get("effects", []):
+				new_state = _apply_weighted_effect(new_state, effect_dict, random_value)
+
+			# Log the outcome description if present
+			var outcome_desc = selected_outcome.get("description", "")
+			if outcome_desc != "":
+				new_state = _add_log_entry(new_state, outcome_desc)
+	else:
+		# Legacy single effect system (backwards compatibility)
+		var effect = choice.get("effect", Phase2Types.EventEffectType.MORALE_BOOST)
+		new_state = _apply_event_effect(new_state, effect, choice.get("effect_value", 0), random_value)
 
 	# Clear event and resume
 	new_state.active_event = {}
 	new_state.auto_advance = true
+
+	return new_state
+
+static func _select_weighted_outcome(outcomes: Array, random_value: float) -> Dictionary:
+	## Select an outcome based on weighted probability
+	## random_value should be 0.0-1.0
+	var cumulative = 0.0
+	for outcome in outcomes:
+		cumulative += outcome.get("weight", 0.0)
+		if random_value < cumulative:
+			return outcome
+	# Fallback to last outcome if weights don't sum to 1.0
+	return outcomes[-1] if not outcomes.is_empty() else {}
+
+static func _apply_weighted_effect(state: Dictionary, effect_dict: Dictionary, random_value: float) -> Dictionary:
+	## Apply a single effect from a weighted outcome
+	## effect_dict: {type, value, target}
+	var new_state = state.duplicate(true)
+	var effect_type = effect_dict.get("type", "")
+	var value = effect_dict.get("value", 0)
+	var target = effect_dict.get("target", "all")
+
+	match effect_type:
+		"morale":
+			new_state = _apply_crew_stat_change(new_state, "morale", value, target, random_value)
+		"health":
+			new_state = _apply_crew_stat_change(new_state, "health", value, target, random_value)
+		"fatigue":
+			new_state = _apply_crew_stat_change(new_state, "fatigue", value, target, random_value)
+		"food":
+			new_state = _apply_resource_change(new_state, "food", value)
+		"water":
+			new_state = _apply_resource_change(new_state, "water", value)
+		"oxygen":
+			new_state = _apply_resource_change(new_state, "oxygen", value)
+		"power":
+			new_state = _apply_resource_change(new_state, "power", value)
+		"fuel":
+			new_state = _apply_resource_change(new_state, "fuel", value)
+		"log":
+			# Log message is stored in target field for this effect type
+			if target != "all" and target != "":
+				new_state = _add_log_entry(new_state, target)
+
+	return new_state
+
+static func _apply_crew_stat_change(state: Dictionary, stat: String, value: int, target: String, random_value: float) -> Dictionary:
+	## Apply a stat change to crew members
+	## target: "all", "random", or crew role name (e.g., "engineer")
+	var new_state = state.duplicate(true)
+	var crew = new_state.crew.duplicate()
+
+	if target == "all":
+		for i in range(crew.size()):
+			var member = crew[i].duplicate()
+			member[stat] = clamp(member[stat] + value, 0, 100)
+			crew[i] = member
+	elif target == "random":
+		if crew.size() > 0:
+			var idx = int(random_value * crew.size()) % crew.size()
+			var member = crew[idx].duplicate()
+			member[stat] = clamp(member[stat] + value, 0, 100)
+			crew[idx] = member
+	else:
+		# Target specific crew by role
+		var role_map = {
+			"commander": Phase2Types.CrewRole.COMMANDER,
+			"engineer": Phase2Types.CrewRole.ENGINEER,
+			"scientist": Phase2Types.CrewRole.SCIENTIST,
+			"medical": Phase2Types.CrewRole.MEDICAL
+		}
+		var target_role = role_map.get(target.to_lower(), -1)
+		for i in range(crew.size()):
+			if crew[i].role == target_role:
+				var member = crew[i].duplicate()
+				member[stat] = clamp(member[stat] + value, 0, 100)
+				crew[i] = member
+				break
+
+	new_state.crew = crew
+	return new_state
+
+static func _apply_resource_change(state: Dictionary, resource: String, value: int) -> Dictionary:
+	## Apply a resource change (positive or negative)
+	var new_state = state.duplicate(true)
+
+	if resource == "food" or resource == "water":
+		# These are stored in containers
+		var containers = new_state.storage_containers.duplicate()
+		var remaining = abs(value)
+		var is_loss = value < 0
+
+		for i in range(containers.size()):
+			if containers[i].accessible and remaining > 0:
+				var container = containers[i].duplicate()
+				if is_loss:
+					var take = min(container[resource], remaining)
+					container[resource] = container[resource] - take
+					remaining -= take
+				else:
+					var space = container[resource + "_max"] - container[resource]
+					var add = min(space, remaining)
+					container[resource] = container[resource] + add
+					remaining -= add
+				containers[i] = container
+
+		new_state.storage_containers = containers
+		new_state.resources = Phase2Types.compute_resource_totals(new_state)
+	else:
+		# Direct resource (oxygen, power, fuel)
+		var resources = new_state.resources.duplicate(true)
+		if resources.has(resource):
+			var res = resources[resource].duplicate()
+			res.current = clamp(res.current + value, 0, res.max)
+			resources[resource] = res
+		new_state.resources = resources
 
 	return new_state
 
@@ -364,8 +593,89 @@ static func _apply_event_effect(state: Dictionary, effect, effect_value: int, ra
 			else:
 				new_state = _add_log_entry(new_state, "Quick visual check - no damage found.")
 
+		# New event effects
+		"fatigue_gain":
+			# Engineer manually stabilizes - gains fatigue
+			var crew = new_state.crew.duplicate()
+			var fatigue_amount = effect_value if effect_value > 0 else 15
+			for i in range(crew.size()):
+				if crew[i].role == Phase2Types.CrewRole.ENGINEER:
+					var member = crew[i].duplicate()
+					member.fatigue = min(100, member.fatigue + fatigue_amount)
+					crew[i] = member
+					break
+			new_state.crew = crew
+			new_state = _add_log_entry(new_state, "Engineer manually stabilized the power systems. Exhausting work.")
+
+		"fuel_loss":
+			var resources = new_state.resources.duplicate(true)
+			var loss = effect_value if effect_value > 0 else 3
+			resources.fuel.current = max(0, resources.fuel.current - loss)
+			new_state.resources = resources
+			new_state = _add_log_entry(new_state, "Correction burn executed. Fuel consumed.")
+
+		"delay_correction":
+			new_state = _add_log_entry(new_state, "Waiting for optimal correction window...")
+
+		"water_fix":
+			new_state = _add_log_entry(new_state, "Water recycler filter replaced. Efficiency restored.")
+
+		"partial_fix":
+			new_state = _add_log_entry(new_state, "Water recycler cleaned and recalibrated. 90% efficiency.")
+
+		"water_ration":
+			new_state = _add_log_entry(new_state, "Crew implementing water rationing until Mars arrival.")
+
+		"use_spare":
+			new_state = _add_log_entry(new_state, "Backup sensors installed.")
+
+		"watch_and_wait":
+			new_state = _add_log_entry(new_state, "Monitoring oxygen levels closely...")
+
+		"communication_delay":
+			new_state = _add_log_entry(new_state, "Accepting temporary communication blackout.")
+
+		"health_check":
+			new_state = _add_log_entry(new_state, "Full medical workup complete. Crew health verified.")
+
+		"quick_treatment":
+			new_state = _add_log_entry(new_state, "Standard treatment protocol applied.")
+
+		"rest_treatment":
+			new_state = _add_log_entry(new_state, "Crew member resting and under observation.")
+
+		# Midpoint crisis effects
+		"crisis_repair":
+			var crew = new_state.crew.duplicate()
+			for i in range(crew.size()):
+				var member = crew[i].duplicate()
+				member.fatigue = min(100, member.fatigue + 25)
+				crew[i] = member
+			new_state.crew = crew
+			new_state = _add_log_entry(new_state, "All hands emergency repair! Systems stabilized, crew exhausted.")
+
+		"crisis_oxygen":
+			var resources = new_state.resources.duplicate(true)
+			resources.oxygen.current = max(50, resources.oxygen.current)
+			new_state.resources = resources
+			new_state = _add_log_entry(new_state, "Oxygen systems prioritized and stabilized.")
+
+		"crisis_eva":
+			# Risky EVA to fix both systems
+			if random_value > 0.5:
+				new_state = _add_log_entry(new_state, "EVA repair successful! Both systems operational.")
+			else:
+				var crew = new_state.crew.duplicate()
+				var victim_idx = int(random_value * crew.size()) % crew.size()
+				var victim = crew[victim_idx].duplicate()
+				victim.health = max(0, victim.health - 15)
+				crew[victim_idx] = victim
+				new_state.crew = crew
+				new_state = _add_log_entry(new_state, "EVA repair completed with minor injuries. %s treating minor decompression." % victim.name)
+
 		_:
-			pass  # Unknown effect
+			# Unknown effect - just log it
+			new_state = _add_log_entry(new_state, "Event resolved.")
 
 	return new_state
 
@@ -486,8 +796,8 @@ static func _reduce_block_section(state: Dictionary, container_id: String, statu
 # REPAIR & EVA
 # ============================================================================
 
-static func _reduce_start_repair(state: Dictionary, container_id: String, repair_days: int) -> Dictionary:
-	## Start repairing a blocked section
+static func _reduce_start_repair(state: Dictionary, container_id: String, repair_hours: int) -> Dictionary:
+	## Start repairing a blocked section (now uses hours)
 	var new_state = state.duplicate(true)
 
 	# Find the container
@@ -500,10 +810,14 @@ static func _reduce_start_repair(state: Dictionary, container_id: String, repair
 	if container_name.is_empty():
 		return state
 
-	# Set up repair state
+	# Calculate days for display
+	var repair_days = int(ceil(float(repair_hours) / Phase2Types.HOURS_PER_DAY))
+
+	# Set up repair state (now in hours)
 	new_state.repair = {
 		"in_progress": true,
-		"days_remaining": repair_days,
+		"hours_remaining": repair_hours,
+		"days_remaining": repair_days,  # For display
 		"target_container_id": container_id
 	}
 
@@ -521,7 +835,7 @@ static func _reduce_start_repair(state: Dictionary, container_id: String, repair
 	new_state.active_event = {}
 	new_state.auto_advance = true
 
-	new_state = _add_log_entry(new_state, "Engineer dispatched to repair %s. Estimated %d days." % [container_name, repair_days])
+	new_state = _add_log_entry(new_state, "Engineer dispatched to repair %s. Estimated %d hours (~%d days)." % [container_name, repair_hours, repair_days])
 
 	return new_state
 
@@ -613,6 +927,8 @@ static func _add_log_entry(state: Dictionary, message: String) -> Dictionary:
 	var log = new_state.log.duplicate()
 	log.append({
 		"day": new_state.current_day,
+		"hour": new_state.get("current_hour", 0),
+		"total_hours": new_state.get("total_hours", 0),
 		"message": message
 	})
 	new_state.log = log
@@ -679,7 +995,8 @@ static func has_active_event(state: Dictionary) -> bool:
 	return not state.active_event.is_empty()
 
 static func has_arrived(state: Dictionary) -> bool:
-	return state.current_day >= state.total_days
+	var total_hours = state.get("total_hours", state.current_day * Phase2Types.HOURS_PER_DAY)
+	return total_hours >= Phase2Types.TOTAL_TRAVEL_HOURS or state.current_day >= state.total_days
 
 static func is_game_over(state: Dictionary) -> bool:
 	return Phase2Types.is_game_over(state)
@@ -687,5 +1004,11 @@ static func is_game_over(state: Dictionary) -> bool:
 static func get_days_remaining(state: Dictionary) -> int:
 	return max(0, state.total_days - state.current_day)
 
+static func get_hours_remaining(state: Dictionary) -> int:
+	var total_hours = state.get("total_hours", 0)
+	return max(0, Phase2Types.TOTAL_TRAVEL_HOURS - total_hours)
+
 static func get_journey_progress(state: Dictionary) -> float:
-	return float(state.current_day) / float(state.total_days)
+	## Use total_hours for smoother progress (updates every hour not every day)
+	var total_hours = state.get("total_hours", state.current_day * Phase2Types.HOURS_PER_DAY)
+	return float(total_hours) / float(Phase2Types.TOTAL_TRAVEL_HOURS)

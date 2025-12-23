@@ -284,12 +284,12 @@ const LIFE_SUPPORT_TIERS = {
 
 static func create_phase1_state(difficulty: String = "normal") -> Dictionary:
 	## Create initial state for Phase 1 (Ship Building)
-	var budget = 650000000  # $650M default
+	var budget = 2000000000  # $2B for testing (was $650M)
 	match difficulty:
 		"easy":
-			budget = 800000000
+			budget = 2500000000
 		"hard":
-			budget = 500000000
+			budget = 1500000000
 
 	return {
 		"phase": Phase.SHIP_BUILDING,

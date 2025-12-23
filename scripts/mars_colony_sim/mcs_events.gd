@@ -7,6 +7,7 @@ class_name MCSEvents
 
 # Preload dependencies
 const _MCSTypes = preload("res://scripts/mars_colony_sim/mcs_types.gd")
+const _MCSPopulation = preload("res://scripts/mars_colony_sim/mcs_population.gd")
 
 # ============================================================================
 # EVENT DEFINITIONS - 12 Core Events
@@ -90,7 +91,7 @@ static func _can_event_trigger(event: Dictionary, state: Dictionary) -> bool:
 
 	var min_pop = event.get("min_population", 0)
 	var colonists = state.get("colonists", [])
-	if MCSPopulation.count_alive(colonists) < min_pop:
+	if _MCSPopulation.count_alive(colonists) < min_pop:
 		return false
 
 	var event_cooldowns = state.get("event_cooldowns", {})

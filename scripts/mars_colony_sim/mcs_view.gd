@@ -25,48 +25,274 @@ const ISO_HEIGHT_SCALE = 2.5  # How much Z height translates to screen Y (taller
 
 # Visual sizes in world units
 const LIFEPOD_RADIUS = 20.0
-const BUILDING_RADIUS = 15.0  # Bigger hex footprint
+const BUILDING_RADIUS = 28.0  # MASSIVE footprint for EPIC scale
 const COLONIST_SIZE = 2.5
+
+# =============================================================================
+# PERSPECTIVE SYSTEM
+# =============================================================================
+# One-point perspective: buildings spread from foreground toward horizon
+# Depth = distance into scene, Lateral = left/right from center
+
+const PERSPECTIVE_ENABLED = true  # Toggle for A/B testing
+
+# Screen space ratios (0.0 = top, 1.0 = bottom)
+const HORIZON_SCREEN_Y = 0.38       # Horizon line at 38% from top
+const FOREGROUND_SCREEN_Y = 0.95    # Foreground ground at 95%
+
+# World space bounds for perspective layout
+const MAX_DEPTH = 80.0              # Distance from front to horizon
+const MAX_LATERAL = 14.0            # Left/right spread - TIGHT for dense city
+const MIN_DEPTH = 6.0               # Closest buildings to camera - CLOSE!
+
+# Perspective scaling - EPIC scale for massive structures
+const PERSPECTIVE_BASE_SCALE = 65.0  # Base pixel scale at depth=0 (bigger = larger buildings)
+const PERSPECTIVE_STRENGTH = 0.85    # How aggressively things shrink (lower = less shrinking)
+const PERSPECTIVE_HEIGHT_SCALE = 6.5 # Vertical exaggeration for buildings (MASSIVE!)
+
+# Row layout for perspective view - TIGHT clustering for dense city feel
+const PERSPECTIVE_ROWS = [
+	{"depth": 0.05, "slots": 4, "spread": 0.22},   # Foreground: prominent buildings (tight!)
+	{"depth": 0.11, "slots": 6, "spread": 0.28},
+	{"depth": 0.17, "slots": 8, "spread": 0.34},
+	{"depth": 0.24, "slots": 10, "spread": 0.38},
+	{"depth": 0.31, "slots": 12, "spread": 0.42},
+	{"depth": 0.38, "slots": 14, "spread": 0.46},
+	{"depth": 0.46, "slots": 16, "spread": 0.50},
+	{"depth": 0.54, "slots": 18, "spread": 0.54},
+	{"depth": 0.64, "slots": 22, "spread": 0.58},
+	{"depth": 0.76, "slots": 28, "spread": 0.65},  # Background silhouettes
+]
 
 # =============================================================================
 # BUILDING HEIGHTS (world units) - Scale with colony tier
 # =============================================================================
 
 const BUILDING_HEIGHTS = {
-	# Basic structures (Era: Survival)
-	"hab_pod": 12.0,
-	"greenhouse": 14.0,
-	"solar_array": 4.0,
-	"water_extractor": 10.0,
-	"oxygenator": 12.0,
-	"medical_bay": 18.0,
-	"workshop": 16.0,
-	# Mid-tier (Era: Growth)
-	"hydroponics": 24.0,
-	"factory": 30.0,
-	"lab": 28.0,
-	"fission_reactor": 22.0,
-	"storage": 18.0,
-	# High-tier (Era: Society)
-	"apartment_block": 50.0,
-	"hospital": 42.0,
-	"research_center": 48.0,
-	"university": 55.0,
-	# Mega-structures (Era: Independence)
-	"arcology": 120.0,
-	"mega_tower": 100.0,
-	"admin_spire": 80.0,
-	# Superstructures (transcendence)
-	"space_elevator": 300.0,
-	"orbital_tether": 250.0,
+	# ALL buildings start LOW at tier 1 - upgrades make them taller!
+	# Base height = tier 1 survival bunker/dome
+	# Tier scaling transforms them into impressive structures
+
+	# Housing
+	"hab_pod": 8.0,          # Tier 1: small dome -> Tier 5: apartment tower
+	"apartment_block": 12.0, # Starts modest, becomes high-rise
+	"luxury_quarters": 10.0,
+	"barracks": 8.0,
+
+	# Food production
+	"greenhouse": 10.0,      # Tier 1: low dome -> Tier 5: vertical farm
+	"hydroponics": 12.0,
+
+	# Power
+	"solar_array": 4.0,      # Always stays relatively flat
+	"fission_reactor": 10.0, # Grows into cooling tower
+
+	# Industry
+	"water_extractor": 8.0,  # Drilling rig grows
+	"oxygenator": 6.0,
+	"workshop": 10.0,        # Becomes factory
+	"factory": 14.0,
+	"storage": 8.0,
+
+	# Services
+	"medical_bay": 8.0,      # Clinic -> Hospital
+	"hospital": 12.0,
+	"school": 8.0,
+	"university": 12.0,
+	"lab": 10.0,
+	"research_center": 14.0,
+	"recreation_center": 8.0,
+	"temple": 10.0,
+	"government_hall": 12.0,
+
+	# Mega-structures (these start bigger but still grow)
+	"arcology": 40.0,        # Tier 1: big dome -> Tier 5: mega-tower
+	"mega_tower": 35.0,
+	"admin_spire": 30.0,
+
+	# Superstructures (special - always epic)
+	"space_elevator": 500.0, # Goes to orbit!
+	"orbital_tether": 400.0,
+	"mass_driver": 15.0,     # Rail system
 }
 
+# Colony era multipliers (affects all buildings slightly)
 const TIER_MULTIPLIERS = {
-	"survival": 0.7,
+	"survival": 0.9,
 	"growth": 1.0,
-	"society": 1.4,
-	"independence": 1.8,
-	"transcendence": 2.5,
+	"society": 1.1,
+	"independence": 1.2,
+	"transcendence": 1.3,
+}
+
+# =============================================================================
+# BUILDING UPGRADE PATHS - Visual progression for each building type
+# =============================================================================
+# Each building type has 5 visual tiers that show growth and advancement
+# Tier 1: Emergency/basic survival structure
+# Tier 2: Functional improvement
+# Tier 3: Expanded/upgraded
+# Tier 4: Advanced/optimized
+# Tier 5: Megastructure-level (fully realized)
+
+const UPGRADE_PATHS = {
+	# -------------------------------------------------------------------------
+	# POWER STRUCTURES
+	# -------------------------------------------------------------------------
+	"solar_array": {
+		1: {"name": "Emergency Panel", "desc": "Single panel on ground", "panels": 1, "elevated": false, "rotating": false, "stacked": false},
+		2: {"name": "Panel Array", "desc": "Row of 3 panels", "panels": 3, "elevated": false, "rotating": false, "stacked": false},
+		3: {"name": "Elevated Array", "desc": "Raised on support poles", "panels": 4, "elevated": true, "rotating": false, "stacked": false},
+		4: {"name": "Tracking Array", "desc": "Sun-tracking mount", "panels": 5, "elevated": true, "rotating": true, "stacked": false},
+		5: {"name": "Solar Tower", "desc": "Multi-level solar farm", "panels": 8, "elevated": true, "rotating": true, "stacked": true},
+	},
+	"fission_reactor": {
+		1: {"name": "RTG Pod", "desc": "Basic radioisotope generator", "cooling_towers": 0, "glow": 0.3},
+		2: {"name": "Enhanced RTG", "desc": "Improved output", "cooling_towers": 0, "glow": 0.5},
+		3: {"name": "Small Reactor", "desc": "Nuclear fission core", "cooling_towers": 1, "glow": 0.7},
+		4: {"name": "Power Plant", "desc": "Full reactor complex", "cooling_towers": 2, "glow": 0.85},
+		5: {"name": "Reactor Array", "desc": "Multiple reactor cores", "cooling_towers": 3, "glow": 1.0},
+	},
+	"fusion_reactor": {
+		1: {"name": "Prototype Core", "desc": "Experimental fusion", "rings": 1, "plasma_glow": 0.4},
+		2: {"name": "Stable Core", "desc": "Reliable output", "rings": 2, "plasma_glow": 0.6},
+		3: {"name": "Enhanced Core", "desc": "High efficiency", "rings": 3, "plasma_glow": 0.75},
+		4: {"name": "Fusion Complex", "desc": "Multi-core plant", "rings": 4, "plasma_glow": 0.9},
+		5: {"name": "Fusion Megaplex", "desc": "Powers the colony", "rings": 5, "plasma_glow": 1.0},
+	},
+	# -------------------------------------------------------------------------
+	# HOUSING
+	# -------------------------------------------------------------------------
+	"hab_pod": {
+		1: {"name": "Emergency Shelter", "desc": "Pressurized bunker", "domes": 1, "windows": 0, "height_mult": 0.6},
+		2: {"name": "Basic Hab", "desc": "Small dome with airlock", "domes": 1, "windows": 2, "height_mult": 0.8},
+		3: {"name": "Expanded Hab", "desc": "Larger living space", "domes": 1, "windows": 4, "height_mult": 1.0},
+		4: {"name": "Hab Complex", "desc": "Connected modules", "domes": 2, "windows": 6, "height_mult": 1.3},
+		5: {"name": "Hab Tower", "desc": "Multi-story housing", "domes": 3, "windows": 10, "height_mult": 2.0},
+	},
+	"apartment_block": {
+		1: {"name": "Crew Quarters", "desc": "Basic shared housing", "floors": 2, "balconies": false},
+		2: {"name": "Apartment Unit", "desc": "Private apartments", "floors": 3, "balconies": false},
+		3: {"name": "Apartment Block", "desc": "Family housing", "floors": 5, "balconies": true},
+		4: {"name": "High-Rise", "desc": "Tall residential tower", "floors": 8, "balconies": true},
+		5: {"name": "Sky Apartments", "desc": "Luxury tower", "floors": 12, "balconies": true},
+	},
+	# -------------------------------------------------------------------------
+	# FOOD PRODUCTION
+	# -------------------------------------------------------------------------
+	"greenhouse": {
+		1: {"name": "Grow Tent", "desc": "Emergency hydroponics", "sections": 1, "opacity": 0.6, "crops_visible": false},
+		2: {"name": "Small Greenhouse", "desc": "Basic growing dome", "sections": 1, "opacity": 0.5, "crops_visible": true},
+		3: {"name": "Greenhouse", "desc": "Full production dome", "sections": 2, "opacity": 0.4, "crops_visible": true},
+		4: {"name": "Agri-Complex", "desc": "Multiple growing areas", "sections": 3, "opacity": 0.35, "crops_visible": true},
+		5: {"name": "Vertical Farm", "desc": "Multi-level agriculture", "sections": 4, "opacity": 0.3, "crops_visible": true},
+	},
+	"hydroponics": {
+		1: {"name": "Hydro Pod", "desc": "Small water system", "tanks": 1, "pipes_visible": false},
+		2: {"name": "Hydro Array", "desc": "Expanded growing", "tanks": 2, "pipes_visible": true},
+		3: {"name": "Hydro Bay", "desc": "Full bay system", "tanks": 3, "pipes_visible": true},
+		4: {"name": "Hydro Tower", "desc": "Vertical hydroponics", "tanks": 4, "pipes_visible": true},
+		5: {"name": "Hydro Megafarm", "desc": "Industrial scale", "tanks": 6, "pipes_visible": true},
+	},
+	# -------------------------------------------------------------------------
+	# WATER & LIFE SUPPORT
+	# -------------------------------------------------------------------------
+	"water_extractor": {
+		1: {"name": "Ice Drill", "desc": "Basic extraction", "drills": 1, "tank_size": 0.5, "pipes": false},
+		2: {"name": "Deep Well", "desc": "Deeper access", "drills": 1, "tank_size": 0.7, "pipes": true},
+		3: {"name": "Extraction Rig", "desc": "Multiple wells", "drills": 2, "tank_size": 1.0, "pipes": true},
+		4: {"name": "Water Plant", "desc": "Processing facility", "drills": 3, "tank_size": 1.3, "pipes": true},
+		5: {"name": "Water Tower", "desc": "Full distribution", "drills": 4, "tank_size": 2.0, "pipes": true},
+	},
+	"oxygenator": {
+		1: {"name": "O2 Generator", "desc": "Basic oxygen", "vents": 1, "flow_rate": 0.5},
+		2: {"name": "O2 Array", "desc": "Improved output", "vents": 2, "flow_rate": 0.7},
+		3: {"name": "O2 Plant", "desc": "Life support hub", "vents": 3, "flow_rate": 1.0},
+		4: {"name": "Atmo Processor", "desc": "Air recycling", "vents": 4, "flow_rate": 1.3},
+		5: {"name": "Atmo Tower", "desc": "Colony-wide air", "vents": 6, "flow_rate": 2.0},
+	},
+	# -------------------------------------------------------------------------
+	# INDUSTRY
+	# -------------------------------------------------------------------------
+	"workshop": {
+		1: {"name": "Tool Shed", "desc": "Basic repairs", "workstations": 1, "chimneys": 0},
+		2: {"name": "Workshop", "desc": "General fabrication", "workstations": 2, "chimneys": 0},
+		3: {"name": "Machine Shop", "desc": "Precision manufacturing", "workstations": 3, "chimneys": 1},
+		4: {"name": "Fab Lab", "desc": "Advanced manufacturing", "workstations": 4, "chimneys": 1},
+		5: {"name": "Factory", "desc": "Industrial production", "workstations": 6, "chimneys": 2},
+	},
+	"factory": {
+		1: {"name": "Small Factory", "desc": "Basic production", "smokestacks": 1, "cranes": 0},
+		2: {"name": "Factory", "desc": "Standard output", "smokestacks": 1, "cranes": 1},
+		3: {"name": "Industrial Plant", "desc": "High output", "smokestacks": 2, "cranes": 1},
+		4: {"name": "Manufacturing Hub", "desc": "Automation", "smokestacks": 2, "cranes": 2},
+		5: {"name": "Mega-Factory", "desc": "Full automation", "smokestacks": 3, "cranes": 3},
+	},
+	"storage": {
+		1: {"name": "Supply Cache", "desc": "Small storage", "tanks": 1, "height_mult": 0.6},
+		2: {"name": "Warehouse", "desc": "General storage", "tanks": 2, "height_mult": 0.8},
+		3: {"name": "Storage Hub", "desc": "Central storage", "tanks": 3, "height_mult": 1.0},
+		4: {"name": "Distribution Center", "desc": "Logistics hub", "tanks": 4, "height_mult": 1.3},
+		5: {"name": "Storage Complex", "desc": "Massive capacity", "tanks": 6, "height_mult": 1.8},
+	},
+	# -------------------------------------------------------------------------
+	# MEDICAL & SERVICES
+	# -------------------------------------------------------------------------
+	"medical_bay": {
+		1: {"name": "First Aid Station", "desc": "Emergency care", "beds": 2, "red_cross": true},
+		2: {"name": "Medical Bay", "desc": "Basic treatment", "beds": 4, "red_cross": true},
+		3: {"name": "Clinic", "desc": "Full medical", "beds": 6, "red_cross": true},
+		4: {"name": "Med Center", "desc": "Advanced care", "beds": 8, "red_cross": true},
+		5: {"name": "Hospital", "desc": "Complete hospital", "beds": 12, "red_cross": true},
+	},
+	"school": {
+		1: {"name": "Learning Pod", "desc": "Basic education", "floors": 1, "windows": 2},
+		2: {"name": "School Room", "desc": "Class education", "floors": 1, "windows": 4},
+		3: {"name": "School", "desc": "Full curriculum", "floors": 2, "windows": 6},
+		4: {"name": "Academy", "desc": "Advanced education", "floors": 3, "windows": 8},
+		5: {"name": "University", "desc": "Higher learning", "floors": 4, "windows": 12},
+	},
+	"lab": {
+		1: {"name": "Research Pod", "desc": "Basic experiments", "antennas": 1, "glow": 0.3},
+		2: {"name": "Lab", "desc": "Science lab", "antennas": 2, "glow": 0.5},
+		3: {"name": "Research Lab", "desc": "Advanced research", "antennas": 3, "glow": 0.7},
+		4: {"name": "Science Center", "desc": "Multi-discipline", "antennas": 4, "glow": 0.85},
+		5: {"name": "Research Complex", "desc": "Cutting edge", "antennas": 6, "glow": 1.0},
+	},
+	# -------------------------------------------------------------------------
+	# INFRASTRUCTURE
+	# -------------------------------------------------------------------------
+	"communications": {
+		1: {"name": "Radio Mast", "desc": "Basic comms", "dishes": 0, "antenna_height": 0.8},
+		2: {"name": "Comms Tower", "desc": "Enhanced range", "dishes": 1, "antenna_height": 1.0},
+		3: {"name": "Relay Station", "desc": "Network node", "dishes": 2, "antenna_height": 1.3},
+		4: {"name": "Comms Array", "desc": "Multi-band", "dishes": 3, "antenna_height": 1.6},
+		5: {"name": "Deep Space Array", "desc": "Interplanetary", "dishes": 4, "antenna_height": 2.0},
+	},
+	"landing_pad": {
+		1: {"name": "Marked Area", "desc": "Basic landing zone", "lights": 2, "has_tower": false},
+		2: {"name": "Landing Pad", "desc": "Prepared surface", "lights": 4, "has_tower": false},
+		3: {"name": "Spaceport Pad", "desc": "Refueling capable", "lights": 6, "has_tower": true},
+		4: {"name": "Launch Complex", "desc": "Full facilities", "lights": 8, "has_tower": true},
+		5: {"name": "Spaceport", "desc": "Major hub", "lights": 12, "has_tower": true},
+	},
+	# -------------------------------------------------------------------------
+	# MEGASTRUCTURES (special - always impressive)
+	# -------------------------------------------------------------------------
+	"space_elevator": {
+		1: {"name": "Anchor Point", "desc": "Base construction", "cable_opacity": 0.3, "platforms": 1},
+		2: {"name": "Partial Tether", "desc": "Cable rising", "cable_opacity": 0.5, "platforms": 1},
+		3: {"name": "Basic Elevator", "desc": "First cargo runs", "cable_opacity": 0.7, "platforms": 2},
+		4: {"name": "Space Elevator", "desc": "Regular service", "cable_opacity": 0.85, "platforms": 3},
+		5: {"name": "Orbital Gateway", "desc": "Major transit hub", "cable_opacity": 1.0, "platforms": 4},
+	},
+	"mass_driver": {
+		1: {"name": "Launch Ramp", "desc": "Basic accelerator", "rail_length": 0.5, "power_glow": 0.3},
+		2: {"name": "Mass Driver", "desc": "Functional launcher", "rail_length": 0.7, "power_glow": 0.5},
+		3: {"name": "Cargo Launcher", "desc": "Regular launches", "rail_length": 0.85, "power_glow": 0.7},
+		4: {"name": "Mass Driver Array", "desc": "High capacity", "rail_length": 1.0, "power_glow": 0.85},
+		5: {"name": "Orbital Cannon", "desc": "Continuous ops", "rail_length": 1.2, "power_glow": 1.0},
+	},
 }
 
 # =============================================================================
@@ -86,15 +312,16 @@ const COLOR_LIFEPOD_RIGHT = Color(0.32, 0.50, 0.68)
 const COLOR_TUNNEL = Color(0.2, 0.15, 0.12)
 const COLOR_TUNNEL_GLOW = Color(1.0, 0.8, 0.5, 0.5)
 
+# Warm futuristic palette inspired by concept art - metallic with golden highlights
 const BUILDING_COLORS = {
-	"housing": {"top": Color(0.4, 0.6, 0.85), "left": Color(0.28, 0.42, 0.62), "right": Color(0.34, 0.52, 0.72)},
-	"food": {"top": Color(0.4, 0.75, 0.4), "left": Color(0.28, 0.55, 0.28), "right": Color(0.34, 0.65, 0.34)},
-	"power": {"top": Color(0.95, 0.78, 0.3), "left": Color(0.72, 0.58, 0.18), "right": Color(0.82, 0.68, 0.24)},
-	"water": {"top": Color(0.35, 0.7, 0.9), "left": Color(0.22, 0.5, 0.68), "right": Color(0.28, 0.6, 0.78)},
-	"industry": {"top": Color(0.65, 0.5, 0.38), "left": Color(0.45, 0.32, 0.24), "right": Color(0.55, 0.42, 0.32)},
-	"medical": {"top": Color(0.85, 0.4, 0.4), "left": Color(0.62, 0.28, 0.28), "right": Color(0.72, 0.34, 0.34)},
-	"research": {"top": Color(0.68, 0.4, 0.78), "left": Color(0.48, 0.28, 0.58), "right": Color(0.58, 0.34, 0.68)},
-	"mega": {"top": Color(0.92, 0.92, 0.95), "left": Color(0.65, 0.68, 0.72), "right": Color(0.78, 0.80, 0.84)},
+	"housing": {"top": Color(0.78, 0.72, 0.68), "left": Color(0.55, 0.50, 0.46), "right": Color(0.68, 0.62, 0.58)},  # Warm metallic
+	"food": {"top": Color(0.45, 0.65, 0.42), "left": Color(0.32, 0.48, 0.30), "right": Color(0.38, 0.55, 0.36)},  # Muted green
+	"power": {"top": Color(0.95, 0.82, 0.55), "left": Color(0.78, 0.65, 0.42), "right": Color(0.88, 0.75, 0.50)},  # Golden
+	"water": {"top": Color(0.55, 0.72, 0.82), "left": Color(0.42, 0.55, 0.65), "right": Color(0.48, 0.65, 0.75)},  # Steel blue
+	"industry": {"top": Color(0.72, 0.62, 0.52), "left": Color(0.52, 0.42, 0.32), "right": Color(0.62, 0.52, 0.42)},  # Bronze
+	"medical": {"top": Color(0.85, 0.75, 0.72), "left": Color(0.65, 0.55, 0.52), "right": Color(0.75, 0.65, 0.62)},  # Warm white/pink
+	"research": {"top": Color(0.72, 0.68, 0.78), "left": Color(0.52, 0.48, 0.58), "right": Color(0.62, 0.58, 0.68)},  # Soft purple-gray
+	"mega": {"top": Color(0.95, 0.92, 0.88), "left": Color(0.72, 0.68, 0.65), "right": Color(0.85, 0.82, 0.78)},  # Bright silver
 }
 
 # =============================================================================
@@ -157,6 +384,66 @@ func _get_depth(world_x: float, world_y: float, world_z: float = 0.0) -> float:
 	return -(world_x + world_y) + world_z * 0.01
 
 # =============================================================================
+# PERSPECTIVE TRANSFORM SYSTEM
+# =============================================================================
+
+func _get_vanishing_point() -> Vector2:
+	"""The point on horizon where all perspective lines converge"""
+	return Vector2(size.x * 0.5, size.y * HORIZON_SCREEN_Y)
+
+func _perspective_transform(world_x: float, world_depth: float, world_z: float = 0.0) -> Vector2:
+	"""
+	One-point perspective transform.
+	world_x: lateral position (negative = left, positive = right, 0 = center)
+	world_depth: distance into scene (0 = foreground, MAX_DEPTH = horizon)
+	world_z: height above ground
+	"""
+	var vp = _get_vanishing_point()
+
+	# Normalize depth (0 = closest, 1 = horizon)
+	var depth_norm = clampf(world_depth / MAX_DEPTH, 0.0, 1.0)
+
+	# Perspective scale: things shrink as they approach horizon
+	# Use exponential falloff for more realistic perspective
+	var scale = PERSPECTIVE_BASE_SCALE / (1.0 + depth_norm * PERSPECTIVE_STRENGTH)
+
+	# Screen Y: interpolate from foreground ground toward horizon
+	var ground_y = size.y * FOREGROUND_SCREEN_Y
+	var horizon_y = size.y * HORIZON_SCREEN_Y
+	# Ease-out curve so distant objects cluster near horizon
+	var y_ratio = 1.0 - pow(1.0 - depth_norm, 1.5)
+	var base_screen_y = lerp(ground_y, horizon_y, y_ratio)
+
+	# Apply height (scaled by perspective - taller things remain visible)
+	var height_offset = world_z * scale * PERSPECTIVE_HEIGHT_SCALE / PERSPECTIVE_BASE_SCALE
+	var screen_y = base_screen_y - height_offset
+
+	# Screen X: spread from vanishing point center, scaled by perspective
+	var screen_x = vp.x + world_x * scale
+
+	# Apply camera zoom and pan
+	var result = Vector2(screen_x, screen_y)
+	result = (result - size / 2) * _camera_zoom + size / 2 + _camera_pan
+
+	return result
+
+func _perspective_v2(lateral: float, depth: float, z: float = 0.0) -> Vector2:
+	"""Convenience wrapper for perspective transform"""
+	return _perspective_transform(lateral, depth, z)
+
+func _get_perspective_scale(world_depth: float) -> float:
+	"""Get the scale factor at a given depth (for sizing elements)"""
+	var depth_norm = clampf(world_depth / MAX_DEPTH, 0.0, 1.0)
+	# Minimum scale of 40% to keep back buildings visible
+	var raw_scale = PERSPECTIVE_BASE_SCALE / (1.0 + depth_norm * PERSPECTIVE_STRENGTH)
+	return maxf(raw_scale, PERSPECTIVE_BASE_SCALE * 0.4)
+
+func _get_depth_perspective(world_depth: float, world_z: float = 0.0) -> float:
+	"""Depth sorting for perspective: higher depth = draw first (background)"""
+	# Objects further into scene draw first, height breaks ties
+	return world_depth - world_z * 0.001
+
+# =============================================================================
 # LIFECYCLE
 # =============================================================================
 
@@ -203,6 +490,7 @@ func _draw():
 			"building": _draw_building_obj(obj)
 			"lifepod": _draw_lifepod_obj(obj)
 			"colonist": _draw_colonist_obj(obj)
+			"drone": _draw_drone_obj(obj)
 
 	# Force field dome over colony
 	_draw_force_field()
@@ -221,44 +509,132 @@ func _draw():
 # =============================================================================
 
 func _draw_sky():
-	"""Draw Mars sky with gradient and celestial bodies"""
-	# Gradient from horizon (dusty orange) to zenith (darker rust)
-	var horizon_color = Color(0.82, 0.55, 0.45)
-	var zenith_color = Color(0.45, 0.28, 0.22)
+	"""Draw Mars sky with horizon, distant mountains, and celestial bodies"""
+	var sky_palette = TERRAFORM_SKY_COLORS[_terraforming_stage]
+	var horizon_color = sky_palette.horizon
+	var zenith_color = sky_palette.zenith
+	var ground_colors = TERRAFORM_GROUND_COLORS[_terraforming_stage]
 
-	# Simple gradient via rectangles
-	var bands = 8
+	# Horizon position depends on perspective mode
+	var horizon_ratio = HORIZON_SCREEN_Y if PERSPECTIVE_ENABLED else 0.5
+	var horizon_y = size.y * horizon_ratio
+
+	# Sky gradient - from top to horizon
+	var bands = 12
 	for i in range(bands):
 		var t1 = float(i) / bands
 		var t2 = float(i + 1) / bands
-		var c1 = horizon_color.lerp(zenith_color, t1)
-		var c2 = horizon_color.lerp(zenith_color, t2)
-		var y1 = size.y * (1.0 - t1) * 0.4  # Top 40% of screen
-		var y2 = size.y * (1.0 - t2) * 0.4
-		draw_rect(Rect2(0, y2, size.x, y1 - y2), c1.lerp(c2, 0.5))
+		var c1 = zenith_color.lerp(horizon_color, t1)
+		var c2 = zenith_color.lerp(horizon_color, t2)
+		var y1 = horizon_y * t1
+		var y2 = horizon_y * t2
+		draw_rect(Rect2(0, y1, size.x, y2 - y1), c1.lerp(c2, 0.5))
 
-	# Fill rest with ground color
-	draw_rect(Rect2(0, size.y * 0.4, size.x, size.y * 0.6), COLOR_SKY)
+	# Distant mountains silhouette (far background)
+	_draw_distant_mountains(horizon_y, ground_colors.dark.darkened(0.3))
+
+	# Mid-ground terrain (closer hills)
+	_draw_midground_terrain(horizon_y, ground_colors.dark.darkened(0.15))
+
+	# Ground plane (fades from horizon)
+	_draw_ground_plane(horizon_y, ground_colors)
 
 	# Phobos (small, fast moon)
 	var phobos_t = fmod(_time * 0.3, 1.0)
 	var phobos_x = size.x * (0.1 + phobos_t * 0.8)
-	var phobos_y = size.y * (0.08 + sin(phobos_t * PI) * 0.1)
-	draw_circle(Vector2(phobos_x, phobos_y), 4, Color(0.7, 0.65, 0.6))
+	var phobos_y = size.y * (0.1 + sin(phobos_t * PI) * 0.15)
+	draw_circle(Vector2(phobos_x, phobos_y), 5, Color(0.7, 0.65, 0.6))
 
 	# Deimos (tiny, slower moon)
 	var deimos_t = fmod(_time * 0.15, 1.0)
 	var deimos_x = size.x * (0.9 - deimos_t * 0.7)
-	var deimos_y = size.y * (0.12 + sin(deimos_t * PI) * 0.05)
-	draw_circle(Vector2(deimos_x, deimos_y), 2, Color(0.65, 0.6, 0.55))
+	var deimos_y = size.y * (0.15 + sin(deimos_t * PI) * 0.08)
+	draw_circle(Vector2(deimos_x, deimos_y), 3, Color(0.65, 0.6, 0.55))
 
 	# Stars (visible during dust-free moments)
 	if not _sandstorm_active:
-		for i in range(20):
+		for i in range(25):
 			var sx = fmod(i * 137.5 + 50, size.x)
-			var sy = fmod(i * 89.3 + 20, size.y * 0.35)
-			var twinkle = 0.3 + sin(_time * 2.0 + i * 0.7) * 0.2
+			var sy = fmod(i * 89.3 + 20, size.y * 0.4)
+			var twinkle = 0.2 + sin(_time * 2.0 + i * 0.7) * 0.15
 			draw_circle(Vector2(sx, sy), 1.0, Color(1.0, 1.0, 0.95, twinkle))
+
+func _draw_distant_mountains(horizon_y: float, color: Color):
+	"""Draw layered mountain ranges for cinematic depth"""
+	var sky_palette = TERRAFORM_SKY_COLORS[_terraforming_stage]
+
+	# Layer 1: Most distant - barely visible, blends with horizon
+	var far_color = color.lerp(sky_palette.horizon, 0.7)
+	var far_points = PackedVector2Array()
+	far_points.append(Vector2(0, horizon_y + 30))
+	for i in range(17):
+		var x = size.x * i / 16
+		var peak_h = 45 + sin(i * 0.6) * 30 + sin(i * 2.1) * 12
+		far_points.append(Vector2(x, horizon_y - peak_h))
+	far_points.append(Vector2(size.x, horizon_y + 30))
+	draw_polygon(far_points, [far_color])
+
+	# Layer 2: Mid-distance mountains
+	var mid_color = color.lerp(sky_palette.horizon, 0.4)
+	var mid_points = PackedVector2Array()
+	mid_points.append(Vector2(0, horizon_y + 25))
+	for i in range(13):
+		var x = size.x * i / 12
+		var peak_h = 35 + sin(i * 0.8 + 1.0) * 25 + sin(i * 1.7) * 15 + sin(i * 0.4) * 18
+		mid_points.append(Vector2(x, horizon_y - peak_h))
+	mid_points.append(Vector2(size.x, horizon_y + 25))
+	draw_polygon(mid_points, [mid_color])
+
+	# Layer 3: Foreground mountains - more detail and contrast
+	var near_color = color.lerp(sky_palette.horizon, 0.15)
+	var near_points = PackedVector2Array()
+	near_points.append(Vector2(0, horizon_y + 20))
+	for i in range(10):
+		var x = size.x * i / 9
+		var peak_h = 25 + sin(i * 1.1 + 2.0) * 20 + sin(i * 2.3) * 12
+		near_points.append(Vector2(x, horizon_y - peak_h))
+	near_points.append(Vector2(size.x, horizon_y + 20))
+	draw_polygon(near_points, [near_color])
+
+func _draw_midground_terrain(horizon_y: float, color: Color):
+	"""Draw closer rolling hills with atmospheric perspective"""
+	var sky_palette = TERRAFORM_SKY_COLORS[_terraforming_stage]
+
+	# Layer 1: Distant hills - hazed
+	var far_hill_color = color.lerp(sky_palette.horizon, 0.5)
+	var far_points = PackedVector2Array()
+	far_points.append(Vector2(0, horizon_y + 70))
+	for i in range(21):
+		var x = size.x * i / 20
+		var hill_h = 18 + sin(i * 0.4) * 14 + sin(i * 1.1) * 8
+		far_points.append(Vector2(x, horizon_y + 20 - hill_h))
+	far_points.append(Vector2(size.x, horizon_y + 70))
+	draw_polygon(far_points, [far_hill_color])
+
+	# Layer 2: Closer hills
+	var points = PackedVector2Array()
+	points.append(Vector2(0, horizon_y + 60))
+	for i in range(16):
+		var x = size.x * i / 15
+		var hill_h = 15 + sin(i * 0.5 + 2.0) * 12 + sin(i * 1.2) * 8
+		points.append(Vector2(x, horizon_y + 10 - hill_h))
+	points.append(Vector2(size.x, horizon_y + 60))
+	draw_polygon(points, [color])
+
+func _draw_ground_plane(horizon_y: float, ground_colors: Dictionary):
+	"""Draw the ground plane that buildings sit on - fades from horizon"""
+	# Foreground terrain fills rest of screen
+	var fg_color = ground_colors.dark
+	draw_rect(Rect2(0, horizon_y + 20, size.x, size.y - horizon_y - 20), fg_color)
+
+	# Subtle gradient bands for depth
+	var num_bands = 6
+	for i in range(num_bands):
+		var t = float(i) / num_bands
+		var band_y = horizon_y + 30 + t * (size.y - horizon_y - 30)
+		var band_h = (size.y - horizon_y - 30) / num_bands
+		var band_color = ground_colors.dark.lerp(ground_colors.light, t * 0.5)
+		draw_rect(Rect2(0, band_y, size.x, band_h), band_color)
 
 func _draw_orbital_elements():
 	"""Draw satellites, space stations, and orbital ring in the sky"""
@@ -402,41 +778,271 @@ func _draw_meteor():
 	draw_circle(pos, 3, Color(1.0, 0.95, 0.8, 1.0 - meteor_t))
 
 # =============================================================================
-# GROUND PLANE (Isometric Diamond)
+# CRATER TERRAIN SYSTEM
 # =============================================================================
 
+# Crater parameters
+const CRATER_RIM_HEIGHT = 25.0      # Height of crater rim above floor (reduced)
+const CRATER_RIM_WIDTH = 40.0       # Width of the rim ring (narrower)
+const CRATER_FLOOR_RADIUS = 160.0   # Radius of flat buildable area (bigger for buildings)
+const CRATER_SEGMENTS = 32          # Smoothness of crater circle
+
+# Terraforming stage (0-4)
+var _terraforming_stage: int = 0
+
+# Terraforming color palettes
+# Golden/warm sky colors inspired by concept art - dramatic sunset atmosphere
+const TERRAFORM_SKY_COLORS = [
+	{"horizon": Color(0.95, 0.72, 0.45), "zenith": Color(0.55, 0.32, 0.22)},  # Stage 0: Golden Mars sunset
+	{"horizon": Color(0.92, 0.75, 0.55), "zenith": Color(0.58, 0.38, 0.28)},  # Stage 1: Warming amber
+	{"horizon": Color(0.95, 0.82, 0.65), "zenith": Color(0.65, 0.48, 0.36)},  # Stage 2: Soft gold
+	{"horizon": Color(0.88, 0.82, 0.78), "zenith": Color(0.55, 0.58, 0.62)},  # Stage 3: Living
+	{"horizon": Color(0.75, 0.85, 0.92), "zenith": Color(0.45, 0.58, 0.72)},  # Stage 4: Breathable blue
+]
+
+const TERRAFORM_GROUND_COLORS = [
+	{"light": Color(0.65, 0.38, 0.25), "dark": Color(0.50, 0.28, 0.18)},  # Stage 0: Warm red rock
+	{"light": Color(0.60, 0.35, 0.26), "dark": Color(0.45, 0.25, 0.18)},  # Stage 1: Rich red
+	{"light": Color(0.52, 0.38, 0.28), "dark": Color(0.40, 0.30, 0.22)},  # Stage 2: Brown earth
+	{"light": Color(0.40, 0.48, 0.32), "dark": Color(0.28, 0.38, 0.22)},  # Stage 3: Green patches
+	{"light": Color(0.35, 0.55, 0.38), "dark": Color(0.25, 0.45, 0.28)},  # Stage 4: Lush green
+]
+
 func _draw_ground():
-	# The ground is a square in world space, which becomes a diamond in isometric
-	# Four corners of the world
-	var nw = _iso_transform(0, 0, 0)              # Top (north-west corner)
-	var ne = _iso_transform(WORLD_SIZE, 0, 0)     # Right (north-east corner)
-	var se = _iso_transform(WORLD_SIZE, WORLD_SIZE, 0)  # Bottom (south-east corner)
-	var sw = _iso_transform(0, WORLD_SIZE, 0)     # Left (south-west corner)
+	"""Draw ground details - the background is handled by _draw_sky()"""
+	# The sky/horizon/ground_plane already draws the base terrain
+	# Here we just add the local details around the colony
 
-	# Main ground fill
-	var ground_poly = PackedVector2Array([nw, ne, se, sw])
-	draw_polygon(ground_poly, [COLOR_GROUND_LIGHT])
+	var ground_colors = TERRAFORM_GROUND_COLORS[_terraforming_stage]
 
-	# Subtle grid for depth perception
-	var grid_step = 50.0
-	var grid_color = COLOR_GROUND_DARK
-	grid_color.a = 0.25
+	if PERSPECTIVE_ENABLED:
+		_draw_ground_perspective(ground_colors)
+	else:
+		_draw_ground_isometric(ground_colors)
 
-	for i in range(int(WORLD_SIZE / grid_step) + 1):
-		var t = i * grid_step
-		# Lines parallel to Y axis (going NE-SW on screen)
-		var line_start = _iso_transform(t, 0, 0)
-		var line_end = _iso_transform(t, WORLD_SIZE, 0)
-		draw_line(line_start, line_end, grid_color, 1.0)
+func _draw_ground_perspective(ground_colors: Dictionary):
+	"""Draw ground for perspective view - subtle depth lines converging to horizon"""
+	# Draw converging perspective lines to create depth
+	var vp = _get_vanishing_point()
+	var line_color = ground_colors.dark
+	line_color.a = 0.1
 
-		# Lines parallel to X axis (going NW-SE on screen)
-		line_start = _iso_transform(0, t, 0)
-		line_end = _iso_transform(WORLD_SIZE, t, 0)
-		draw_line(line_start, line_end, grid_color, 1.0)
+	# Horizontal depth lines (parallel to horizon, getting smaller toward horizon)
+	var num_lines = 8
+	for i in range(num_lines):
+		var depth_t = float(i + 1) / (num_lines + 1)
+		var depth = depth_t * MAX_DEPTH
+		var y = lerp(size.y * FOREGROUND_SCREEN_Y, size.y * HORIZON_SCREEN_Y, pow(depth_t, 1.3))
+		var spread = lerp(size.x * 0.6, size.x * 0.1, depth_t)
+		draw_line(Vector2(vp.x - spread, y), Vector2(vp.x + spread, y), line_color, 1.0)
 
-	# Edge highlight
-	draw_line(nw, ne, COLOR_GROUND_EDGE, 2.0)
-	draw_line(nw, sw, COLOR_GROUND_EDGE, 2.0)
+	# Converging vertical lines
+	var num_vlines = 12
+	for i in range(num_vlines):
+		var t = float(i) / (num_vlines - 1)
+		var bottom_x = size.x * (0.1 + t * 0.8)
+		var top_t = 0.3 + t * 0.4  # Lines converge toward center at horizon
+		var top_x = vp.x + (bottom_x - vp.x) * 0.3
+		draw_line(Vector2(bottom_x, size.y * FOREGROUND_SCREEN_Y),
+			Vector2(top_x, size.y * (HORIZON_SCREEN_Y + 0.05)), line_color, 0.5)
+
+	# Subtle colony highlight area
+	var colony_color = ground_colors.light
+	colony_color.a = 0.15
+	var colony_poly = PackedVector2Array([
+		_perspective_transform(-MAX_LATERAL * 0.4, MIN_DEPTH, 0),
+		_perspective_transform(MAX_LATERAL * 0.4, MIN_DEPTH, 0),
+		_perspective_transform(MAX_LATERAL * 0.3, MAX_DEPTH * 0.6, 0),
+		_perspective_transform(-MAX_LATERAL * 0.3, MAX_DEPTH * 0.6, 0)
+	])
+	draw_polygon(colony_poly, [colony_color])
+
+func _draw_ground_isometric(ground_colors: Dictionary):
+	"""Draw ground for isometric view - original circular colony area"""
+	# Subtle lighter area where colony sits (isometric circle)
+	var colony_area_points = PackedVector2Array()
+	var colony_r = WORLD_SIZE * 0.4
+	for i in range(32):
+		var angle = i * TAU / 32.0
+		var pos = _iso_transform(
+			WORLD_CENTER_X + cos(angle) * colony_r,
+			WORLD_CENTER_Y + sin(angle) * colony_r,
+			0
+		)
+		colony_area_points.append(pos)
+
+	# Subtle highlight for the colony area
+	var colony_ground = ground_colors.light
+	colony_ground.a = 0.3
+	draw_polygon(colony_area_points, [colony_ground])
+
+	# Draw terrain features based on terraforming stage
+	_draw_terrain_features()
+
+	# Draw subtle grid in colony area
+	_draw_floor_grid()
+
+func _draw_floor_grid():
+	"""Draw subtle grid for depth perception (isometric only)"""
+	if PERSPECTIVE_ENABLED:
+		return  # Perspective mode uses different grid in _draw_ground_perspective
+
+	var grid_color = TERRAFORM_GROUND_COLORS[_terraforming_stage].dark
+	grid_color.a = 0.15
+
+	var grid_range = WORLD_SIZE * 0.4
+
+	# Circular grid lines (concentric rings)
+	for ring in range(1, 5):
+		var r = ring * grid_range / 4.0
+		var prev_pos = _iso_transform(WORLD_CENTER_X + r, WORLD_CENTER_Y, 0)
+		for seg in range(1, 25):
+			var angle = seg * TAU / 24.0
+			var pos = _iso_transform(WORLD_CENTER_X + cos(angle) * r, WORLD_CENTER_Y + sin(angle) * r, 0)
+			draw_line(prev_pos, pos, grid_color, 1.0)
+			prev_pos = pos
+
+	# Radial grid lines (spokes from center)
+	for i in range(8):
+		var angle = i * TAU / 8.0
+		var start = _iso_transform(WORLD_CENTER_X, WORLD_CENTER_Y, 0)
+		var end_pos = _iso_transform(
+			WORLD_CENTER_X + cos(angle) * grid_range,
+			WORLD_CENTER_Y + sin(angle) * grid_range,
+			0
+		)
+		draw_line(start, end_pos, grid_color, 1.0)
+
+func _draw_terrain_features():
+	"""Draw stage-specific terrain features"""
+	match _terraforming_stage:
+		0:
+			_draw_dust_patches()
+		1:
+			_draw_dust_patches()
+			_draw_ice_pools()
+		2:
+			_draw_ice_pools()
+			_draw_small_lakes()
+		3:
+			_draw_small_lakes()
+			_draw_vegetation_patches()
+		4:
+			_draw_lakes_and_rivers()
+			_draw_vegetation_patches()
+			_draw_trees()
+
+func _draw_dust_patches():
+	"""Draw dusty patches on crater floor"""
+	for i in range(8):
+		var patch_angle = i * TAU / 8.0 + 0.5
+		var patch_r = 40 + sin(i * 3.1) * 30
+		var patch_x = WORLD_CENTER_X + cos(patch_angle) * patch_r
+		var patch_y = WORLD_CENTER_Y + sin(patch_angle) * patch_r
+		var patch_pos = _iso_transform(patch_x, patch_y, 0.1)
+		var patch_size = 15 + sin(i * 2.7) * 8
+
+		var dust_color = TERRAFORM_GROUND_COLORS[0].dark
+		dust_color.a = 0.3
+		_draw_ellipse(patch_pos, patch_size * _camera_zoom, patch_size * 0.5 * _camera_zoom, dust_color)
+
+func _draw_ice_pools():
+	"""Draw melting ice pools (stage 1-2)"""
+	var ice_color = Color(0.7, 0.85, 0.95, 0.6)
+
+	for i in range(5):
+		var pool_angle = i * TAU / 5.0 + _time * 0.01
+		var pool_r = 60 + sin(i * 2.3) * 25
+		var pool_x = WORLD_CENTER_X + cos(pool_angle) * pool_r
+		var pool_y = WORLD_CENTER_Y + sin(pool_angle) * pool_r
+		var pool_pos = _iso_transform(pool_x, pool_y, 0.2)
+		var pool_size = 12 + sin(i * 1.9) * 6
+
+		_draw_ellipse(pool_pos, pool_size * _camera_zoom, pool_size * 0.5 * _camera_zoom, ice_color)
+
+		# Mist rising
+		var mist_y_offset = sin(_time * 2.0 + i) * 3
+		var mist_pos = pool_pos - Vector2(0, 5 + mist_y_offset) * _camera_zoom
+		draw_circle(mist_pos, 6 * _camera_zoom, Color(0.9, 0.95, 1.0, 0.2))
+
+func _draw_small_lakes():
+	"""Draw small water bodies (stage 2-3)"""
+	var water_color = Color(0.3, 0.5, 0.7, 0.7)
+
+	for i in range(3):
+		var lake_angle = i * TAU / 3.0 + 1.0
+		var lake_r = 70 + sin(i * 1.7) * 20
+		var lake_x = WORLD_CENTER_X + cos(lake_angle) * lake_r
+		var lake_y = WORLD_CENTER_Y + sin(lake_angle) * lake_r
+		var lake_pos = _iso_transform(lake_x, lake_y, -0.5)
+		var lake_size = 20 + sin(i * 2.1) * 8
+
+		_draw_ellipse(lake_pos, lake_size * _camera_zoom, lake_size * 0.5 * _camera_zoom, water_color)
+
+		# Water shimmer
+		var shimmer = 0.3 + sin(_time * 1.5 + i * 2) * 0.2
+		draw_circle(lake_pos + Vector2(-3, -2) * _camera_zoom, 4 * _camera_zoom, Color(0.8, 0.9, 1.0, shimmer))
+
+func _draw_lakes_and_rivers():
+	"""Draw larger water features (stage 4)"""
+	var water_color = Color(0.2, 0.45, 0.65, 0.8)
+
+	# Central lake
+	var lake_pos = _iso_transform(WORLD_CENTER_X - 50, WORLD_CENTER_Y + 40, -1)
+	_draw_ellipse(lake_pos, 35 * _camera_zoom, 20 * _camera_zoom, water_color)
+
+	# River channel
+	var river_color = Color(0.25, 0.5, 0.7, 0.6)
+	var river_start = _iso_transform(WORLD_CENTER_X - 80, WORLD_CENTER_Y - 60, -0.5)
+	var river_mid = _iso_transform(WORLD_CENTER_X - 50, WORLD_CENTER_Y + 40, -0.5)
+	var river_end = _iso_transform(WORLD_CENTER_X + 30, WORLD_CENTER_Y + 80, -0.5)
+
+	draw_line(river_start, river_mid, river_color, 8 * _camera_zoom)
+	draw_line(river_mid, river_end, river_color, 6 * _camera_zoom)
+
+func _draw_vegetation_patches():
+	"""Draw green vegetation (stage 3-4)"""
+	var green_light = Color(0.3, 0.6, 0.3, 0.7)
+	var green_dark = Color(0.2, 0.45, 0.2, 0.6)
+
+	var num_patches = 6 if _terraforming_stage == 3 else 12
+
+	for i in range(num_patches):
+		var patch_angle = i * TAU / num_patches + 0.3
+		var patch_r = 50 + sin(i * 2.9) * 35
+		var patch_x = WORLD_CENTER_X + cos(patch_angle) * patch_r
+		var patch_y = WORLD_CENTER_Y + sin(patch_angle) * patch_r
+		var patch_pos = _iso_transform(patch_x, patch_y, 0.3)
+		var patch_size = 18 + sin(i * 1.7) * 10
+
+		var patch_color = green_light if i % 2 == 0 else green_dark
+		_draw_ellipse(patch_pos, patch_size * _camera_zoom, patch_size * 0.5 * _camera_zoom, patch_color)
+
+func _draw_trees():
+	"""Draw trees (stage 4 only)"""
+	var trunk_color = Color(0.4, 0.3, 0.2)
+	var leaf_color = Color(0.2, 0.5, 0.25)
+
+	for i in range(8):
+		var tree_angle = i * TAU / 8.0 + 0.7
+		var tree_r = 65 + sin(i * 3.3) * 25
+		var tree_x = WORLD_CENTER_X + cos(tree_angle) * tree_r
+		var tree_y = WORLD_CENTER_Y + sin(tree_angle) * tree_r
+
+		var tree_height = 8 + sin(i * 2.1) * 4
+
+		# Trunk
+		var trunk_base = _iso_transform(tree_x, tree_y, 0)
+		var trunk_top = _iso_transform(tree_x, tree_y, tree_height)
+		draw_line(trunk_base, trunk_top, trunk_color, 2 * _camera_zoom)
+
+		# Canopy
+		var canopy_pos = _iso_transform(tree_x, tree_y, tree_height + 3)
+		draw_circle(canopy_pos, (6 + sin(i) * 2) * _camera_zoom, leaf_color)
+
+# Public API for terraforming
+func set_terraforming_stage(stage: int):
+	_terraforming_stage = clampi(stage, 0, 4)
 
 # =============================================================================
 # OBJECT COLLECTION
@@ -446,6 +1052,98 @@ func _collect_all_objects() -> Array:
 	var objects = []
 	var tier_mult = TIER_MULTIPLIERS.get(_colony_tier, 1.0)
 
+	if PERSPECTIVE_ENABLED:
+		return _collect_all_objects_perspective(tier_mult)
+	else:
+		return _collect_all_objects_isometric(tier_mult)
+
+func _collect_all_objects_perspective(tier_mult: float) -> Array:
+	"""Collect objects for perspective rendering"""
+	var objects = []
+
+	# Lifepod in center-front
+	var lp_height = 15.0 * tier_mult
+	var lp_depth = MIN_DEPTH * 0.8  # Slightly in front of closest buildings
+	objects.append({
+		"type": "lifepod",
+		"lateral": 0.0,
+		"world_depth": lp_depth,
+		"height": lp_height,
+		"depth": _get_depth_perspective(lp_depth, lp_height),
+		"depth_ratio": lp_depth / MAX_DEPTH,
+		"is_perspective": true
+	})
+
+	# Buildings
+	for building in _buildings:
+		var bid = building.get("id", "")
+		if not _building_layout.has(bid):
+			continue
+
+		var layout = _building_layout[bid]
+		var lateral = layout.get("lateral", layout.world_x)
+		var world_depth = layout.get("depth", layout.world_y)
+		var bh = layout.height
+		var depth_ratio = layout.get("depth_ratio", world_depth / MAX_DEPTH)
+
+		# Shadow (on ground, behind building)
+		objects.append({
+			"type": "shadow",
+			"lateral": lateral + bh * 0.15,  # Shadow offset right
+			"world_depth": world_depth,
+			"height": bh,
+			"depth": _get_depth_perspective(world_depth, 0) + 0.001,
+			"depth_ratio": depth_ratio,
+			"is_perspective": true
+		})
+
+		# Building
+		objects.append({
+			"type": "building",
+			"lateral": lateral,
+			"world_depth": world_depth,
+			"height": bh,
+			"building": building,
+			"category": layout.category,
+			"depth": _get_depth_perspective(world_depth, bh),
+			"depth_ratio": depth_ratio,
+			"is_perspective": true
+		})
+
+	# Colonists - position relative to their buildings
+	for colonist in _colonists:
+		if not colonist.get("is_alive", true):
+			continue
+		var cpos = _get_colonist_perspective_pos(colonist)
+		objects.append({
+			"type": "colonist",
+			"lateral": cpos.x,
+			"world_depth": cpos.y,
+			"depth": _get_depth_perspective(cpos.y, 2),
+			"depth_ratio": cpos.y / MAX_DEPTH,
+			"is_perspective": true
+		})
+
+	# Worker drones - autonomous robots traveling between buildings
+	var num_drones = mini(_buildings.size() * 2, 40)  # 2 drones per building, max 40
+	for drone_id in range(num_drones):
+		var dpos = _get_drone_perspective_pos(drone_id)
+		objects.append({
+			"type": "drone",
+			"lateral": dpos.x,
+			"world_depth": dpos.y,
+			"depth": _get_depth_perspective(dpos.y, 1),
+			"depth_ratio": dpos.y / MAX_DEPTH,
+			"drone_id": drone_id,
+			"is_perspective": true
+		})
+
+	return objects
+
+func _collect_all_objects_isometric(tier_mult: float) -> Array:
+	"""Collect objects for isometric rendering (original)"""
+	var objects = []
+
 	# Lifepod at center
 	var lp_height = 15.0 * tier_mult
 	objects.append({
@@ -453,7 +1151,8 @@ func _collect_all_objects() -> Array:
 		"x": WORLD_CENTER_X,
 		"y": WORLD_CENTER_Y,
 		"height": lp_height,
-		"depth": _get_depth(WORLD_CENTER_X, WORLD_CENTER_Y, lp_height)
+		"depth": _get_depth(WORLD_CENTER_X, WORLD_CENTER_Y, lp_height),
+		"is_perspective": false
 	})
 
 	# Buildings
@@ -475,7 +1174,8 @@ func _collect_all_objects() -> Array:
 			"to_x": bx,
 			"to_y": by,
 			"is_operational": building.get("is_operational", false),
-			"depth": _get_depth(bx, by, -5)  # Underground = very far back
+			"depth": _get_depth(bx, by, -5),
+			"is_perspective": false
 		})
 
 		# Shadow (on ground)
@@ -484,7 +1184,8 @@ func _collect_all_objects() -> Array:
 			"x": bx,
 			"y": by,
 			"height": bh,
-			"depth": _get_depth(bx, by, 0) + 0.001
+			"depth": _get_depth(bx, by, 0) + 0.001,
+			"is_perspective": false
 		})
 
 		# Building
@@ -495,7 +1196,8 @@ func _collect_all_objects() -> Array:
 			"height": bh,
 			"building": building,
 			"category": layout.category,
-			"depth": _get_depth(bx, by, bh)
+			"depth": _get_depth(bx, by, bh),
+			"is_perspective": false
 		})
 
 	# Colonists
@@ -507,10 +1209,103 @@ func _collect_all_objects() -> Array:
 			"type": "colonist",
 			"x": cpos.x,
 			"y": cpos.y,
-			"depth": _get_depth(cpos.x, cpos.y, 2)
+			"depth": _get_depth(cpos.x, cpos.y, 2),
+			"is_perspective": false
 		})
 
 	return objects
+
+func _get_drone_perspective_pos(drone_id: int) -> Vector2:
+	"""Get drone position - fast workers zipping between buildings"""
+	var seed_val = float(hash(str(drone_id))) * 0.0001
+
+	if _building_layout.size() < 2:
+		# No buildings, hover near lifepod
+		var hover_x = sin(_time * 2.0 + seed_val * 20.0) * 20.0
+		var hover_y = MIN_DEPTH * 0.5 + cos(_time * 1.5 + seed_val * 15.0) * 5.0
+		return Vector2(hover_x, hover_y)
+
+	# Drones travel between two buildings
+	var building_keys = _building_layout.keys()
+	var from_idx = drone_id % building_keys.size()
+	var to_idx = (drone_id * 7 + 3) % building_keys.size()  # Different destination
+
+	var from_layout = _building_layout[building_keys[from_idx]]
+	var to_layout = _building_layout[building_keys[to_idx]]
+
+	var from_pos = Vector2(from_layout.get("lateral", 0.0), from_layout.get("depth", MIN_DEPTH))
+	var to_pos = Vector2(to_layout.get("lateral", 0.0), to_layout.get("depth", MIN_DEPTH))
+
+	# Speed scales SMOOTHLY with game speed - always some movement
+	# _time_scale is ~14 at slider=1, ~70 at slider=5, ~140 at slider=10
+	var speed_scale = clampf(_time_scale / 100.0, 0.1, 1.5)  # Always moving, faster at higher speeds
+	var base_speed = 0.25 + seed_val * 0.15
+	var phase = fmod(_time * base_speed * speed_scale + seed_val * 10.0, 2.0)
+
+	var t: float
+	if phase < 1.0:
+		t = phase
+	else:
+		t = 2.0 - phase
+
+	# Linear movement (drones don't need smooth easing, they're robots)
+	var pos = from_pos.lerp(to_pos, t)
+
+	# Hover wobble also slows at low speed
+	var wobble = sin(_time * 6.0 * speed_scale + seed_val * 30.0) * 0.5
+	return Vector2(pos.x + wobble, clampf(pos.y, MIN_DEPTH * 0.2, MAX_DEPTH * 0.95))
+
+func _get_colonist_perspective_pos(colonist: Dictionary) -> Vector2:
+	"""Get colonist position - travels between lifepod and buildings"""
+	var colonist_id = colonist.get("id", 0)
+	var seed_val = float(hash(str(colonist_id))) * 0.0001
+
+	# Lifepod position (home base)
+	var home = Vector2(0.0, MIN_DEPTH * 0.6)
+
+	# Find a destination building for this colonist
+	var dest = home
+	var assigned_building = colonist.get("assigned_building", "")
+
+	if assigned_building != "" and _building_layout.has(assigned_building):
+		# Go to assigned building
+		var layout = _building_layout[assigned_building]
+		dest = Vector2(layout.get("lateral", 0.0), layout.get("depth", MIN_DEPTH))
+	elif _building_layout.size() > 0:
+		# Pick a building to visit based on colonist ID and time
+		# Visit cycle scales smoothly with game speed
+		var visit_speed_scale = clampf(_time_scale / 100.0, 0.1, 1.5)
+		var building_keys = _building_layout.keys()
+		var visit_cycle = fmod(_time * 0.02 * visit_speed_scale + seed_val * 10.0, float(building_keys.size()))
+		var target_idx = int(visit_cycle) % building_keys.size()
+		var target_key = building_keys[target_idx]
+		var layout = _building_layout[target_key]
+		dest = Vector2(layout.get("lateral", 0.0), layout.get("depth", MIN_DEPTH))
+
+	# Animate walking between home and destination
+	# Speed scales smoothly with game speed
+	var speed_scale = clampf(_time_scale / 100.0, 0.1, 1.5)
+	var walk_speed = 0.08 + seed_val * 0.04  # Varied walking speeds
+	var walk_phase = fmod(_time * walk_speed * speed_scale + seed_val * 5.0, 2.0)
+
+	# 0-1: walk to destination, 1-2: walk back home
+	var t: float
+	if walk_phase < 1.0:
+		t = walk_phase  # Going to building
+	else:
+		t = 2.0 - walk_phase  # Coming back
+
+	# Smooth easing for natural movement
+	t = t * t * (3.0 - 2.0 * t)  # Smoothstep
+
+	# Interpolate position
+	var pos = home.lerp(dest, t)
+
+	# Walking wobble also slows at low speed
+	var wobble_x = sin(_time * 3.0 * speed_scale + seed_val * 10.0) * 1.0
+	var wobble_y = cos(_time * 3.0 * speed_scale + seed_val * 10.0) * 0.3
+
+	return Vector2(pos.x + wobble_x, clampf(pos.y + wobble_y, MIN_DEPTH * 0.3, MAX_DEPTH * 0.95))
 
 # =============================================================================
 # DRAWING FUNCTIONS
@@ -528,22 +1323,32 @@ func _draw_tunnel_obj(obj: Dictionary):
 		draw_line(from_screen, to_screen, COLOR_TUNNEL_GLOW, 2.0 * _camera_zoom)
 
 func _draw_shadow_obj(obj: Dictionary):
-	# Shadow is an ellipse on the ground, offset by height
-	var shadow_offset_x = obj.height * 0.2
-	var shadow_offset_y = obj.height * 0.1
-	var shadow_center = _iso_transform(obj.x + shadow_offset_x, obj.y + shadow_offset_y, 0)
+	var shadow_center: Vector2
+	var shadow_rx: float
+	var shadow_ry: float
 
-	var shadow_rx = (BUILDING_RADIUS + obj.height * 0.15) * _camera_zoom
-	var shadow_ry = shadow_rx * 0.5  # Isometric compression
+	if obj.get("is_perspective", false):
+		# Perspective shadow
+		var lateral = obj.get("lateral", 0.0)
+		var world_depth = obj.get("world_depth", MIN_DEPTH)
+		shadow_center = _perspective_transform(lateral, world_depth, 0)
+		var scale = _get_perspective_scale(world_depth)
+		shadow_rx = (BUILDING_RADIUS + obj.height * 0.1) * scale / PERSPECTIVE_BASE_SCALE * _camera_zoom * 1.5
+		shadow_ry = shadow_rx * 0.4  # Flatter in perspective
+	else:
+		# Isometric shadow
+		var shadow_offset_x = obj.height * 0.2
+		var shadow_offset_y = obj.height * 0.1
+		shadow_center = _iso_transform(obj.x + shadow_offset_x, obj.y + shadow_offset_y, 0)
+		shadow_rx = (BUILDING_RADIUS + obj.height * 0.15) * _camera_zoom
+		shadow_ry = shadow_rx * 0.5
 
 	_draw_ellipse(shadow_center, shadow_rx, shadow_ry, COLOR_SHADOW)
 
 func _draw_building_obj(obj: Dictionary):
-	var bx = obj.x
-	var by = obj.y
-	var height = obj.height
 	var building = obj.building
 	var category = obj.category
+	var height = obj.height
 	var building_type = building.get("type", 0)
 
 	var colors = BUILDING_COLORS.get(category, BUILDING_COLORS["housing"])
@@ -569,8 +1374,17 @@ func _draw_building_obj(obj: Dictionary):
 		left_color.a = alpha
 		right_color.a = alpha
 
-	# Draw based on building shape type
 	var shape = _get_building_shape(building_type)
+
+	# Perspective mode: use simplified building shapes
+	if obj.get("is_perspective", false):
+		_draw_building_perspective(obj, shape, draw_height, top_color, left_color, right_color, is_operational, progress)
+		return
+
+	# Isometric mode: use original detailed shapes
+	var bx = obj.x
+	var by = obj.y
+
 	match shape:
 		BuildingShape.TOWER:
 			_draw_tower(bx, by, BUILDING_RADIUS * 1.8, draw_height, top_color)
@@ -592,11 +1406,17 @@ func _draw_building_obj(obj: Dictionary):
 			_draw_comms_tower(bx, by, draw_height * 1.5)
 		BuildingShape.SPACE_ELEVATOR:
 			_draw_space_elevator(bx, by, draw_height * 3.0)
+		BuildingShape.MASS_DRIVER:
+			_draw_mass_driver(bx, by, BUILDING_RADIUS * 3.0)
+		BuildingShape.FUSION_REACTOR:
+			_draw_fusion_reactor(bx, by, draw_height * 1.5)
 		_:  # HEX_PRISM (default)
 			_draw_hex_prism(bx, by, BUILDING_RADIUS, draw_height, top_color, left_color, right_color)
 
-	# Status light on top (skip for solar arrays - they're flat)
-	if progress >= 1.0 and shape != BuildingShape.SOLAR_ARRAY:
+	# Status light on top (skip for solar arrays and megastructures - they have their own visuals)
+	var skip_status_light = shape in [BuildingShape.SOLAR_ARRAY, BuildingShape.MASS_DRIVER,
+		BuildingShape.FUSION_REACTOR, BuildingShape.SPACE_ELEVATOR]
+	if progress >= 1.0 and not skip_status_light:
 		var light_z = draw_height + 3
 		if shape == BuildingShape.DOME:
 			light_z = 4.0 + draw_height * 0.7 + 3  # Dome has base + dome height
@@ -608,16 +1428,929 @@ func _draw_building_obj(obj: Dictionary):
 			light_color.a = 0.2
 		draw_circle(light_pos, 3.0 * _camera_zoom, light_color)
 
-	# Label
-	var label = _get_building_label(building_type)
-	var label_z = draw_height + 1
-	if shape == BuildingShape.DOME:
-		label_z = 4.0 + draw_height * 0.7 + 1
-	var label_pos = _iso_transform(bx, by, label_z)
-	draw_string(ThemeDB.fallback_font, label_pos - Vector2(4, -2) * _camera_zoom, label,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, int(9 * _camera_zoom), Color.WHITE)
+func _draw_building_perspective(obj: Dictionary, shape: BuildingShape, draw_height: float,
+		top_color: Color, left_color: Color, right_color: Color,
+		is_operational: bool, progress: float):
+	"""Draw a building in perspective view - atmospheric haze for distant buildings"""
+	var lateral = obj.get("lateral", 0.0)
+	var world_depth = obj.get("world_depth", MIN_DEPTH)
+	var depth_ratio = obj.get("depth_ratio", 0.0)
+
+	# Get building tier (1-5) for visual upgrades
+	var building = obj.get("building", {})
+	var tier = clampi(building.get("tier", 1), 1, 5)
+	var building_type = building.get("type", 0)
+
+	# Get perspective scale for this depth
+	var scale = _get_perspective_scale(world_depth)
+	var scale_mult = scale / PERSPECTIVE_BASE_SCALE
+
+	# Atmospheric haze - golden dusty Mars atmosphere
+	# Distant buildings blend toward warm horizon color
+	var haze_factor = clampf(depth_ratio * 1.3, 0.0, 0.85)
+	var sky_palette = TERRAFORM_SKY_COLORS[_terraforming_stage]
+	var haze_color = sky_palette.horizon.lerp(Color(0.4, 0.25, 0.18), 0.4)  # Dusty gold
+
+	# Silhouette for very distant buildings (dark against bright sky)
+	var silhouette_factor = clampf((depth_ratio - 0.5) * 2.0, 0.0, 0.7)
+	var silhouette_color = Color(0.22, 0.18, 0.15)
+
+	# Apply atmospheric effects
+	# Near: original colors, Mid: hazed, Far: silhouette
+	top_color = top_color.lerp(haze_color, haze_factor * 0.6)
+	top_color = top_color.lerp(silhouette_color, silhouette_factor)
+	left_color = left_color.lerp(haze_color, haze_factor * 0.7)
+	left_color = left_color.lerp(silhouette_color, silhouette_factor * 1.1)
+	right_color = right_color.lerp(haze_color, haze_factor * 0.5)
+	right_color = right_color.lerp(silhouette_color, silhouette_factor * 0.9)
+
+	# Base and top positions
+	var base_pos = _perspective_transform(lateral, world_depth, 0)
+	var top_pos = _perspective_transform(lateral, world_depth, draw_height)
+
+	# Width scales with perspective
+	var base_width = BUILDING_RADIUS * scale_mult * _camera_zoom * 2.0
+
+	# Draw different shapes based on building type - now with tier support!
+	match shape:
+		BuildingShape.TOWER, BuildingShape.ARCOLOGY:
+			_draw_perspective_tower(base_pos, top_pos, base_width, draw_height, scale_mult,
+				top_color, left_color, right_color, depth_ratio, tier)
+		BuildingShape.DOME, BuildingShape.GREENHOUSE:
+			_draw_perspective_dome(base_pos, base_width, draw_height * 0.7, scale_mult,
+				top_color, depth_ratio, tier, building_type)
+		BuildingShape.SOLAR_ARRAY:
+			_draw_perspective_solar(base_pos, base_width * 1.5, scale_mult, depth_ratio, tier)
+		BuildingShape.REACTOR, BuildingShape.FUSION_REACTOR:
+			_draw_perspective_reactor(base_pos, base_width, draw_height, scale_mult,
+				top_color, depth_ratio, tier)
+		BuildingShape.SPACE_ELEVATOR:
+			_draw_perspective_elevator(base_pos, draw_height * 3.0, scale_mult, depth_ratio, tier)
+		BuildingShape.TERRAFORMING_TOWER, BuildingShape.COMMS_TOWER:
+			_draw_perspective_spire(base_pos, draw_height, scale_mult, top_color, depth_ratio, tier)
+		BuildingShape.MASS_DRIVER:
+			_draw_perspective_mass_driver(base_pos, base_width * 2.0, scale_mult, depth_ratio, tier)
+		_:  # HEX_PRISM, LANDING_PAD, etc
+			_draw_perspective_block(base_pos, top_pos, base_width, draw_height, scale_mult,
+				top_color, left_color, right_color, tier)
+
+	# Status light (skip for very distant buildings)
+	if progress >= 1.0 and depth_ratio < 0.6:
+		var light_pos = _perspective_transform(lateral, world_depth, draw_height + 2)
+		var light_color = Color.GREEN if is_operational else Color.RED
+		if not is_operational and fmod(_time, 0.8) < 0.4:
+			light_color.a = 0.2
+		var light_size = maxf(2.0, 3.0 * scale_mult) * _camera_zoom
+		draw_circle(light_pos, light_size, light_color)
+
+# =============================================================================
+# PERSPECTIVE BUILDING SHAPES
+# =============================================================================
+
+func _draw_perspective_block(base_pos: Vector2, top_pos: Vector2, width: float,
+		height: float, scale: float, top_c: Color, left_c: Color, right_c: Color, tier: int = 1):
+	"""
+	Generic building block (used for workshops, storage, medical, etc.)
+	Tier affects: size, detail level, window count, structural complexity
+	"""
+	# Size grows with tier
+	var hw = width * (0.45 + tier * 0.02)
+
+	# Warm metallic tint for sci-fi look
+	var warm_tint = Color(1.0, 0.95, 0.88)
+	var main_color = left_c.lerp(warm_tint, 0.15)
+	var light_color = right_c.lerp(warm_tint, 0.25)
+	var shadow_color = left_c.darkened(0.15)
+
+	# Left face (shadow side)
+	var left_poly = PackedVector2Array([
+		base_pos + Vector2(-hw, 0),
+		base_pos + Vector2(0, 0),
+		top_pos + Vector2(0, 0),
+		top_pos + Vector2(-hw * 0.9, 0)
+	])
+	draw_polygon(left_poly, [shadow_color])
+
+	# Right face (lit side - golden light)
+	var right_poly = PackedVector2Array([
+		base_pos + Vector2(0, 0),
+		base_pos + Vector2(hw, 0),
+		top_pos + Vector2(hw * 0.9, 0),
+		top_pos + Vector2(0, 0)
+	])
+	draw_polygon(right_poly, [light_color])
+
+	# Top face
+	var depth_offset = height * 0.15 * scale
+	var top_poly = PackedVector2Array([
+		top_pos + Vector2(-hw * 0.9, 0),
+		top_pos + Vector2(hw * 0.9, 0),
+		top_pos + Vector2(hw * 0.8, -depth_offset),
+		top_pos + Vector2(-hw * 0.8, -depth_offset)
+	])
+	draw_polygon(top_poly, [top_c.lerp(warm_tint, 0.2)])
+
+	# Golden edge highlights (warm rim lighting)
+	var highlight = Color(1.0, 0.92, 0.75, 0.4 + tier * 0.05)
+	draw_line(top_pos + Vector2(-hw * 0.9, 0), top_pos + Vector2(hw * 0.9, 0),
+		highlight, 2.0 * _camera_zoom)
+	draw_line(base_pos + Vector2(hw, 0), top_pos + Vector2(hw * 0.9, 0),
+		highlight, 1.5 * _camera_zoom)
+
+	# Structural bands (more at higher tiers)
+	if tier >= 2 and scale > 0.3:
+		var band_color = shadow_color.darkened(0.1)
+		var num_bands = tier - 1
+		for b in range(num_bands):
+			var t = float(b + 1) / (num_bands + 1)
+			var band_y = lerp(base_pos.y, top_pos.y, t)
+			var band_hw = lerp(hw, hw * 0.9, t)
+			draw_line(Vector2(base_pos.x - band_hw, band_y),
+				Vector2(base_pos.x + band_hw, band_y), band_color, 1.5 * _camera_zoom)
+
+	# Window strips (warm interior glow) - more at higher tiers
+	var min_height_for_windows = 15.0 - tier * 2  # Lower threshold at higher tiers
+	if height > min_height_for_windows and scale > 0.3:
+		var window_glow = Color(1.0, 0.9, 0.65, 0.6 + tier * 0.05)
+		var num_floors = int(clampf(height / (12.0 - tier), 1, 4 + tier))
+		for i in range(num_floors):
+			var t = float(i + 0.5) / num_floors
+			var floor_y = lerp(base_pos.y - 5, top_pos.y + 5, t)
+			var floor_hw = lerp(hw * 0.85, hw * 0.75, t)
+			var window_h = maxf(2.0, (2.0 + tier * 0.5) * scale) * _camera_zoom
+			draw_rect(Rect2(base_pos.x - floor_hw * 0.6, floor_y - window_h/2,
+				floor_hw * 1.2, window_h), window_glow)
+
+	# Roof equipment (tier 3+) - antenna, vents, etc.
+	if tier >= 3:
+		var equipment_color = shadow_color.lightened(0.1)
+		# Small antenna
+		var antenna_height = 8.0 * scale * _camera_zoom
+		draw_line(top_pos + Vector2(hw * 0.3, -depth_offset),
+			top_pos + Vector2(hw * 0.3, -depth_offset - antenna_height),
+			equipment_color, 1.5 * _camera_zoom)
+		# Vent box
+		if tier >= 4:
+			draw_rect(Rect2(top_pos.x - hw * 0.4, top_pos.y - depth_offset - 5 * scale * _camera_zoom,
+				hw * 0.3, 5 * scale * _camera_zoom), equipment_color)
+
+func _draw_perspective_tower(base_pos: Vector2, top_pos: Vector2, width: float,
+		height: float, scale: float, top_c: Color, left_c: Color, right_c: Color,
+		depth_ratio: float, tier: int = 1):
+	"""
+	Tiered apartment/tower progression:
+	Tier 1: Low crew quarters (2 floors)
+	Tier 2: Apartment unit (3 floors)
+	Tier 3: Apartment block (5 floors, balconies)
+	Tier 4: High-rise (8 floors, balconies)
+	Tier 5: Sky apartments (12 floors, luxury balconies)
+	"""
+	var upgrade_data = UPGRADE_PATHS.get("apartment_block", {}).get(tier, {})
+	var num_floors = upgrade_data.get("floors", 2)
+	var has_balconies = upgrade_data.get("balconies", false)
+
+	var hw = width * (0.4 + tier * 0.02)  # Slightly wider at higher tiers
+
+	# Tower colors - metallic silver/white like concept art
+	var tower_base = Color(0.75, 0.72, 0.68)  # Warm metallic
+	var tower_light = Color(0.85, 0.82, 0.78)
+	var tower_dark = Color(0.55, 0.52, 0.48)
+
+	# Main tower body - tapered elegantly
+	var tower_poly = PackedVector2Array([
+		base_pos + Vector2(-hw, 0),
+		base_pos + Vector2(hw, 0),
+		top_pos + Vector2(hw * 0.6, 0),
+		top_pos + Vector2(-hw * 0.6, 0)
+	])
+	draw_polygon(tower_poly, [tower_base])
+
+	# Right face (lit side) - warm golden light
+	var right_poly = PackedVector2Array([
+		base_pos + Vector2(hw, 0),
+		base_pos + Vector2(hw * 0.3, 0),
+		top_pos + Vector2(hw * 0.2, 0),
+		top_pos + Vector2(hw * 0.6, 0)
+	])
+	draw_polygon(right_poly, [tower_light])
+
+	# Glowing windows (warm interior light) - number based on tier
+	if depth_ratio < 0.55:
+		var window_glow = Color(1.0, 0.9, 0.6, 0.9)  # Warm golden light
+		var window_bright = Color(1.0, 0.95, 0.8)
+		for i in range(num_floors):
+			var t = float(i + 0.5) / num_floors
+			var floor_y = lerp(base_pos.y - 5, top_pos.y + 5, t)
+			var floor_hw = lerp(hw * 0.9, hw * 0.5, t)
+			var window_w = maxf(3.0, 6.0 * scale) * _camera_zoom
+			var window_h = maxf(2.0, 4.0 * scale) * _camera_zoom
+
+			# Window strip across floor
+			draw_rect(Rect2(base_pos.x - floor_hw * 0.7, floor_y - window_h/2,
+				floor_hw * 1.4, window_h), window_glow)
+			# Bright center
+			draw_rect(Rect2(base_pos.x - floor_hw * 0.3, floor_y - window_h/2,
+				floor_hw * 0.6, window_h), window_bright)
+
+			# Balconies (tier 3+)
+			if has_balconies and i % 2 == 0 and depth_ratio < 0.4:
+				var balcony_color = Color(0.5, 0.55, 0.6)
+				var balcony_w = floor_hw * 0.3
+				var balcony_h = 3.0 * scale * _camera_zoom
+				# Left balcony
+				draw_rect(Rect2(base_pos.x - floor_hw - balcony_w, floor_y - balcony_h/2,
+					balcony_w, balcony_h), balcony_color)
+				# Right balcony
+				draw_rect(Rect2(base_pos.x + floor_hw, floor_y - balcony_h/2,
+					balcony_w, balcony_h), balcony_color)
+
+	# Spire on top - elegant antenna (taller at higher tiers)
+	var spire_height = (10.0 + tier * 3.0) * scale * _camera_zoom
+	var spire_top = top_pos + Vector2(0, -spire_height)
+	draw_line(top_pos, spire_top, tower_light, 2.0 * _camera_zoom)
+
+	# Beacon light at top (pulsing)
+	var beacon_pulse = sin(_time * 3.0) * 0.3 + 0.7
+	draw_circle(spire_top, 4.0 * scale * _camera_zoom * beacon_pulse, Color(1.0, 0.3, 0.2, beacon_pulse))
+	draw_circle(spire_top, 2.0 * scale * _camera_zoom, Color(1.0, 0.5, 0.3))
+
+	# Rim lighting on edges
+	draw_line(base_pos + Vector2(-hw, 0), top_pos + Vector2(-hw * 0.6, 0),
+		Color(1.0, 0.9, 0.7, 0.3), 1.5 * _camera_zoom)
+	draw_line(base_pos + Vector2(hw, 0), top_pos + Vector2(hw * 0.6, 0),
+		Color(1.0, 0.95, 0.8, 0.4), 2.0 * _camera_zoom)
+
+func _draw_perspective_dome(base_pos: Vector2, width: float, height: float,
+		scale: float, color: Color, depth_ratio: float, tier: int = 1, building_type: int = 0):
+	"""
+	Tiered dome progression (for hab pods and greenhouses):
+	Hab pods: Tier 1=bunker, Tier 2=dome, Tier 3+=multi-dome
+	Greenhouses: Tier 1=tent, Tier 2=small dome, Tier 3+=vertical farm sections
+	"""
+	# Determine which upgrade path to use based on building type
+	var upgrade_key = "hab_pod"
+	if building_type == _MCSTypes.BuildingType.GREENHOUSE or building_type == _MCSTypes.BuildingType.HYDROPONICS:
+		upgrade_key = "greenhouse"
+	var upgrade_data = UPGRADE_PATHS.get(upgrade_key, {}).get(tier, {})
+
+	# Size grows with tier
+	var size_mult = upgrade_data.get("height_mult", 1.0) if upgrade_key == "hab_pod" else 1.0
+	var radius = width * 0.6 * (0.8 + tier * 0.1)
+	var dome_height = height * scale * _camera_zoom * 2.5 * size_mult
+
+	# For greenhouses: more sections = more domes side by side
+	var num_sections = upgrade_data.get("sections", 1) if upgrade_key == "greenhouse" else 1
+	var num_domes = upgrade_data.get("domes", 1) if upgrade_key == "hab_pod" else 1
+	var has_crops = upgrade_data.get("crops_visible", false)
+	var glass_opacity = upgrade_data.get("opacity", 0.4)
+	var num_windows = upgrade_data.get("windows", 0)
+
+	# Glass tint - semi-transparent with warm reflection
+	var glass_color = Color(0.85, 0.9, 0.95, glass_opacity)
+	var frame_color = Color(0.6, 0.55, 0.5)  # Metallic bronze frame
+	var interior_green = Color(0.2, 0.5, 0.25, 0.6)  # Visible greenery inside
+	var highlight_color = Color(1.0, 0.95, 0.85, 0.3)  # Warm rim light
+
+	# Calculate dome positions for multi-dome configurations
+	var dome_positions: Array = []
+	if upgrade_key == "greenhouse" and num_sections > 1:
+		# Greenhouses: side-by-side sections
+		for s in range(num_sections):
+			var offset_x = (s - (num_sections - 1) / 2.0) * radius * 1.4
+			dome_positions.append(base_pos + Vector2(offset_x, 0))
+	elif upgrade_key == "hab_pod" and num_domes > 1:
+		# Hab pods: clustered domes
+		dome_positions.append(base_pos)  # Central dome
+		if num_domes >= 2:
+			dome_positions.append(base_pos + Vector2(-radius * 0.9, 3))  # Left
+		if num_domes >= 3:
+			dome_positions.append(base_pos + Vector2(radius * 0.9, 3))   # Right
+	else:
+		dome_positions.append(base_pos)
+
+	# Draw each dome
+	for dome_idx in range(dome_positions.size()):
+		var dome_pos = dome_positions[dome_idx]
+		var this_radius = radius * (1.0 if dome_idx == 0 else 0.7)
+		var this_height = dome_height * (1.0 if dome_idx == 0 else 0.6)
+
+		var segments = 12 if depth_ratio < 0.5 else 8
+		var points = PackedVector2Array()
+
+		for i in range(segments + 1):
+			var angle = PI * float(i) / segments
+			var x = dome_pos.x + cos(angle) * this_radius
+			var y = dome_pos.y - sin(angle) * this_height
+			points.append(Vector2(x, y))
+
+		points.append(dome_pos + Vector2(this_radius, 0))
+		points.append(dome_pos + Vector2(-this_radius, 0))
+
+		# Interior greenery (for greenhouses with visible crops)
+		if has_crops or upgrade_key == "greenhouse":
+			var green_points = PackedVector2Array()
+			for i in range(segments + 1):
+				var angle = PI * float(i) / segments
+				var x = dome_pos.x + cos(angle) * this_radius * 0.85
+				var y = dome_pos.y - sin(angle) * this_height * 0.7
+				green_points.append(Vector2(x, y))
+			green_points.append(dome_pos + Vector2(this_radius * 0.85, 0))
+			green_points.append(dome_pos + Vector2(-this_radius * 0.85, 0))
+			# More vibrant green at higher tiers
+			var green_intensity = 0.4 + tier * 0.1
+			draw_polygon(green_points, [Color(0.2, green_intensity, 0.25, 0.6)])
+
+		# Glass dome (semi-transparent)
+		draw_polygon(points, [glass_color])
+
+		# Geodesic frame lines (more detail at higher tiers)
+		if depth_ratio < 0.6:
+			var num_bands = mini(1 + tier, 4)
+			# Horizontal bands
+			for band in range(num_bands):
+				var band_t = float(band + 1) / (num_bands + 1)
+				var band_y = dome_pos.y - this_height * band_t
+				var band_radius = this_radius * sqrt(1.0 - band_t * band_t) * 1.1
+				var band_points = PackedVector2Array()
+				for i in range(9):
+					var angle = PI * float(i) / 8.0
+					band_points.append(Vector2(dome_pos.x + cos(angle) * band_radius, band_y))
+				for i in range(8):
+					draw_line(band_points[i], band_points[i + 1], frame_color, 1.5 * _camera_zoom)
+
+			# Vertical ribs (more at higher tiers)
+			var num_ribs = 4 + tier
+			for i in range(num_ribs):
+				var angle = PI * float(i) / (num_ribs - 1)
+				var top = Vector2(dome_pos.x, dome_pos.y - this_height)
+				var bottom = Vector2(dome_pos.x + cos(angle) * this_radius, dome_pos.y)
+				draw_line(bottom, top, frame_color, 1.2 * _camera_zoom)
+
+		# Windows for hab pods (tier 2+)
+		if upgrade_key == "hab_pod" and num_windows > 0 and depth_ratio < 0.5:
+			var window_color = Color(0.9, 0.85, 0.6, 0.8)  # Warm interior light
+			for w in range(mini(num_windows, 4)):
+				var window_angle = PI * 0.3 + w * PI * 0.15
+				var window_x = dome_pos.x + cos(window_angle) * this_radius * 0.9
+				var window_y = dome_pos.y - sin(window_angle) * this_height * 0.6
+				var window_size = 3.0 * scale * _camera_zoom
+				draw_circle(Vector2(window_x, window_y), window_size, window_color)
+
+		# Highlight arc (rim lighting - warm golden)
+		for i in range(segments):
+			var angle1 = PI * float(i) / segments
+			var angle2 = PI * float(i + 1) / segments
+			var p1 = Vector2(dome_pos.x + cos(angle1) * this_radius, dome_pos.y - sin(angle1) * this_height)
+			var p2 = Vector2(dome_pos.x + cos(angle2) * this_radius, dome_pos.y - sin(angle2) * this_height)
+			var brightness = 0.15 + 0.25 * (1.0 - float(i) / segments)
+			draw_line(p1, p2, Color(1.0, 0.9, 0.7, brightness), 2.5 * _camera_zoom)
+
+		# Base ring (metallic)
+		draw_line(dome_pos + Vector2(-this_radius, 0), dome_pos + Vector2(this_radius, 0),
+			frame_color.darkened(0.2), 3.0 * _camera_zoom)
+
+	# Connecting tunnels between domes (for multi-dome configs)
+	if dome_positions.size() > 1 and depth_ratio < 0.5:
+		var tunnel_color = Color(0.5, 0.48, 0.45)
+		for i in range(dome_positions.size() - 1):
+			var tunnel_start = dome_positions[i] + Vector2(radius * 0.4, 0)
+			var tunnel_end = dome_positions[i + 1] + Vector2(-radius * 0.4, 0)
+			draw_line(tunnel_start, tunnel_end, tunnel_color, 4.0 * _camera_zoom)
+
+func _draw_perspective_solar(base_pos: Vector2, width: float, scale: float, depth_ratio: float, tier: int = 1):
+	"""
+	Tiered solar array progression:
+	Tier 1: Single emergency panel flat on ground
+	Tier 2: Row of 3 panels on ground
+	Tier 3: Elevated on support poles
+	Tier 4: Tracking mount that rotates toward sun
+	Tier 5: Multi-level solar tower farm
+	"""
+	# Get upgrade path data
+	var upgrade_data = UPGRADE_PATHS.get("solar_array", {}).get(tier, {})
+	var num_panels = upgrade_data.get("panels", 1)
+	var is_elevated = upgrade_data.get("elevated", false)
+	var is_rotating = upgrade_data.get("rotating", false)
+	var is_stacked = upgrade_data.get("stacked", false)
+
+	# Colors
+	var panel_dark = Color(0.15, 0.20, 0.35)
+	var panel_light = Color(0.25, 0.32, 0.48)
+	var reflection = Color(1.0, 0.85, 0.55, 0.3)
+	var frame_color = Color(0.72, 0.68, 0.62)
+	var grid_color = Color(0.35, 0.42, 0.55)
+
+	var base_hw = width * 0.35  # Single panel half-width
+	var panel_tilt_base = 6.0 * scale * _camera_zoom
+
+	# Pole height depends on tier
+	var pole_height = 0.0
+	if is_elevated:
+		pole_height = (8.0 + tier * 3.0) * scale * _camera_zoom
+
+	# Rotation animation for tracking arrays (tier 4+)
+	var rotation_offset = 0.0
+	if is_rotating:
+		# Slow tracking motion following the sun
+		rotation_offset = sin(_time * 0.3) * 0.2
+
+	# Number of vertical levels for stacked arrays (tier 5)
+	var num_levels = 1
+	if is_stacked:
+		num_levels = 3
+
+	# Draw support structure first
+	if is_elevated:
+		# Main support pole
+		draw_line(base_pos, base_pos + Vector2(0, -pole_height), frame_color, 3.0 * _camera_zoom)
+		# Cross-bracing for taller structures
+		if tier >= 4:
+			var brace_y = pole_height * 0.4
+			draw_line(base_pos + Vector2(-8 * scale, 0), base_pos + Vector2(0, -brace_y),
+				frame_color.darkened(0.2), 1.5 * _camera_zoom)
+			draw_line(base_pos + Vector2(8 * scale, 0), base_pos + Vector2(0, -brace_y),
+				frame_color.darkened(0.2), 1.5 * _camera_zoom)
+
+	# Draw each level of panels
+	for level in range(num_levels):
+		var level_offset = level * pole_height * 0.4 if is_stacked else 0.0
+		var level_base = base_pos + Vector2(0, -pole_height - level_offset)
+
+		# Calculate panel layout for this level
+		var panels_this_level = num_panels if level == 0 else maxi(num_panels - level * 2, 2)
+		var total_width = panels_this_level * base_hw * 2.2
+		var start_x = -total_width / 2.0 + base_hw
+
+		# Draw each panel
+		for p in range(panels_this_level):
+			var panel_x = start_x + p * base_hw * 2.2
+			var panel_pos = level_base + Vector2(panel_x, 0)
+
+			# Panel size grows slightly with tier
+			var hw = base_hw * (0.8 + tier * 0.1)
+			var tilt = panel_tilt_base * (1.0 + rotation_offset)
+
+			# Draw panel with tilt
+			var panel_poly = PackedVector2Array([
+				panel_pos + Vector2(-hw, 0),
+				panel_pos + Vector2(hw, 0),
+				panel_pos + Vector2(hw * 0.85, -tilt),
+				panel_pos + Vector2(-hw * 0.85, -tilt)
+			])
+			draw_polygon(panel_poly, [panel_dark])
+
+			# Light reflection on right half
+			var reflect_poly = PackedVector2Array([
+				panel_pos + Vector2(0, 0),
+				panel_pos + Vector2(hw, 0),
+				panel_pos + Vector2(hw * 0.85, -tilt),
+				panel_pos + Vector2(0, -tilt * 0.95)
+			])
+			draw_polygon(reflect_poly, [panel_light])
+
+			# Animated sun glint
+			var glint_phase = sin(_time * 0.5 + panel_pos.x * 0.1 + p * 0.5) * 0.3 + 0.5
+			var glint_x = lerp(panel_pos.x - hw * 0.5, panel_pos.x + hw * 0.5, glint_phase)
+			var glint_y = panel_pos.y - tilt * 0.5
+			draw_circle(Vector2(glint_x, glint_y), (2.0 + tier * 0.5) * scale * _camera_zoom, reflection)
+
+			# Grid lines (skip for distant or low tier)
+			if depth_ratio < 0.65 and tier >= 2:
+				var divisions = mini(tier, 4)
+				for i in range(divisions):
+					var t = float(i + 1) / (divisions + 1)
+					var x1 = lerp(panel_pos.x - hw, panel_pos.x + hw, t)
+					var x2 = lerp(panel_pos.x - hw * 0.85, panel_pos.x + hw * 0.85, t)
+					draw_line(Vector2(x1, panel_pos.y), Vector2(x2, panel_pos.y - tilt),
+						grid_color, 0.8 * _camera_zoom)
+
+			# Frame edge highlights
+			draw_line(panel_pos + Vector2(-hw, 0), panel_pos + Vector2(-hw * 0.85, -tilt),
+				frame_color.lightened(0.2), 1.5 * _camera_zoom)
+			draw_line(panel_pos + Vector2(hw, 0), panel_pos + Vector2(hw * 0.85, -tilt),
+				frame_color.lightened(0.3), 1.5 * _camera_zoom)
+
+		# Connecting bar for multi-panel arrays
+		if panels_this_level > 1 and is_elevated:
+			var bar_y = level_base.y
+			draw_line(level_base + Vector2(start_x - base_hw, 0),
+				level_base + Vector2(-start_x + base_hw, 0),
+				frame_color.darkened(0.1), 2.0 * _camera_zoom)
+
+	# Tracking motor housing for tier 4+
+	if is_rotating and depth_ratio < 0.5:
+		var motor_pos = base_pos + Vector2(0, -pole_height + 3 * scale)
+		draw_circle(motor_pos, 4.0 * scale * _camera_zoom, frame_color)
+		# Rotating indicator light
+		var indicator_pulse = sin(_time * 2.0) * 0.3 + 0.7
+		draw_circle(motor_pos + Vector2(3 * scale, 0), 1.5 * scale * _camera_zoom,
+			Color(0.3, 1.0, 0.5, indicator_pulse))
+
+func _draw_perspective_reactor(base_pos: Vector2, width: float, height: float,
+		scale: float, color: Color, depth_ratio: float, tier: int = 1):
+	"""
+	Tiered reactor progression:
+	Tier 1-2: RTG pod (small, minimal glow)
+	Tier 3: Small reactor with one cooling tower
+	Tier 4: Power plant with dual cooling towers
+	Tier 5: Reactor array with triple cooling towers and plasma arcs
+	"""
+	var upgrade_data = UPGRADE_PATHS.get("fission_reactor", {}).get(tier, {})
+	var cooling_towers = upgrade_data.get("cooling_towers", 0)
+	var glow_intensity = upgrade_data.get("glow", 0.3)
+
+	var hw = width * 0.55 * (0.7 + tier * 0.15)  # Grows with tier
+	var reactor_height = height * scale * _camera_zoom * (0.8 + tier * 0.2)
+
+	# Metallic containment vessel colors
+	var vessel_dark = Color(0.45, 0.42, 0.40)
+	var vessel_light = Color(0.65, 0.62, 0.58)
+	var vessel_highlight = Color(0.82, 0.78, 0.72)
+
+	# Left side of vessel (shadow)
+	var left_body = PackedVector2Array([
+		base_pos + Vector2(-hw, 0),
+		base_pos + Vector2(0, 0),
+		base_pos + Vector2(0, -reactor_height),
+		base_pos + Vector2(-hw * 0.75, -reactor_height)
+	])
+	draw_polygon(left_body, [vessel_dark])
+
+	# Right side of vessel (lit by reactor glow)
+	var right_body = PackedVector2Array([
+		base_pos + Vector2(0, 0),
+		base_pos + Vector2(hw, 0),
+		base_pos + Vector2(hw * 0.75, -reactor_height),
+		base_pos + Vector2(0, -reactor_height)
+	])
+	draw_polygon(right_body, [vessel_light])
+
+	# Top dome cap
+	var dome_points = PackedVector2Array()
+	var dome_segments = 8
+	var dome_radius = hw * 0.75
+	var dome_height = 8.0 * scale * _camera_zoom
+	for i in range(dome_segments + 1):
+		var angle = PI * float(i) / dome_segments
+		var x = base_pos.x + cos(angle) * dome_radius
+		var y = base_pos.y - reactor_height - sin(angle) * dome_height
+		dome_points.append(Vector2(x, y))
+	dome_points.append(base_pos + Vector2(dome_radius, -reactor_height))
+	dome_points.append(base_pos + Vector2(-dome_radius, -reactor_height))
+	draw_polygon(dome_points, [vessel_highlight])
+
+	# Containment rings (industrial details)
+	var num_rings = 3
+	for i in range(num_rings):
+		var t = float(i + 1) / (num_rings + 1)
+		var ring_y = base_pos.y - reactor_height * t
+		var ring_hw = lerp(hw, hw * 0.75, t)
+		draw_line(Vector2(base_pos.x - ring_hw, ring_y),
+			Vector2(base_pos.x + ring_hw, ring_y), vessel_dark.darkened(0.2), 3.0 * _camera_zoom)
+
+	# Glowing reactor core (visible through center viewport)
+	var core_y = base_pos.y - reactor_height * 0.5
+	var core_radius = hw * 0.35
+	var glow_pulse = glow_intensity * (0.6 + sin(_time * 3.0) * 0.4)
+
+	# Outer glow (large, soft) - scaled by tier glow
+	var outer_glow = Color(0.3, 0.85, 1.0, 0.2 * glow_pulse * (1.0 - depth_ratio * 0.7))
+	draw_circle(Vector2(base_pos.x, core_y), core_radius * 2.5, outer_glow)
+
+	# Middle glow
+	var mid_glow = Color(0.4, 0.9, 1.0, 0.4 * glow_pulse * (1.0 - depth_ratio * 0.5))
+	draw_circle(Vector2(base_pos.x, core_y), core_radius * 1.5, mid_glow)
+
+	# Core glow (bright center)
+	var core_glow = Color(0.7, 0.95, 1.0, 0.8 * glow_pulse)
+	draw_circle(Vector2(base_pos.x, core_y), core_radius, core_glow)
+
+	# White-hot center (only visible at tier 3+)
+	if tier >= 3:
+		draw_circle(Vector2(base_pos.x, core_y), core_radius * 0.4, Color(1.0, 1.0, 1.0, glow_pulse))
+
+	# Viewport frame
+	var viewport_hw = hw * 0.25
+	var viewport_top = core_y - core_radius * 0.8
+	var viewport_bot = core_y + core_radius * 0.8
+	draw_line(Vector2(base_pos.x - viewport_hw, viewport_top),
+		Vector2(base_pos.x - viewport_hw, viewport_bot), vessel_dark, 2.0 * _camera_zoom)
+	draw_line(Vector2(base_pos.x + viewport_hw, viewport_top),
+		Vector2(base_pos.x + viewport_hw, viewport_bot), vessel_dark, 2.0 * _camera_zoom)
+
+	# Cooling towers (tier 3+)
+	if cooling_towers > 0 and depth_ratio < 0.7:
+		var tower_spacing = hw * 1.5
+		for t in range(cooling_towers):
+			var tower_x = base_pos.x + (t - (cooling_towers - 1) / 2.0) * tower_spacing
+			var tower_hw = hw * 0.35
+			var tower_h = reactor_height * 0.8
+			# Cooling tower body (hyperboloid shape)
+			var tower_poly = PackedVector2Array([
+				Vector2(tower_x - tower_hw, base_pos.y),
+				Vector2(tower_x + tower_hw, base_pos.y),
+				Vector2(tower_x + tower_hw * 0.6, base_pos.y - tower_h * 0.5),
+				Vector2(tower_x + tower_hw * 0.8, base_pos.y - tower_h),
+				Vector2(tower_x - tower_hw * 0.8, base_pos.y - tower_h),
+				Vector2(tower_x - tower_hw * 0.6, base_pos.y - tower_h * 0.5),
+			])
+			draw_polygon(tower_poly, [vessel_dark.lightened(0.1)])
+			# Steam effect
+			var steam_pulse = sin(_time * 2.0 + t) * 0.3 + 0.7
+			var steam_color = Color(0.9, 0.95, 1.0, 0.3 * steam_pulse)
+			draw_circle(Vector2(tower_x, base_pos.y - tower_h - 5 * scale), 8 * scale * _camera_zoom, steam_color)
+
+	# Energy conduits coming out the sides (tier 2+)
+	if depth_ratio < 0.5 and tier >= 2:
+		var conduit_color = Color(0.5, 0.75, 0.85, 0.6)
+		var conduit_glow = Color(0.4, 0.9, 1.0, 0.3 * glow_pulse)
+		# Left conduit
+		draw_line(Vector2(base_pos.x - hw, core_y),
+			Vector2(base_pos.x - hw * 1.5, core_y - 5), conduit_color, 4.0 * _camera_zoom)
+		draw_circle(Vector2(base_pos.x - hw * 1.5, core_y - 5), 5.0 * scale * _camera_zoom, conduit_glow)
+		# Right conduit
+		draw_line(Vector2(base_pos.x + hw, core_y),
+			Vector2(base_pos.x + hw * 1.5, core_y - 5), conduit_color, 4.0 * _camera_zoom)
+		draw_circle(Vector2(base_pos.x + hw * 1.5, core_y - 5), 5.0 * scale * _camera_zoom, conduit_glow)
+
+	# Plasma arcs between towers (tier 5 only)
+	if tier >= 5 and cooling_towers >= 2 and depth_ratio < 0.5:
+		var arc_color = Color(0.5, 0.8, 1.0, sin(_time * 4.0) * 0.3 + 0.5)
+		var arc_y = base_pos.y - reactor_height * 0.3
+		for t in range(cooling_towers - 1):
+			var arc_x1 = base_pos.x + (t - (cooling_towers - 1) / 2.0) * hw * 1.5
+			var arc_x2 = base_pos.x + (t + 1 - (cooling_towers - 1) / 2.0) * hw * 1.5
+			draw_line(Vector2(arc_x1, arc_y), Vector2(arc_x2, arc_y), arc_color, 2.0 * _camera_zoom)
+
+func _draw_perspective_elevator(base_pos: Vector2, height: float, scale: float, depth_ratio: float, tier: int = 1):
+	"""
+	Tiered space elevator progression:
+	Tier 1: Anchor point (construction base)
+	Tier 2: Partial tether rising
+	Tier 3: Basic elevator with single climber
+	Tier 4: Full elevator with multiple climbers
+	Tier 5: Orbital gateway with station ring
+	"""
+	var upgrade_data = UPGRADE_PATHS.get("space_elevator", {}).get(tier, {})
+	var cable_opacity = upgrade_data.get("cable_opacity", 0.3)
+	var num_platforms = upgrade_data.get("platforms", 1)
+	var cable_color = Color(0.3, 0.35, 0.4, cable_opacity)
+	var glow_color = Color(0.4, 0.7, 1.0, 0.3 * cable_opacity)
+	var station_color = Color(0.5, 0.55, 0.6)
+
+	# The elevator height depends on tier
+	# Tier 1-2: Partial construction, Tier 3+: Full height to orbit
+	var top_y: float
+	if tier <= 2:
+		# Still under construction - cable rises partway
+		var construction_progress = 0.3 + tier * 0.25
+		top_y = lerp(base_pos.y - 100, 20.0, construction_progress)
+	else:
+		top_y = 20.0  # Full height to ORBIT
+
+	# Energy glow along cable (pulsing) - more visible at higher tiers
+	var pulse = sin(_time * 2.0) * 0.3 + 0.5
+	var glow_width = 12.0 * scale * _camera_zoom * pulse * cable_opacity
+	if tier >= 3:
+		draw_line(base_pos, Vector2(base_pos.x, top_y), glow_color, glow_width)
+
+	# Main cable - thickness increases with tier
+	var cable_width = maxf(2.0 + tier, 6.0 * scale) * _camera_zoom
+	draw_line(base_pos, Vector2(base_pos.x, top_y), cable_color, cable_width)
+
+	# Secondary support cables (tier 3+)
+	if tier >= 3:
+		var support_offset = 15.0 * scale * _camera_zoom
+		draw_line(base_pos + Vector2(-support_offset, 0), Vector2(base_pos.x - 3, top_y),
+			cable_color.darkened(0.2), cable_width * 0.4)
+		draw_line(base_pos + Vector2(support_offset, 0), Vector2(base_pos.x + 3, top_y),
+			cable_color.darkened(0.2), cable_width * 0.4)
+
+	# Base station grows with tier
+	var base_width = (20.0 + tier * 8.0) * scale * _camera_zoom
+	var base_height = (15.0 + tier * 8.0) * scale * _camera_zoom
+	# Main structure
+	draw_polygon(PackedVector2Array([
+		base_pos + Vector2(-base_width, 0),
+		base_pos + Vector2(base_width, 0),
+		base_pos + Vector2(base_width * 0.6, -base_height),
+		base_pos + Vector2(-base_width * 0.6, -base_height)
+	]), [station_color])
+
+	# Top platform (tier 2+)
+	if tier >= 2:
+		draw_polygon(PackedVector2Array([
+			base_pos + Vector2(-base_width * 0.7, -base_height),
+			base_pos + Vector2(base_width * 0.7, -base_height),
+			base_pos + Vector2(base_width * 0.5, -base_height - 10 * scale * _camera_zoom),
+			base_pos + Vector2(-base_width * 0.5, -base_height - 10 * scale * _camera_zoom)
+		]), [station_color.lightened(0.1)])
+
+	# Climbing pods - number based on platforms/tier
+	if tier >= 3:
+		var num_pods = num_platforms
+		for pod_idx in range(num_pods):
+			var pod_offset = float(pod_idx) / num_pods
+			var pod_t = fmod(_time * 0.08 + pod_offset, 1.0)
+			var pod_y = lerp(base_pos.y - base_height - 20, top_y + 30, pod_t)
+			var pod_size = maxf(5.0, 10.0 * scale * (1.0 - pod_t * 0.6)) * _camera_zoom
+			# Pod glow
+			draw_circle(Vector2(base_pos.x, pod_y), pod_size * 1.5, Color(0.5, 0.8, 1.0, 0.3))
+			# Pod body
+			draw_rect(Rect2(base_pos.x - pod_size/2, pod_y - pod_size, pod_size, pod_size * 2),
+				Color(0.7, 0.75, 0.85))
+
+	# Orbital station at top (tier 4+ only)
+	if tier >= 4:
+		var orbital_width = (15.0 + tier * 5.0) * _camera_zoom
+		draw_circle(Vector2(base_pos.x, top_y + 15), orbital_width * 0.6, Color(0.6, 0.65, 0.7))
+		# Rotating ring (tier 5)
+		if tier >= 5:
+			var ring_angle = _time * 0.5
+			for i in range(4):
+				var a = ring_angle + i * PI / 2
+				var ring_offset = Vector2(cos(a), sin(a) * 0.3) * orbital_width
+				draw_circle(Vector2(base_pos.x, top_y + 15) + ring_offset, 4 * _camera_zoom, Color(0.5, 0.55, 0.6))
+
+	# Construction scaffolding for low tiers
+	if tier <= 2:
+		var scaffold_color = Color(0.6, 0.55, 0.45, 0.7)
+		# Cranes and supports
+		draw_line(base_pos + Vector2(-base_width * 1.2, 0), base_pos + Vector2(-base_width * 0.5, -base_height * 0.8),
+			scaffold_color, 2.0 * _camera_zoom)
+		draw_line(base_pos + Vector2(base_width * 1.2, 0), base_pos + Vector2(base_width * 0.5, -base_height * 0.8),
+			scaffold_color, 2.0 * _camera_zoom)
+
+func _draw_perspective_spire(base_pos: Vector2, height: float, scale: float,
+		color: Color, depth_ratio: float, tier: int = 1):
+	"""
+	Tiered communications tower:
+	Tier 1: Simple radio mast
+	Tier 2: Tower with small dish
+	Tier 3: Relay station with multiple dishes
+	Tier 4: Comms array (larger dishes)
+	Tier 5: Deep space array (massive dishes, constant signal)
+	"""
+	var upgrade_data = UPGRADE_PATHS.get("communications", {}).get(tier, {})
+	var num_dishes = upgrade_data.get("dishes", 0)
+	var antenna_mult = upgrade_data.get("antenna_height", 1.0)
+	var tower_height = height * scale * _camera_zoom * 1.5 * antenna_mult
+	var base_width = (4.0 + tier * 1.0) * scale * _camera_zoom  # Wider at higher tiers
+
+	# Lattice tower
+	var top_pos = base_pos + Vector2(0, -tower_height)
+	draw_line(base_pos + Vector2(-base_width, 0), top_pos, color.darkened(0.3), 2.0 * _camera_zoom)
+	draw_line(base_pos + Vector2(base_width, 0), top_pos, color.darkened(0.3), 2.0 * _camera_zoom)
+
+	# Cross braces - more detail at higher tiers
+	if depth_ratio < 0.5:
+		var num_braces = 2 + tier
+		for i in range(num_braces):
+			var t = float(i + 1) / (num_braces + 1)
+			var y = lerp(base_pos.y, top_pos.y, t)
+			var w = lerp(base_width, base_width * 0.2, t)
+			draw_line(Vector2(base_pos.x - w, y), Vector2(base_pos.x + w, y), color.darkened(0.2), 1.0)
+			# X-bracing for higher tiers
+			if tier >= 3 and i < num_braces - 1:
+				var y2 = lerp(base_pos.y, top_pos.y, float(i + 2) / (num_braces + 1))
+				var w2 = lerp(base_width, base_width * 0.2, float(i + 2) / (num_braces + 1))
+				draw_line(Vector2(base_pos.x - w, y), Vector2(base_pos.x + w2, y2), color.darkened(0.25), 0.8)
+				draw_line(Vector2(base_pos.x + w, y), Vector2(base_pos.x - w2, y2), color.darkened(0.25), 0.8)
+
+	# Main antenna/emitter at top
+	var dish_radius = (3.0 + tier * 1.5) * scale * _camera_zoom
+	draw_circle(top_pos, dish_radius, color)
+
+	# Satellite dishes (based on tier)
+	if num_dishes > 0 and depth_ratio < 0.6:
+		var dish_color = Color(0.7, 0.75, 0.8)
+		for d in range(num_dishes):
+			var dish_t = 0.5 + float(d) / (num_dishes + 1) * 0.4
+			var dish_y = lerp(base_pos.y, top_pos.y, dish_t)
+			var dish_offset = -1 if d % 2 == 0 else 1  # Alternate sides
+			var dish_x = base_pos.x + dish_offset * base_width * 1.5
+			var this_dish_size = dish_radius * (0.6 + float(tier) * 0.1)
+			# Dish shape (arc facing up-right)
+			var dish_points = PackedVector2Array()
+			for i in range(7):
+				var angle = PI * 0.2 + float(i) / 6 * PI * 0.6
+				dish_points.append(Vector2(dish_x + cos(angle) * this_dish_size,
+					dish_y - sin(angle) * this_dish_size * 0.5))
+			for i in range(6):
+				draw_line(dish_points[i], dish_points[i + 1], dish_color, 1.5 * _camera_zoom)
+			# Dish support arm
+			draw_line(Vector2(base_pos.x, dish_y), Vector2(dish_x, dish_y), color.darkened(0.2), 1.0)
+
+	# Signal effect - stronger and more constant at higher tiers
+	if depth_ratio < 0.4:
+		var signal_speed = 1.5 + tier * 0.5  # Faster pulses at higher tiers
+		var pulse = fmod(_time * signal_speed, 2.0) / 2.0
+		var signal_alpha = (1.0 - pulse) * (0.3 + tier * 0.1)  # Stronger signal at higher tiers
+		var signal_color = Color(0.5, 0.8, 1.0, signal_alpha)
+		draw_circle(top_pos, dish_radius * (1.0 + pulse * 3.0), signal_color)
+		# Secondary signal for tier 4+
+		if tier >= 4:
+			var pulse2 = fmod(_time * signal_speed + 0.5, 2.0) / 2.0
+			draw_circle(top_pos, dish_radius * (1.0 + pulse2 * 3.0), signal_color.darkened(0.3))
+
+func _draw_perspective_mass_driver(base_pos: Vector2, width: float, scale: float, depth_ratio: float, tier: int = 1):
+	"""
+	Tiered mass driver progression:
+	Tier 1: Launch ramp (basic accelerator)
+	Tier 2: Mass driver (functional)
+	Tier 3: Cargo launcher (regular launches)
+	Tier 4: Mass driver array (high capacity)
+	Tier 5: Orbital cannon (continuous ops, massive power)
+	"""
+	var upgrade_data = UPGRADE_PATHS.get("mass_driver", {}).get(tier, {})
+	var rail_length_mult = upgrade_data.get("rail_length", 0.5)
+	var power_glow = upgrade_data.get("power_glow", 0.3)
+
+	var rail_color = Color(0.35, 0.38, 0.42)
+	var coil_color = Color(0.7, 0.5, 0.2)
+	var energy_color = Color(0.3, 0.6, 1.0, power_glow)
+
+	# Rail length scales with tier
+	var rail_length = 200.0 * scale * _camera_zoom * rail_length_mult
+	var rail_width = (5.0 + tier * 1.5) * scale * _camera_zoom
+	# Angled toward horizon-left for dramatic perspective
+	var end_pos = Vector2(base_pos.x - rail_length * 0.4, base_pos.y - rail_length * 0.85)
+
+	# Support structure beneath rail
+	var support_color = Color(0.3, 0.32, 0.35)
+	for i in range(6):
+		var t = float(i) / 5.0
+		var support_base = base_pos.lerp(end_pos, t)
+		var support_height = 20.0 * scale * _camera_zoom * (1.0 - t * 0.5)
+		draw_line(support_base, support_base + Vector2(0, support_height), support_color, 3 * _camera_zoom)
+
+	# Twin rails
+	var rail_sep = 12.0 * scale * _camera_zoom
+	draw_line(base_pos + Vector2(-rail_sep, 0), end_pos + Vector2(-rail_sep * 0.3, 0), rail_color, rail_width)
+	draw_line(base_pos + Vector2(rail_sep, 0), end_pos + Vector2(rail_sep * 0.3, 0), rail_color, rail_width)
+
+	# Electromagnetic coils (BIG and glowing)
+	var num_coils = 8
+	for i in range(num_coils):
+		var t = float(i + 1) / (num_coils + 1)
+		var coil_pos = base_pos.lerp(end_pos, t)
+		var coil_width_outer = width * 0.6 * (1.0 - t * 0.4)
+		var coil_width_inner = coil_width_outer * 0.6
+
+		# Coil ring
+		draw_circle(coil_pos, coil_width_outer, coil_color)
+		draw_circle(coil_pos, coil_width_inner, rail_color.darkened(0.2))
+
+		# Energy glow (animated)
+		var coil_phase = fmod(_time * 3.0 + i * 0.3, 1.0)
+		var glow_alpha = 0.3 + coil_phase * 0.4
+		draw_circle(coil_pos, coil_width_outer * 1.3, Color(energy_color.r, energy_color.g, energy_color.b, glow_alpha * (1.0 - t)))
+
+	# Launch bay at base
+	var bay_width = 35.0 * scale * _camera_zoom
+	var bay_height = 25.0 * scale * _camera_zoom
+	draw_polygon(PackedVector2Array([
+		base_pos + Vector2(-bay_width, 0),
+		base_pos + Vector2(bay_width, 0),
+		base_pos + Vector2(bay_width * 0.7, -bay_height),
+		base_pos + Vector2(-bay_width * 0.7, -bay_height)
+	]), [Color(0.45, 0.48, 0.52)])
+
+	# PROJECTILE LAUNCH (dramatic!)
+	var launch_cycle = fmod(_time * 0.3, 1.0)
+	if launch_cycle < 0.4:
+		var proj_t = launch_cycle / 0.4
+		var proj_pos = base_pos.lerp(end_pos, proj_t)
+
+		# Projectile with trail
+		var trail_length = 8
+		for trail_i in range(trail_length):
+			var trail_t = maxf(0, proj_t - trail_i * 0.03)
+			var trail_pos = base_pos.lerp(end_pos, trail_t)
+			var trail_alpha = (1.0 - float(trail_i) / trail_length) * (1.0 - proj_t * 0.5)
+			var trail_size = (8.0 - trail_i * 0.8) * scale * _camera_zoom
+			draw_circle(trail_pos, trail_size, Color(1.0, 0.7, 0.2, trail_alpha))
+
+		# Main projectile (bright!)
+		var proj_size = 10.0 * scale * _camera_zoom
+		draw_circle(proj_pos, proj_size * 1.5, Color(1.0, 0.9, 0.5, 0.5))
+		draw_circle(proj_pos, proj_size, Color(1.0, 0.95, 0.8))
+
+		# Muzzle flash at launch point
+		if proj_t < 0.15:
+			var flash_size = 30.0 * scale * _camera_zoom * (1.0 - proj_t / 0.15)
+			draw_circle(base_pos + Vector2(0, -bay_height), flash_size, Color(1.0, 0.8, 0.4, 0.6))
+
+# =============================================================================
+# LIFEPOD AND COLONIST DRAWING
+# =============================================================================
 
 func _draw_lifepod_obj(obj: Dictionary):
+	if obj.get("is_perspective", false):
+		_draw_lifepod_perspective(obj)
+		return
+
+	# Isometric mode
 	var lx = obj.x
 	var ly = obj.y
 	var lh = obj.height
@@ -642,12 +2375,115 @@ func _draw_lifepod_obj(obj: Dictionary):
 	var beacon_alpha = 0.4 + sin(_time * 3.0) * 0.3
 	draw_circle(beacon_pos, 4.0 * _camera_zoom, Color(0.5, 0.8, 1.0, beacon_alpha))
 
+func _draw_lifepod_perspective(obj: Dictionary):
+	"""Draw lifepod in perspective view"""
+	var lateral = obj.get("lateral", 0.0)
+	var world_depth = obj.get("world_depth", MIN_DEPTH)
+	var lh = obj.height
+
+	var scale = _get_perspective_scale(world_depth)
+	var scale_mult = scale / PERSPECTIVE_BASE_SCALE
+
+	var base_pos = _perspective_transform(lateral, world_depth, 0)
+	var top_pos = _perspective_transform(lateral, world_depth, lh)
+
+	# Glow on ground
+	var glow_pulse = 0.6 + sin(_time * 2.0) * 0.2
+	var glow_color = Color(0.4, 0.7, 1.0, glow_pulse * 0.4)
+	var glow_r = LIFEPOD_RADIUS * scale_mult * _camera_zoom * 1.5
+	_draw_ellipse(base_pos, glow_r, glow_r * 0.4, glow_color)
+
+	# Draw as perspective block (dome-like)
+	var width = LIFEPOD_RADIUS * scale_mult * _camera_zoom * 2.0
+	_draw_perspective_dome(base_pos, width, lh, scale_mult, COLOR_LIFEPOD_TOP, 0.0)
+
+	# Label
+	draw_string(ThemeDB.fallback_font, top_pos - Vector2(7, 5) * _camera_zoom, "LP",
+		HORIZONTAL_ALIGNMENT_LEFT, -1, int(11 * scale_mult * _camera_zoom), Color.WHITE)
+
+	# Beacon
+	var beacon_pos = _perspective_transform(lateral, world_depth, lh + 4)
+	var beacon_alpha = 0.4 + sin(_time * 3.0) * 0.3
+	draw_circle(beacon_pos, 4.0 * scale_mult * _camera_zoom, Color(0.5, 0.8, 1.0, beacon_alpha))
+
 func _draw_colonist_obj(obj: Dictionary):
-	var screen_pos = _iso_transform(obj.x, obj.y, 1)
-	draw_circle(screen_pos, COLONIST_SIZE * _camera_zoom, Color.WHITE)
-	# Tiny shadow
-	var shadow_pos = _iso_transform(obj.x + 1, obj.y + 0.5, 0)
-	draw_circle(shadow_pos, COLONIST_SIZE * 0.7 * _camera_zoom, Color(0, 0, 0, 0.2))
+	# Colonist colors - bright orange suit for visibility against Mars terrain
+	var suit_color = Color(1.0, 0.6, 0.2)  # Orange spacesuit
+	var helmet_color = Color(0.9, 0.95, 1.0, 0.9)  # White/reflective helmet
+
+	if obj.get("is_perspective", false):
+		var lateral = obj.get("lateral", 0.0)
+		var world_depth = obj.get("world_depth", MIN_DEPTH)
+		var scale = _get_perspective_scale(world_depth)
+		var scale_mult = scale / PERSPECTIVE_BASE_SCALE
+
+		var screen_pos = _perspective_transform(lateral, world_depth, 1.5)
+		var colonist_size = COLONIST_SIZE * 1.5 * scale_mult * _camera_zoom
+
+		# Shadow first
+		var shadow_pos = _perspective_transform(lateral + 0.5, world_depth, 0)
+		draw_circle(shadow_pos, colonist_size * 0.8, Color(0, 0, 0, 0.3))
+
+		# Body (orange suit)
+		draw_circle(screen_pos, colonist_size, suit_color)
+		# Helmet (smaller, on top)
+		var head_pos = _perspective_transform(lateral, world_depth, 2.5)
+		draw_circle(head_pos, colonist_size * 0.6, helmet_color)
+	else:
+		var screen_pos = _iso_transform(obj.x, obj.y, 1)
+		var colonist_size = COLONIST_SIZE * 1.5 * _camera_zoom
+		# Shadow
+		var shadow_pos = _iso_transform(obj.x + 1, obj.y + 0.5, 0)
+		draw_circle(shadow_pos, colonist_size * 0.8, Color(0, 0, 0, 0.3))
+		# Body
+		draw_circle(screen_pos, colonist_size, suit_color)
+		# Helmet
+		var head_pos = _iso_transform(obj.x, obj.y, 2)
+		draw_circle(head_pos, colonist_size * 0.6, helmet_color)
+
+func _draw_drone_obj(obj: Dictionary):
+	"""Draw a worker drone - small cyan robot with blinking lights"""
+	var drone_id = obj.get("drone_id", 0)
+	var blink = sin(_time * 8.0 + drone_id * 1.5) * 0.5 + 0.5  # Fast blink
+
+	# Drone colors - cyan/teal mechanical look
+	var body_color = Color(0.2, 0.8, 0.9)  # Cyan body
+	var light_color = Color(0.4, 1.0, 0.4, blink)  # Green status light, blinking
+	var thruster_color = Color(0.3, 0.6, 1.0, 0.6 + blink * 0.3)  # Blue thruster glow
+
+	if obj.get("is_perspective", false):
+		var lateral = obj.get("lateral", 0.0)
+		var world_depth = obj.get("world_depth", MIN_DEPTH)
+		var scale = _get_perspective_scale(world_depth)
+		var scale_mult = scale / PERSPECTIVE_BASE_SCALE
+
+		var screen_pos = _perspective_transform(lateral, world_depth, 2)
+		var drone_size = 3.0 * scale_mult * _camera_zoom
+
+		# Thruster glow (underneath)
+		var thruster_pos = _perspective_transform(lateral, world_depth, 1.5)
+		draw_circle(thruster_pos, drone_size * 1.2, thruster_color)
+
+		# Main body (boxy drone shape approximated as circle)
+		draw_circle(screen_pos, drone_size, body_color)
+
+		# Status light on top
+		var light_pos = _perspective_transform(lateral, world_depth, 2.5)
+		draw_circle(light_pos, drone_size * 0.4, light_color)
+	else:
+		var screen_pos = _iso_transform(obj.x, obj.y, 2)
+		var drone_size = 3.0 * _camera_zoom
+
+		# Thruster glow
+		var thruster_pos = _iso_transform(obj.x, obj.y, 1.5)
+		draw_circle(thruster_pos, drone_size * 1.2, thruster_color)
+
+		# Body
+		draw_circle(screen_pos, drone_size, body_color)
+
+		# Light
+		var light_pos = _iso_transform(obj.x, obj.y, 2.5)
+		draw_circle(light_pos, drone_size * 0.4, light_color)
 
 # =============================================================================
 # HEX PRISM DRAWING
@@ -1245,6 +3081,150 @@ func _draw_force_field():
 		draw_circle(impact_pos, 15 * _camera_zoom, Color(0.5, 0.8, 1.0, 0.6))
 		draw_circle(impact_pos, 8 * _camera_zoom, Color(0.7, 0.9, 1.0, 0.8))
 
+func _draw_mass_driver(cx: float, cy: float, length: float):
+	"""Draw electromagnetic mass driver / railgun launcher"""
+	var rail_color = Color(0.4, 0.42, 0.45)
+	var coil_color = Color(0.6, 0.4, 0.2)  # Copper coils
+	var energy_color = Color(0.3, 0.7, 1.0)
+
+	# Base platform
+	_draw_hex_prism(cx, cy, 20.0, 6.0, rail_color.lightened(0.1), rail_color.darkened(0.2), rail_color)
+
+	# The rail extends outward at an angle (pointing toward horizon)
+	var rail_angle = -PI * 0.15  # Slight upward angle
+	var rail_dir = Vector2(1.0, -0.3).normalized()
+
+	# Two parallel rails
+	var rail_spacing = 8.0
+	var rail_height_start = 8.0
+	var rail_height_end = 25.0
+
+	for rail_side in [-1, 1]:
+		var offset = rail_side * rail_spacing * 0.5
+		var start_pos = _iso_transform(cx + offset, cy, rail_height_start)
+		var end_pos = _iso_transform(cx + rail_dir.x * length + offset, cy + rail_dir.y * length * 0.5, rail_height_end)
+
+		# Main rail
+		draw_line(start_pos, end_pos, rail_color, 4.0 * _camera_zoom)
+
+		# Rail glow when active
+		var glow_alpha = 0.3 + sin(_time * 4.0) * 0.2
+		draw_line(start_pos, end_pos, Color(energy_color.r, energy_color.g, energy_color.b, glow_alpha), 2.0 * _camera_zoom)
+
+	# Electromagnetic coils along the rail
+	var num_coils = 8
+	for i in range(num_coils):
+		var t = float(i) / (num_coils - 1)
+		var coil_x = cx + rail_dir.x * length * t
+		var coil_y = cy + rail_dir.y * length * 0.5 * t
+		var coil_z = lerp(rail_height_start, rail_height_end, t)
+		var coil_pos = _iso_transform(coil_x, coil_y, coil_z)
+
+		# Coil ring
+		var coil_active = fmod(_time * 2.0 + i * 0.3, 1.0) < 0.3
+		var coil_c = coil_color if not coil_active else energy_color
+		_draw_ellipse(coil_pos, 10 * _camera_zoom, 5 * _camera_zoom, coil_c)
+
+	# Payload / projectile being launched (occasionally)
+	var launch_cycle = fmod(_time, 4.0)
+	if launch_cycle < 1.5:
+		var proj_t = launch_cycle / 1.5
+		var proj_x = cx + rail_dir.x * length * proj_t
+		var proj_y = cy + rail_dir.y * length * 0.5 * proj_t
+		var proj_z = lerp(rail_height_start, rail_height_end, proj_t) + proj_t * 20  # Arc upward
+		var proj_pos = _iso_transform(proj_x, proj_y, proj_z)
+
+		# Projectile
+		draw_circle(proj_pos, 5 * _camera_zoom, Color(0.8, 0.8, 0.85))
+
+		# Plasma trail
+		for trail in range(5):
+			var trail_t = max(0, proj_t - trail * 0.08)
+			var trail_x = cx + rail_dir.x * length * trail_t
+			var trail_y = cy + rail_dir.y * length * 0.5 * trail_t
+			var trail_z = lerp(rail_height_start, rail_height_end, trail_t) + trail_t * 20
+			var trail_pos = _iso_transform(trail_x, trail_y, trail_z)
+			draw_circle(trail_pos, (4 - trail * 0.6) * _camera_zoom, Color(0.5, 0.8, 1.0, 0.6 - trail * 0.1))
+
+	# Control tower
+	var tower_pos = _iso_transform(cx - 15, cy + 10, 0)
+	_draw_hex_prism(cx - 15, cy + 10, 8.0, 18.0, rail_color, rail_color.darkened(0.2), rail_color.darkened(0.1))
+
+	# Blinking warning light
+	if fmod(_time, 0.8) < 0.4:
+		var warn_pos = _iso_transform(cx - 15, cy + 10, 20)
+		draw_circle(warn_pos, 3 * _camera_zoom, Color(1.0, 0.3, 0.1))
+
+func _draw_fusion_reactor(cx: float, cy: float, height: float):
+	"""Draw tokamak fusion reactor with plasma torus"""
+	var shell_color = Color(0.45, 0.48, 0.52)
+	var plasma_color = Color(0.9, 0.4, 0.8)  # Hot pink plasma
+	var coil_color = Color(0.3, 0.5, 0.7)
+
+	# Main containment building (cylindrical)
+	_draw_hex_prism(cx, cy, 25.0, height * 0.6, shell_color, shell_color.darkened(0.25), shell_color.darkened(0.1))
+
+	# Tokamak torus (donut shape) visible through top
+	var torus_z = height * 0.35
+	var torus_major_r = 15.0  # Distance from center to tube center
+	var torus_minor_r = 6.0   # Tube radius
+
+	# Draw torus as series of circles
+	var torus_segments = 16
+	for i in range(torus_segments):
+		var angle = i * TAU / torus_segments
+		var tube_cx = cx + cos(angle) * torus_major_r
+		var tube_cy = cy + sin(angle) * torus_major_r
+		var tube_pos = _iso_transform(tube_cx, tube_cy, torus_z)
+
+		# Plasma glow inside tube
+		var plasma_pulse = 0.5 + sin(_time * 6.0 + angle * 2) * 0.3
+		draw_circle(tube_pos, torus_minor_r * _camera_zoom, Color(plasma_color.r, plasma_color.g, plasma_color.b, plasma_pulse))
+
+		# Tube outline
+		_draw_ellipse(tube_pos, torus_minor_r * 1.2 * _camera_zoom, torus_minor_r * 0.6 * _camera_zoom,
+			Color(shell_color.r, shell_color.g, shell_color.b, 0.7))
+
+	# Magnetic field coils (vertical rings)
+	for i in range(6):
+		var coil_angle = i * TAU / 6
+		var coil_x = cx + cos(coil_angle) * (torus_major_r + 5)
+		var coil_y = cy + sin(coil_angle) * (torus_major_r + 5)
+
+		# Vertical coil
+		var coil_bottom = _iso_transform(coil_x, coil_y, torus_z - 8)
+		var coil_top = _iso_transform(coil_x, coil_y, torus_z + 8)
+		draw_line(coil_bottom, coil_top, coil_color, 3 * _camera_zoom)
+
+		# Coil glow
+		var glow = 0.3 + sin(_time * 3.0 + i) * 0.2
+		draw_line(coil_bottom, coil_top, Color(0.4, 0.7, 1.0, glow), 2 * _camera_zoom)
+
+	# Central plasma core glow
+	var core_pos = _iso_transform(cx, cy, torus_z)
+	var core_pulse = 0.4 + sin(_time * 8.0) * 0.3
+	draw_circle(core_pos, 20 * _camera_zoom, Color(plasma_color.r, plasma_color.g, plasma_color.b, core_pulse * 0.3))
+	draw_circle(core_pos, 10 * _camera_zoom, Color(1.0, 0.8, 0.9, core_pulse * 0.5))
+
+	# Energy output conduits
+	for angle in [0, TAU/3, TAU*2/3]:
+		var conduit_end_x = cx + cos(angle) * 35
+		var conduit_end_y = cy + sin(angle) * 35
+		var start = _iso_transform(cx + cos(angle) * 25, cy + sin(angle) * 25, torus_z)
+		var end_p = _iso_transform(conduit_end_x, conduit_end_y, 5)
+
+		draw_line(start, end_p, coil_color, 3 * _camera_zoom)
+
+		# Energy pulse traveling down conduit
+		var pulse_t = fmod(_time * 1.5 + angle, 1.0)
+		var pulse_pos = start.lerp(end_p, pulse_t)
+		draw_circle(pulse_pos, 4 * _camera_zoom, Color(0.5, 0.9, 1.0, 1.0 - pulse_t))
+
+	# Status lights on top
+	var status_pos = _iso_transform(cx, cy, height * 0.6 + 3)
+	var status_pulse = 0.5 + sin(_time * 2.0) * 0.5
+	draw_circle(status_pos, 5 * _camera_zoom, Color(0.2, 1.0, 0.4, status_pulse))
+
 # =============================================================================
 # DUST / WEATHER
 # =============================================================================
@@ -1355,23 +3335,26 @@ func _get_building_label(building_type: int) -> String:
 
 enum BuildingShape {
 	HEX_PRISM, TOWER, DOME, SOLAR_ARRAY, TERRAFORMING_TOWER,
-	ARCOLOGY, GREENHOUSE, REACTOR, LANDING_PAD, COMMS_TOWER, SPACE_ELEVATOR
+	ARCOLOGY, GREENHOUSE, REACTOR, LANDING_PAD, COMMS_TOWER, SPACE_ELEVATOR,
+	MASS_DRIVER, FUSION_REACTOR
 }
 
 func _get_building_shape(building_type: int) -> BuildingShape:
 	"""Determine which visual shape to use for a building type"""
 	match building_type:
-		# TOWER - rectangular buildings with windows
+		# DOME - low bunker/dome structures (survival era basics)
+		# Hab pods, medical bays, etc. are LOW pressurized shelters
+		_MCSTypes.BuildingType.HAB_POD, _MCSTypes.BuildingType.MEDICAL_BAY, \
+		_MCSTypes.BuildingType.SCHOOL, _MCSTypes.BuildingType.LAB, \
+		_MCSTypes.BuildingType.RECREATION_CENTER, _MCSTypes.BuildingType.TEMPLE:
+			return BuildingShape.DOME
+		# TOWER - tall rectangular buildings (growth era and later)
 		_MCSTypes.BuildingType.APARTMENT_BLOCK, _MCSTypes.BuildingType.FACTORY, \
 		_MCSTypes.BuildingType.WORKSHOP, _MCSTypes.BuildingType.HOSPITAL, \
 		_MCSTypes.BuildingType.UNIVERSITY, _MCSTypes.BuildingType.BARRACKS, \
 		_MCSTypes.BuildingType.STORAGE, _MCSTypes.BuildingType.GOVERNMENT_HALL, \
 		_MCSTypes.BuildingType.PRISON:
 			return BuildingShape.TOWER
-		# DOME - hemispherical structures (small/medium)
-		_MCSTypes.BuildingType.LAB, _MCSTypes.BuildingType.RECREATION_CENTER, \
-		_MCSTypes.BuildingType.TEMPLE:
-			return BuildingShape.DOME
 		# ARCOLOGY - mega domes for research centers and luxury
 		_MCSTypes.BuildingType.RESEARCH_CENTER, _MCSTypes.BuildingType.LUXURY_QUARTERS:
 			return BuildingShape.ARCOLOGY
@@ -1385,17 +3368,24 @@ func _get_building_shape(building_type: int) -> BuildingShape:
 		# REACTOR - glowing core power plants
 		_MCSTypes.BuildingType.FISSION_REACTOR, _MCSTypes.BuildingType.RTG:
 			return BuildingShape.REACTOR
-		# TERRAFORMING - tall processing towers
-		_MCSTypes.BuildingType.CO2_SCRUBBER, _MCSTypes.BuildingType.OXYGENATOR, \
-		_MCSTypes.BuildingType.WASTE_PROCESSOR:
-			return BuildingShape.TERRAFORMING_TOWER
+		# HEX_PRISM - small industrial (water extractor, oxygenator)
+		_MCSTypes.BuildingType.WATER_EXTRACTOR, _MCSTypes.BuildingType.OXYGENATOR, \
+		_MCSTypes.BuildingType.CO2_SCRUBBER, _MCSTypes.BuildingType.WASTE_PROCESSOR:
+			return BuildingShape.HEX_PRISM
 		# LANDING_PAD - flat pads with ships
 		_MCSTypes.BuildingType.LANDING_PAD, _MCSTypes.BuildingType.AIRLOCK:
 			return BuildingShape.LANDING_PAD
 		# COMMS_TOWER - lattice towers with dishes
 		_MCSTypes.BuildingType.COMMUNICATIONS:
 			return BuildingShape.COMMS_TOWER
-		# Default: hex prism for hab pods, medical, etc.
+		# MEGASTRUCTURES
+		_MCSTypes.BuildingType.MASS_DRIVER:
+			return BuildingShape.MASS_DRIVER
+		_MCSTypes.BuildingType.FUSION_REACTOR:
+			return BuildingShape.FUSION_REACTOR
+		_MCSTypes.BuildingType.SPACE_ELEVATOR:
+			return BuildingShape.SPACE_ELEVATOR
+		# Default: hex prism for anything else
 		_:
 			return BuildingShape.HEX_PRISM
 
@@ -1423,12 +3413,111 @@ func update_from_state(state: Dictionary):
 	_layout_buildings()
 
 func _layout_buildings():
-	"""Arrange buildings in rings around the lifepod"""
+	"""Main layout dispatcher - routes to perspective or isometric"""
 	_building_layout.clear()
 
 	if _buildings.size() == 0:
 		return
 
+	if PERSPECTIVE_ENABLED:
+		_layout_buildings_perspective()
+	else:
+		_layout_buildings_isometric()
+
+func _layout_buildings_perspective():
+	"""Arrange buildings in rows from foreground to horizon (perspective view)"""
+	var tier_mult = TIER_MULTIPLIERS.get(_colony_tier, 1.0)
+
+	# MEGASTRUCTURES get FIXED positions so they don't move around!
+	var megastructure_types = [
+		_MCSTypes.BuildingType.SPACE_ELEVATOR,
+		_MCSTypes.BuildingType.MASS_DRIVER,
+	]
+	var megastructure_positions = {
+		_MCSTypes.BuildingType.SPACE_ELEVATOR: {"lateral": -3.0, "depth": 0.08},  # Left foreground, FIXED
+		_MCSTypes.BuildingType.MASS_DRIVER: {"lateral": 5.0, "depth": 0.12},      # Right foreground, FIXED
+	}
+
+	# Separate megastructures from regular buildings
+	var regular_buildings = []
+	var megastructures = []
+	for building in _buildings:
+		var btype = building.get("type", 0)
+		if btype in megastructure_types:
+			megastructures.append(building)
+		else:
+			regular_buildings.append(building)
+
+	# Place megastructures at fixed positions FIRST
+	for building in megastructures:
+		var bid = building.get("id", "mega")
+		var btype = building.get("type", 0)
+		var building_tier = building.get("tier", 1)
+
+		var fixed_pos = megastructure_positions.get(btype, {"lateral": 0.0, "depth": 0.05})
+		var height_key = _get_building_height_key(btype)
+		var base_h = BUILDING_HEIGHTS.get(height_key, 8.0)
+		# DRAMATIC tier scaling: Tier 1 = bunker, Tier 5 = skyscraper!
+		var tier_scale = 1.0 + (building_tier - 1) * 1.0  # 100% per tier (5x at tier 5)
+
+		_building_layout[bid] = {
+			"lateral": fixed_pos.lateral,
+			"depth": fixed_pos.depth * MAX_DEPTH,
+			"world_x": fixed_pos.lateral,
+			"world_y": fixed_pos.depth * MAX_DEPTH,
+			"height": base_h * tier_mult * tier_scale,
+			"category": _get_building_category(btype),
+			"depth_ratio": fixed_pos.depth,
+			"tier": building_tier,
+		}
+
+	# STABLE POSITIONS: Use building ID hash to determine position
+	# This prevents shuffling when buildings upgrade or new ones are added
+	# Each building gets a permanent slot based on its ID
+
+	for building in regular_buildings:
+		var bid = building.get("id", "")
+		var btype = building.get("type", 0)
+		var building_tier = building.get("tier", 1)
+
+		# Use hash of building ID for stable, deterministic position
+		var hash_val = bid.hash()
+		var hash_norm = abs(hash_val) / float(0x7FFFFFFF)  # Normalize to 0-1
+
+		# Determine row (depth) based on hash - spread evenly across rows
+		var row_idx = int(hash_norm * PERSPECTIVE_ROWS.size()) % PERSPECTIVE_ROWS.size()
+		var row = PERSPECTIVE_ROWS[row_idx]
+		var base_depth = row.depth * MAX_DEPTH
+		var spread = row.spread * MAX_LATERAL
+
+		# Determine lateral position within row
+		var lateral_hash = abs((hash_val * 7919) % 0x7FFFFFFF) / float(0x7FFFFFFF)
+		var lateral = lerp(-spread, spread, lateral_hash)
+
+		# Small jitter for visual variety
+		var jitter_x = sin(hash_val * 0.1) * spread * 0.05
+		var jitter_depth = cos(hash_val * 0.07) * MAX_DEPTH * 0.01
+		lateral += jitter_x
+		var depth = base_depth + jitter_depth
+
+		var height_key = _get_building_height_key(btype)
+		var base_h = BUILDING_HEIGHTS.get(height_key, 8.0)
+		# DRAMATIC tier scaling: Tier 1 = bunker, Tier 5 = skyscraper!
+		var tier_scale = 1.0 + (building_tier - 1) * 1.0  # 100% per tier (5x at tier 5)
+
+		_building_layout[bid] = {
+			"lateral": lateral,
+			"depth": depth,
+			"world_x": lateral,
+			"world_y": depth,
+			"height": base_h * tier_mult * tier_scale,
+			"category": _get_building_category(btype),
+			"depth_ratio": row.depth,
+			"tier": building_tier,
+		}
+
+func _layout_buildings_isometric():
+	"""Arrange buildings in rings around the lifepod (original isometric layout)"""
 	var tier_mult = TIER_MULTIPLIERS.get(_colony_tier, 1.0)
 	var ring_radius = 55.0
 	var ring_spacing = 45.0
@@ -1455,15 +3544,19 @@ func _layout_buildings():
 			var building = _buildings[idx]
 			var bid = building.get("id", "building_%d" % idx)
 			var btype = building.get("type", 0)
+			var building_tier = building.get("tier", 1)  # 1-5, upgrades over time
 
 			var height_key = _get_building_height_key(btype)
 			var base_h = BUILDING_HEIGHTS.get(height_key, 8.0)
+			# DRAMATIC tier scaling: Tier 1 = bunker, Tier 5 = skyscraper!
+			var tier_scale = 1.0 + (building_tier - 1) * 1.0  # 100% per tier (5x at tier 5)
 
 			_building_layout[bid] = {
 				"world_x": wx,
 				"world_y": wy,
-				"height": base_h * tier_mult,
-				"category": _get_building_category(btype)
+				"height": base_h * tier_mult * tier_scale,
+				"category": _get_building_category(btype),
+				"tier": building_tier,
 			}
 
 			idx += 1
@@ -1505,7 +3598,7 @@ func set_colony_tier(tier: String):
 	_colony_tier = tier
 
 func set_camera_zoom(z: float):
-	_camera_zoom = clamp(z, 0.4, 3.0)
+	_camera_zoom = clamp(z, 0.3, 5.0)  # Allow much closer zoom for epic views
 
 func set_camera_offset(offset: Vector2):
 	_camera_pan = offset

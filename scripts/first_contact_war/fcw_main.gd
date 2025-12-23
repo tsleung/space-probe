@@ -5,6 +5,7 @@ extends Control
 
 # Preload FCW scripts
 const FCWTypes = preload("res://scripts/first_contact_war/fcw_types.gd")
+const FCWStore = preload("res://scripts/first_contact_war/fcw_store.gd")
 const FCWSolarMap = preload("res://scripts/first_contact_war/fcw_solar_map.gd")
 const FCWBattleSystem = preload("res://scripts/first_contact_war/fcw_battle_system.gd")
 const FCWBattleView = preload("res://scripts/first_contact_war/fcw_battle_view.gd")
@@ -109,6 +110,7 @@ const MAX_BATTLE_VIEWS = 4  # Maximum simultaneous battle windows
 # Planet Detail View (Picture-in-Picture)
 var _planet_view: FCWPlanetView
 var _planet_view_close_timer: float = -1.0  # Timer to auto-close planet view
+var _planet_view_saved_positions: Dictionary = {}  # zone_id -> Vector2 (user-dragged positions)
 
 # ============================================================================
 # LIFECYCLE
@@ -173,6 +175,7 @@ func _setup_planet_view() -> void:
 	_planet_view.size = Vector2(280, 200)
 	add_child(_planet_view)
 	_planet_view.close_requested.connect(_on_planet_view_close)
+	_planet_view.position_changed.connect(_on_planet_view_position_changed)
 
 func _setup_zone_fallen_overlay() -> void:
 	# Create dramatic full-screen overlay for zone fallen events
@@ -292,7 +295,7 @@ func _process(delta: float) -> void:
 
 	# Battle view runs in corner - no pause needed
 
-	# Handle attack animation phase
+	# Handle attack animation phase (but don't block game time!)
 	if _is_in_attack_phase:
 		_attack_phase_timer += delta
 		if _attack_phase_timer >= ATTACK_PHASE_DURATION:
@@ -300,7 +303,7 @@ func _process(delta: float) -> void:
 			solar_map.set_attacking(false)
 			if _planet_view and _planet_view.visible:
 				_schedule_planet_view_close(1.5)
-		return
+		# Don't return here - let game time continue during battles!
 
 	if _is_paused:
 		return
@@ -1418,36 +1421,11 @@ func _on_extra_battle_complete(battle_view: FCWBattleView) -> void:
 		_extra_battle_views.erase(battle_view)
 	battle_view.queue_free()
 
-func _spawn_cascading_battle_view(zone_name: String, defenders: Array, herald_count: int, will_hold: bool) -> void:
-	## Spawn a new battle view that cascades from existing views
-	# Count active views
-	var active_count = 1 if _battle_view.visible else 0
-	active_count += _extra_battle_views.size()
-
-	if active_count >= MAX_BATTLE_VIEWS:
-		return  # Too many views already
-
-	# Create new battle view
-	var new_view = FCWBattleView.new()
-	new_view.name = "BattleView_%d" % (_extra_battle_views.size() + 1)
-
-	# Cascade position: offset from bottom-right, stacking up and left
-	var cascade_offset = (_extra_battle_views.size() + 1) * 30
-	new_view.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	new_view.offset_left = -420 - cascade_offset
-	new_view.offset_top = -300 - cascade_offset
-	new_view.offset_right = -20 - cascade_offset
-	new_view.offset_bottom = -20 - cascade_offset
-	new_view.custom_minimum_size = Vector2(350, 250)  # Slightly smaller
-
-	add_child(new_view)
-	new_view.battle_complete.connect(_on_extra_battle_complete.bind(new_view))
-	new_view.ship_destroyed.connect(_on_ship_destroyed)
-
-	# Start the battle
-	new_view.start_battle(zone_name, defenders, herald_count, will_hold)
-
-	_extra_battle_views.append(new_view)
+func _spawn_cascading_battle_view(_zone_name: String, defenders: Array, herald_count: int, _will_hold: bool) -> void:
+	## Reinforce the existing battle instead of spawning new windows
+	## This makes fleet sizes grow larger for epic battles
+	if _battle_view and _battle_view.visible and _battle_view.is_active():
+		_battle_view.reinforce_battle(defenders, herald_count)
 
 func _on_ship_destroyed(ship_name: String) -> void:
 	# Log ship destruction
@@ -1459,6 +1437,12 @@ func _on_battle_view_expand_toggled(is_expanded: bool) -> void:
 func _on_planet_view_close() -> void:
 	_planet_view.hide_view()
 	_planet_view_close_timer = -1.0  # Cancel any pending auto-close
+
+func _on_planet_view_position_changed(new_position: Vector2) -> void:
+	## Save the user's dragged position for this zone
+	var zone_id = _planet_view.get_focused_zone()
+	if zone_id >= 0:
+		_planet_view_saved_positions[zone_id] = new_position
 
 func _schedule_planet_view_close(delay: float) -> void:
 	## Schedule the planet view to auto-close after a delay
@@ -1489,7 +1473,13 @@ func _show_planet_view_for_zone(zone_id: int, is_under_attack: bool) -> void:
 
 func _position_planet_view_near_zone(zone_id: int) -> void:
 	## Position the planet view window near the specified zone on the solar map
+	## If user has dragged this zone's view before, use saved position
 	if not solar_map:
+		return
+
+	# Check if we have a saved position for this zone
+	if _planet_view_saved_positions.has(zone_id):
+		_planet_view.position = _planet_view_saved_positions[zone_id]
 		return
 
 	var view_size = _planet_view.size

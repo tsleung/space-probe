@@ -155,8 +155,14 @@ var _player_losses: int = 0
 var _herald_losses: int = 0
 var _combat_phase: int = 0  # Current phase/round of combat
 var _phase_timer: float = 0.0
-var _phase_duration: float = 3.0  # Seconds per combat phase
+var _phase_duration: float = 1.0  # Seconds per combat phase (fast!)
 var _last_phase_announcement: String = ""
+
+# Performance caches
+var _cached_font: Font = null
+var _starfield_rng: RandomNumberGenerator = null
+var _active_player_count: int = 0  # Cached count, updated on death
+var _active_herald_count: int = 0
 var _is_major_battle: bool = false  # Epic battles last longer
 
 # Camera - Cinematic System
@@ -195,6 +201,10 @@ var _transmission_timer: float = 0.0
 var _is_expanded: bool = false
 var _expand_button_rect: Rect2 = Rect2(0, 0, 30, 20)
 
+# Drag state
+var _dragging: bool = false
+var _drag_offset: Vector2 = Vector2.ZERO
+
 # ============================================================================
 # LIFECYCLE
 # ============================================================================
@@ -206,12 +216,26 @@ func _ready() -> void:
 	clip_contents = true
 
 func _gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		var local_pos = event.position
-		# Check if clicked on expand button (top-right corner)
-		if _expand_button_rect.has_point(local_pos):
-			_toggle_expand()
-			accept_event()
+		if event.pressed:
+			# Check if clicked on expand button (top-right corner)
+			if _expand_button_rect.has_point(local_pos):
+				_toggle_expand()
+				accept_event()
+			else:
+				# Start dragging
+				_dragging = true
+				_drag_offset = local_pos
+				accept_event()
+		else:
+			# Stop dragging
+			_dragging = false
+
+	elif event is InputEventMouseMotion and _dragging:
+		# Move the panel
+		position += event.position - _drag_offset
+		accept_event()
 
 func _toggle_expand() -> void:
 	_is_expanded = not _is_expanded
@@ -247,64 +271,116 @@ func _process(delta: float) -> void:
 	# Cinematic camera changes
 	_update_cinematics(delta)
 
-	# Apply pressure in final phase to ensure predetermined outcome
-	_apply_final_phase_pressure()
-
-	# End battle if time's up and one side is eliminated (or force end)
-	if _battle_time >= _battle_duration and not _outcome_decided:
-		_force_battle_conclusion()
-		_end_battle()
+	# Continuous check for battle end - don't wait for phase boundary
+	if not _outcome_decided:
+		if _active_player_count == 0 or _active_herald_count == 0:
+			_end_battle()
 
 	queue_redraw()
 
 func _update_combat_phase() -> void:
-	## Real combat simulation - no dice rolls, weapons actually kill ships
-	## Phases are now just for UI/narrative tracking, not for arbitrary casualties
+	## Phase-based combat - each phase resolves actual kills based on fleet power
 	if _phase_timer >= _phase_duration:
 		_phase_timer = 0.0
 		_combat_phase += 1
 
-		# Count active ships (actual state from combat simulation)
-		var active_player = _player_ships.filter(func(s): return not s.is_destroyed)
-		var active_herald = _herald_ships.filter(func(s): return not s.is_destroyed)
-		var current_player = active_player.size()
-		var current_herald = active_herald.size()
+		# RESOLVE COMBAT - this is where ships actually die
+		_resolve_phase_combat()
 
-		# Update loss counts from actual combat
+		# Use cached counts (updated by _destroy_* functions)
+		var current_player = _active_player_count
+		var current_herald = _active_herald_count
+
+		# Update loss counts
 		_player_losses = _starting_player_ships - current_player
 		_herald_losses = _starting_herald_ships - current_herald
 
-		# Phase announcements based on REAL combat state
+		# Phase announcements
 		var announcement = ""
 		if _combat_phase == 1:
 			announcement = "[COMBAT] Weapons hot - all batteries engaging!"
+		elif current_player == 0:
+			announcement = "[COMMAND] All ships lost!"
+		elif current_herald == 0:
+			announcement = "[TACTICAL] All enemy contacts destroyed!"
 		else:
-			# Narrative based on actual battle state
 			var player_pct = float(current_player) / maxf(_starting_player_ships, 1)
 			var herald_pct = float(current_herald) / maxf(_starting_herald_ships, 1)
-
-			if current_player == 0:
-				announcement = "[COMMAND] All ships lost!"
-			elif current_herald == 0:
-				announcement = "[TACTICAL] All enemy contacts destroyed!"
-			elif player_pct < 0.3 and _player_losses > 0:
+			if player_pct < 0.3 and _player_losses > 0:
 				announcement = "[MAYDAY] Fleet critically damaged!"
 			elif herald_pct < 0.3 and _herald_losses > 0:
 				announcement = "[TACTICAL] Enemy fleet breaking apart!"
-			elif _player_losses > 0 or _herald_losses > 0:
-				var combat_msgs = [
-					"[PHASE %d] Heavy exchange of fire",
-					"[PHASE %d] Combat continues",
-					"[PHASE %d] Weapons free, all batteries",
-				]
-				announcement = combat_msgs[_combat_phase % combat_msgs.size()] % _combat_phase
 
 		if not announcement.is_empty() and announcement != _last_phase_announcement:
 			_transmissions.append(announcement)
 			_last_phase_announcement = announcement
 
-		# Check for battle conclusion conditions
-		_check_battle_conclusion(current_player, current_herald)
+		# Check if battle is over (one side eliminated)
+		if current_player == 0 or current_herald == 0:
+			if not _outcome_decided:
+				_end_battle()
+
+func _resolve_phase_combat() -> void:
+	## Phase combat with logarithmic scaling:
+	## - 10v10 (even-ish) → ~1 kill/phase → 10 seconds
+	## - 100v10 (overwhelming) → ~3 kills/phase → 3 seconds
+
+	# Use cached counts for quick check
+	if _active_player_count == 0 or _active_herald_count == 0:
+		return  # Battle already over
+
+	var player_count = _active_player_count
+	var herald_count = _active_herald_count
+
+	# Calculate power with 3x winner bonus
+	var player_power = float(player_count) * (3.0 if _player_won else 1.0)
+	var herald_power = float(herald_count) * (3.0 if not _player_won else 1.0)
+
+	# Power ratio determines kill rate
+	var winner_power = player_power if _player_won else herald_power
+	var loser_power = herald_power if _player_won else player_power
+	var power_ratio = winner_power / maxf(loser_power, 1.0)
+
+	# Kills scale logarithmically: 1 at even odds, +1 per 5x advantage
+	# 3:1 ratio (10v10 player wins) → 1 kill/phase → 10 phases
+	# 30:1 ratio (100v10) → 3 kills/phase → 3-4 phases
+	# 300:1 ratio (300v1) → 4-5 kills/phase → instant
+	var kills_this_phase = maxi(1, 1 + int(log(power_ratio) / log(5.0)))
+
+	# Apply kills to losing side - pick random active ships
+	var kills_applied = 0
+	var losing_array = _herald_ships if _player_won else _player_ships
+	var losing_count = _active_herald_count if _player_won else _active_player_count
+
+	# Randomly pick ships to destroy (shuffle indices for fairness)
+	while kills_applied < kills_this_phase and losing_count > 0:
+		var idx = randi() % losing_array.size()
+		var ship = losing_array[idx]
+		if not ship.is_destroyed:
+			ship.health = 0
+			if _player_won:
+				_destroy_herald(ship)
+			else:
+				_destroy_human(ship)
+			kills_applied += 1
+			losing_count -= 1  # Track locally to avoid infinite loop
+
+	# Loser occasionally scores a kill (15% chance per phase for drama)
+	if randf() < 0.15:
+		var winner_array = _player_ships if _player_won else _herald_ships
+		var winner_count = _active_player_count if _player_won else _active_herald_count
+		if winner_count > 0:
+			# Find a random active winner ship
+			for _attempt in range(10):  # Max 10 attempts to find active ship
+				var idx = randi() % winner_array.size()
+				var ship = winner_array[idx]
+				if not ship.is_destroyed:
+					ship.health = 0
+					if _player_won:
+						_destroy_human(ship)
+					else:
+						_destroy_herald(ship)
+					break
 
 func _draw() -> void:
 	# Ensure minimum size for drawing
@@ -442,16 +518,20 @@ func _draw_human_ship(ship: BattleShip, offset: Vector2) -> void:
 	draw_line(pos - dir * s * 0.5, pos + dir * s * 0.8, Color(0.35, 0.35, 0.4), 3)
 	draw_circle(pos + dir * s * 0.9, 2, Color(0.5, 0.5, 0.55))
 
-	# Damage effects
+	# Damage effects - deterministic positions for performance
 	if ship.health < 0.7:
-		for i in range(int((1.0 - ship.health) * 5)):
-			if randf() < 0.5:
-				var spark_pos = pos + Vector2(randf_range(-s, s), randf_range(-s, s)) * 0.6
-				draw_circle(spark_pos, randf_range(1, 3), Color(1, 0.5, 0.2, randf()))
-		# Smoke
-		if randf() < 0.3:
-			var smoke_pos = pos + Vector2(randf_range(-s, s), randf_range(-s, s)) * 0.4
-			draw_circle(smoke_pos, randf_range(3, 6), Color(0.3, 0.3, 0.3, 0.3))
+		var damage_level = int((1.0 - ship.health) * 3)  # 0-3 sparks max
+		var time_phase = _battle_time * 8
+		for i in range(damage_level):
+			# Deterministic position based on time + index
+			var angle = time_phase + i * 2.1
+			var spark_pos = pos + Vector2(cos(angle), sin(angle)) * s * 0.5
+			var spark_alpha = 0.5 + sin(time_phase + i) * 0.3
+			draw_circle(spark_pos, 2, Color(1, 0.5, 0.2, spark_alpha))
+		# Single smoke puff at deterministic position
+		if damage_level > 1:
+			var smoke_pos = pos + Vector2(sin(time_phase * 0.3), cos(time_phase * 0.4)) * s * 0.3
+			draw_circle(smoke_pos, 4, Color(0.3, 0.3, 0.3, 0.25))
 
 	# Health bar
 	if ship.health < 1.0:
@@ -463,9 +543,8 @@ func _draw_human_ship(ship: BattleShip, offset: Vector2) -> void:
 
 	# Ship name
 	if ship.ship_data and ship.ship_data.get("name"):
-		var font = ThemeDB.fallback_font
 		var name_text = ship.ship_data.name.substr(0, 10)
-		draw_string(font, pos + Vector2(-20, -s * 1.3), name_text, HORIZONTAL_ALIGNMENT_CENTER, 40, 7, Color(0.6, 0.8, 1.0, 0.7))
+		draw_string(_get_font(), pos + Vector2(-20, -s * 1.3), name_text, HORIZONTAL_ALIGNMENT_CENTER, 40, 7, Color(0.6, 0.8, 1.0, 0.7))
 
 # ============================================================================
 # DRAWING - HERALD SHIPS (Organic, Pulsing, Alien)
@@ -741,37 +820,45 @@ func _draw_debris(d: Debris, offset: Vector2) -> void:
 		draw_colored_polygon(points, Color(0.35, 0.35, 0.38, alpha))
 
 func _draw_starfield(rect: Rect2, offset: Vector2) -> void:
-	var rng = RandomNumberGenerator.new()
-	rng.seed = 77777
-	for i in range(50):
-		var star_pos = Vector2(rng.randf() * rect.size.x, rng.randf() * rect.size.y)
+	# Use cached RNG - reset seed each frame for consistent positions
+	if not _starfield_rng:
+		_starfield_rng = RandomNumberGenerator.new()
+	_starfield_rng.seed = 77777
+
+	# Reduced star count for performance (30 instead of 50)
+	for i in range(30):
+		var star_pos = Vector2(_starfield_rng.randf() * rect.size.x, _starfield_rng.randf() * rect.size.y)
 		star_pos += offset * 0.05
 		star_pos.x = fmod(star_pos.x + rect.size.x, rect.size.x)
 		star_pos.y = fmod(star_pos.y + rect.size.y, rect.size.y)
-		var brightness = rng.randf_range(0.3, 0.9)
-		var twinkle = sin(_battle_time * rng.randf_range(1, 4) + i) * 0.2 + 0.8
-		draw_circle(star_pos, rng.randf_range(0.5, 1.5), Color(brightness * twinkle, brightness * twinkle, brightness * twinkle * 1.1))
+		var brightness = _starfield_rng.randf_range(0.3, 0.9)
+		# Simplified twinkle - less sin() calls
+		var twinkle = 0.9 if (i + int(_battle_time * 2)) % 5 == 0 else 1.0
+		draw_circle(star_pos, _starfield_rng.randf_range(0.5, 1.2), Color(brightness * twinkle, brightness * twinkle, brightness))
 
 func _draw_nebula(rect: Rect2) -> void:
-	var rng = RandomNumberGenerator.new()
-	rng.seed = 33333
-	for i in range(2):
-		var center = Vector2(rng.randf() * rect.size.x, rng.randf() * rect.size.y)
-		var nebula_color = Color(0.1, 0.05, 0.15, 0.08) if i == 0 else Color(0.05, 0.08, 0.12, 0.06)
-		draw_circle(center, 100, nebula_color)
+	# Static nebula - no RNG needed, positions are fixed
+	draw_circle(Vector2(rect.size.x * 0.3, rect.size.y * 0.4), 100, Color(0.1, 0.05, 0.15, 0.08))
+	draw_circle(Vector2(rect.size.x * 0.7, rect.size.y * 0.6), 100, Color(0.05, 0.08, 0.12, 0.06))
 
 # ============================================================================
 # DRAWING - UI
 # ============================================================================
 
+func _get_font() -> Font:
+	if not _cached_font:
+		_cached_font = ThemeDB.fallback_font
+	return _cached_font
+
 func _draw_battle_ui(rect: Rect2) -> void:
-	var font = ThemeDB.fallback_font
+	var font = _get_font()
 
 	# === EU4-STYLE COMBAT DISPLAY ===
 	# Shows forces on each side with visual attrition bars
 
-	var player_alive = _player_ships.filter(func(s): return not s.is_destroyed).size()
-	var herald_alive = _herald_ships.filter(func(s): return not s.is_destroyed).size()
+	# Use cached counts for performance
+	var player_alive = _active_player_count
+	var herald_alive = _active_herald_count
 
 	# Calculate loss percentages for visual effect
 	var player_start = maxi(_starting_player_ships, 1)
@@ -853,7 +940,7 @@ func _draw_battle_ui(rect: Rect2) -> void:
 
 func _draw_force_panel(rect: Rect2, title: String, starting: int, current: int, losses: int,
 		bg_color: Color, text_color: Color, is_player: bool) -> void:
-	var font = ThemeDB.fallback_font
+	var font = _get_font()
 
 	# Panel background
 	draw_rect(rect, bg_color.darkened(0.7))
@@ -915,7 +1002,7 @@ func _draw_force_panel(rect: Rect2, title: String, starting: int, current: int, 
 			draw_line(Vector2(icon_x + 2, bar_y + 1), Vector2(icon_x - 2, bar_y + bar_h - 1), Color(0.5, 0.2, 0.2, 0.6), 1)
 
 func _draw_transmission(rect: Rect2) -> void:
-	var font = ThemeDB.fallback_font
+	var font = _get_font()
 	var box_h = 28
 	var box_y = rect.size.y - box_h - 4
 	draw_rect(Rect2(4, box_y, rect.size.x - 8, box_h), Color(0.0, 0.05, 0.12, 0.92))
@@ -926,7 +1013,7 @@ func _draw_transmission(rect: Rect2) -> void:
 	draw_string(font, Vector2(10, box_y + 18), text, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 20, 9, Color(0.6, 0.85, 1.0))
 
 func _draw_expand_button(rect: Rect2) -> void:
-	var font = ThemeDB.fallback_font
+	var font = _get_font()
 	var btn_w = 24
 	var btn_h = 16
 	var btn_x = rect.size.x - btn_w - 4
@@ -1638,13 +1725,19 @@ func _hit_human(ship: BattleShip, damage: float, hit_pos: Vector2) -> void:
 			_destroy_human(ship)
 
 func _destroy_herald(ship: BattleShip) -> void:
+	if ship.is_destroyed:
+		return  # Already destroyed
 	ship.is_destroyed = true
+	_active_herald_count -= 1
 	_create_explosion(ship.pos, ship.size * 4, true)
 	_shake_intensity = maxf(_shake_intensity, 12)
 	_spawn_debris(ship.pos, 10, true)
 
 func _destroy_human(ship: BattleShip) -> void:
+	if ship.is_destroyed:
+		return  # Already destroyed
 	ship.is_destroyed = true
+	_active_player_count -= 1
 	_create_explosion(ship.pos, ship.size * 4, false)
 	_shake_intensity = maxf(_shake_intensity, 15)
 	_spawn_debris(ship.pos, 12, false)
@@ -1729,157 +1822,18 @@ func _point_to_line_dist(point: Vector2, line_start: Vector2, line_end: Vector2)
 	return point.distance_to(projection)
 
 # ============================================================================
-# BATTLE CONCLUSION - Ensures predetermined outcome through biased combat
+# BATTLE COMBAT HELPERS - Simplified for phase-based combat
 # ============================================================================
 
-var _in_final_phase: bool = false  # When true, last ships can die
+var _in_final_phase: bool = false  # Legacy, kept for compatibility
 
-func _check_battle_conclusion(current_player: int, current_herald: int) -> void:
-	## Check if battle should conclude and manage the final phase
-	var battle_progress = _battle_time / _battle_duration
+func _get_damage_multiplier(_attacker_is_player: bool) -> float:
+	## Visual weapon damage - just return 1.0, phase combat handles outcome
+	return 1.0
 
-	# Early battle - keep at least 1 ship on each side for drama
-	if battle_progress < 0.7:
-		return
-
-	# Near end of battle - enter final phase where last ships can die
-	if battle_progress > 0.85 and not _in_final_phase:
-		_in_final_phase = true
-		if _player_won:
-			_transmissions.append("[TACTICAL] Enemy retreat detected - press the attack!")
-		else:
-			_transmissions.append("[COMMAND] All ships, fighting withdrawal!")
-
-	# Check for natural conclusion (one side eliminated)
-	if current_player == 0 or current_herald == 0:
-		if not _outcome_decided:
-			_end_battle()
-
-func _get_damage_multiplier(attacker_is_player: bool) -> float:
-	## Returns damage multiplier based on predetermined outcome
-	## CRITICAL: Winners ALWAYS do more damage from the start
-	## The battle must never show the wrong side winning
-	var battle_progress = _battle_time / _battle_duration
-
-	# Strong initial bias that increases over time
-	# Start at 1.3x advantage, grow to 2.0x by end
-	var base_advantage = 1.3
-	var scaling_advantage = battle_progress * 0.7  # Additional 0.7x by end
-	var winner_mult = base_advantage + scaling_advantage
-
-	# Losers do reduced damage from the start
-	var loser_mult = 0.6 - battle_progress * 0.2  # 0.6x down to 0.4x
-
-	if attacker_is_player:
-		# Player attacking herald
-		return winner_mult if _player_won else loser_mult
-	else:
-		# Herald attacking player
-		return winner_mult if not _player_won else loser_mult
-
-func _should_protect_ship(ship: BattleShip) -> bool:
-	## Returns true if this ship should be protected from death
-	## CRITICAL: Winning side's ships are ALWAYS protected until final phase
-	## Losing side only protected if they're the last ship (for drama)
-	if _in_final_phase:
-		return false  # No protection in final phase - let battle conclude
-
-	var is_on_winning_side = (ship.is_player and _player_won) or (not ship.is_player and not _player_won)
-
-	if is_on_winning_side:
-		# ALWAYS protect winning side ships until final phase
-		# They must never all die before the battle ends correctly
-		var active_same_side = 0
-		if ship.is_player:
-			for s in _player_ships:
-				if not s.is_destroyed:
-					active_same_side += 1
-		else:
-			for s in _herald_ships:
-				if not s.is_destroyed:
-					active_same_side += 1
-		# Protect if this would be less than 2 ships (keep drama)
-		return active_same_side <= 2
-	else:
-		# Losing side - only protect the very last ship for dramatic final stand
-		var active_same_side = 0
-		if ship.is_player:
-			for s in _player_ships:
-				if not s.is_destroyed:
-					active_same_side += 1
-		else:
-			for s in _herald_ships:
-				if not s.is_destroyed:
-					active_same_side += 1
-		return active_same_side <= 1
-
-func _apply_final_phase_pressure() -> void:
-	## In final phase, aggressively ensure the correct side wins
-	## This is called every frame, so use small increments
-	if not _in_final_phase:
-		# Even before final phase, apply light attrition to losing side
-		_apply_losing_side_attrition()
-		return
-
-	var active_player = _player_ships.filter(func(s): return not s.is_destroyed)
-	var active_herald = _herald_ships.filter(func(s): return not s.is_destroyed)
-
-	# Aggressive drain in final phase - battle must end correctly
-	var drain_rate = 0.02  # 2% per frame = fast
-
-	if _player_won:
-		# Pressure herald ships to die
-		for ship in active_herald:
-			ship.health -= drain_rate
-			ship.damage_flicker = maxf(ship.damage_flicker, 0.3)
-			if ship.health <= 0 and not ship.is_destroyed:
-				_destroy_herald(ship)
-	else:
-		# Pressure player ships to die
-		for ship in active_player:
-			ship.health -= drain_rate
-			ship.damage_flicker = maxf(ship.damage_flicker, 0.3)
-			if ship.health <= 0 and not ship.is_destroyed:
-				_destroy_human(ship)
-
-func _apply_losing_side_attrition() -> void:
-	## Constant light attrition on losing side to ensure they're always behind
-	## Called every frame before final phase
-	var battle_progress = _battle_time / _battle_duration
-
-	# Attrition increases as battle progresses
-	var attrition_rate = 0.001 + battle_progress * 0.003  # 0.1% to 0.4% per frame
-
-	if _player_won:
-		# Herald is losing - apply attrition
-		for ship in _herald_ships:
-			if not ship.is_destroyed and not _should_protect_ship(ship):
-				ship.health -= attrition_rate
-				if ship.health <= 0:
-					_destroy_herald(ship)
-	else:
-		# Player is losing - apply attrition
-		for ship in _player_ships:
-			if not ship.is_destroyed and not _should_protect_ship(ship):
-				ship.health -= attrition_rate
-				if ship.health <= 0:
-					_destroy_human(ship)
-
-func _force_battle_conclusion() -> void:
-	## Called when battle time is up - ensure the correct side wins
-	## This is the "director's cut" - make sure the story ends right
-	var active_player = _player_ships.filter(func(s): return not s.is_destroyed)
-	var active_herald = _herald_ships.filter(func(s): return not s.is_destroyed)
-
-	if _player_won:
-		# Player should win - destroy remaining herald ships
-		for ship in active_herald:
-			_destroy_herald(ship)
-			_transmissions.append("[TACTICAL] Final enemy contact destroyed!")
-	else:
-		# Herald should win - destroy remaining player ships
-		for ship in active_player:
-			_destroy_human(ship)
+func _should_protect_ship(_ship: BattleShip) -> bool:
+	## No protection - phase combat handles kills decisively
+	return false
 
 # ============================================================================
 # PUBLIC API
@@ -1904,25 +1858,13 @@ func start_battle(zone_name: String, player_ships: Array, herald_count: int, wil
 	_last_phase_announcement = ""
 	_in_final_phase = false  # Reset final phase flag
 
-	# Determine if this is a major battle (epic length)
+	# Determine if this is a major battle (for visual effects)
 	_is_major_battle = total_ships >= 8 or herald_count >= 6 or zone_name in ["Jupiter", "Saturn", "Earth", "Mars"]
 
-	# Scale battle duration: small skirmish = 8s, major battle = 25-40s
-	if total_ships <= 3:
-		_battle_duration = 8.0  # Quick skirmish
-		_phase_duration = 4.0
-	elif total_ships <= 6:
-		_battle_duration = 15.0  # Standard engagement
-		_phase_duration = 3.5
-	elif _is_major_battle:
-		_battle_duration = 25.0 + total_ships * 1.5  # EPIC battle
-		_phase_duration = 4.0
-	else:
-		_battle_duration = 18.0
-		_phase_duration = 3.5
-
-	# Cap at reasonable max
-	_battle_duration = minf(_battle_duration, 45.0)
+	# Fast 1-second phases - battle ends when one side is eliminated
+	# No duration timer needed - combat resolution handles everything
+	_phase_duration = 1.0
+	_battle_duration = 60.0  # Fallback max (should never be reached)
 
 	# Clear all
 	_player_ships.clear()
@@ -1983,6 +1925,10 @@ func start_battle(zone_name: String, player_ships: Array, herald_count: int, wil
 		ship.shields = 0.5  # Heralds have shields
 		_herald_ships.append(ship)
 
+	# Initialize cached counts for performance
+	_active_player_count = _player_ships.size()
+	_active_herald_count = _herald_ships.size()
+
 	# Follow first player ship
 	if not _player_ships.is_empty():
 		_follow_ship = _player_ships[0]
@@ -1993,6 +1939,57 @@ func start_battle(zone_name: String, player_ships: Array, herald_count: int, wil
 
 	visible = true
 
+func reinforce_battle(player_ships: Array, herald_count: int) -> void:
+	## Add more ships to an ongoing battle - makes fleet sizes grow
+	if not _is_active:
+		return
+
+	# Scale factor based on view size
+	var scale_factor = minf(size.x / 400.0, size.y / 280.0)
+	scale_factor = clampf(scale_factor, 1.0, 2.5)
+
+	var center = size / 2
+	var ship_spacing = 40 * scale_factor
+	var ship_base_size = 12 * scale_factor
+
+	# Add human reinforcements (arrive from right edge)
+	var existing_player = _player_ships.size()
+	for i in range(player_ships.size()):
+		var ship = BattleShip.new()
+		ship.ship_data = player_ships[i]
+		# Start off-screen right and move in
+		ship.pos = Vector2(size.x + 50, center.y + ((existing_player + i) % 8 - 4) * ship_spacing * 0.8)
+		ship.vel = Vector2(-80, 0)  # Moving into battle
+		ship.rotation = PI
+		ship.size = ship_base_size + (i % 2) * 4 * scale_factor
+		ship.is_player = true
+		ship.health = 1.0
+		ship.shields = 0
+		_player_ships.append(ship)
+
+	# Add herald reinforcements (arrive from left edge)
+	for i in range(herald_count):
+		var ship = BattleShip.new()
+		ship.pos = Vector2(-30, 40 * scale_factor + randf() * (size.y - 80 * scale_factor))
+		ship.vel = Vector2(60, 0)  # Moving into battle
+		ship.rotation = 0
+		ship.size = randf_range(10, 16) * scale_factor
+		ship.is_player = false
+		ship.health = 0.7
+		ship.shields = 0.5
+		_herald_ships.append(ship)
+
+	# Update counts for phase combat ratios
+	_starting_player_ships += player_ships.size()
+	_starting_herald_ships += herald_count
+
+	# Update cached active counts
+	_active_player_count += player_ships.size()
+	_active_herald_count += herald_count
+
+	# Dramatic announcement
+	_transmissions.append("[COMMAND] Reinforcements arriving!")
+
 func _end_battle() -> void:
 	_outcome_decided = true
 	if _player_won:
@@ -2000,7 +1997,7 @@ func _end_battle() -> void:
 	else:
 		_transmissions.append("[COMMAND] Zone lost. All ships withdraw!")
 
-	await get_tree().create_timer(2.5).timeout
+	await get_tree().create_timer(0.8).timeout  # Quick close after battle ends
 	_is_active = false
 	visible = false
 	battle_complete.emit()

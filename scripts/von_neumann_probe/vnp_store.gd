@@ -16,7 +16,11 @@ func get_state():
 func dispatch(action):
 	# The reducer returns the new state
 	var new_state = reducer.reduce(state, action)
-	
+
+	# Don't update if reducer returned null (error case)
+	if new_state == null:
+		return
+
 	# Only update and notify if the state has actually changed
 	if new_state != state:
 		state = new_state

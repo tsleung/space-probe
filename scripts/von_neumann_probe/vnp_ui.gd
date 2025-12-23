@@ -44,6 +44,9 @@ func _create_ui():
 		var panel = _create_team_panel(team)
 		status_container.add_child(panel)
 		team_panels[team] = panel
+		# Hide Progenitor panel initially - it will be revealed during The Cycle
+		if team == VnpTypes.Team.PROGENITOR:
+			panel.visible = false
 
 	# Add menu button to the status bar (top right)
 	var menu_button = Button.new()
@@ -271,7 +274,15 @@ func init(vnp_store, bases: Dictionary, controller = null, point_nodes: Dictiona
 	on_state_changed(current_state)
 
 func on_state_changed(state):
+	if state == null or not state.has("teams"):
+		return
 	for team in VnpTypes.Team.values():
+		# Skip teams that don't exist in state (like PROGENITOR)
+		if not state.teams.has(team):
+			continue
+		# Skip teams without UI panels
+		if not team_panels.has(team):
+			continue
 		var ship_count = _count_team_ships(state, team)
 		var point_count = _count_team_strategic_points(state, team)
 		var energy = state.teams[team].energy
@@ -376,7 +387,16 @@ func _count_team_strategic_points(state: Dictionary, team: int) -> int:
 
 
 func show_victory(winner_name: String):
-	victory_label.text = "%s Wins!" % winner_name
+	# Special message if Progenitor wins
+	if winner_name == "The Progenitor":
+		victory_label.text = "THE CYCLE CONTINUES\nYou have been absorbed."
+		victory_label.add_theme_color_override("font_color", VnpTypes.PROGENITOR_PULSE)
+		victory_label.add_theme_font_size_override("font_size", 36)
+	else:
+		victory_label.text = "%s Wins!" % winner_name
+		victory_label.add_theme_color_override("font_color", Color.WHITE)
+		victory_label.add_theme_font_size_override("font_size", 48)
+
 	victory_label.visible = true
 
 	# Animate victory label
@@ -870,6 +890,14 @@ func show_mystery_card():
 	if mystery_card:
 		mystery_card.queue_free()
 
+	# Show the Progenitor team panel with "???" as the name
+	var progenitor_panel = team_panels.get(VnpTypes.Team.PROGENITOR)
+	if progenitor_panel:
+		progenitor_panel.visible = true
+		var name_label = progenitor_panel.get_node_or_null("VBoxContainer/NameLabel")
+		if name_label:
+			name_label.text = "???"
+
 	mystery_card = PanelContainer.new()
 	mystery_card.name = "MysteryCard"
 	mystery_card.set_anchors_preset(Control.PRESET_CENTER)
@@ -913,24 +941,47 @@ func show_mystery_card():
 
 
 func reveal_progenitor():
-	"""Transition from ??? to THE PROGENITOR - name revealed"""
+	"""Transition from ??? to THE PROGENITOR - name revealed in team panel"""
 	convergence_active = true
 
+	# Update the team panel name from "???" to "THE PROGENITOR"
+	var progenitor_panel = team_panels.get(VnpTypes.Team.PROGENITOR)
+	if progenitor_panel:
+		var name_label = progenitor_panel.get_node_or_null("VBoxContainer/NameLabel")
+		if name_label:
+			# Dramatic reveal animation
+			var tween = create_tween()
+			tween.tween_property(name_label, "modulate:a", 0.0, 0.3)
+			tween.tween_callback(func(): name_label.text = "THE PROGENITOR")
+			tween.tween_property(name_label, "modulate:a", 1.0, 0.5)
+
+	# Also show a dramatic centered reveal card
 	if progenitor_label:
 		progenitor_label.queue_free()
 
 	progenitor_label = Label.new()
 	progenitor_label.name = "ProgenitorLabel"
 	progenitor_label.text = "THE PROGENITOR"
-	progenitor_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	progenitor_label.position.y = 80
+	progenitor_label.set_anchors_preset(Control.PRESET_CENTER)
 	progenitor_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	progenitor_label.add_theme_font_size_override("font_size", 32)
-	progenitor_label.add_theme_color_override("font_color", VnpTypes.PROGENITOR_ACCENT)
+	progenitor_label.add_theme_font_size_override("font_size", 56)
+	progenitor_label.add_theme_color_override("font_color", VnpTypes.PROGENITOR_PULSE)
 	progenitor_label.add_theme_color_override("font_shadow_color", Color.BLACK)
-	progenitor_label.add_theme_constant_override("shadow_offset_x", 2)
-	progenitor_label.add_theme_constant_override("shadow_offset_y", 2)
+	progenitor_label.add_theme_constant_override("shadow_offset_x", 3)
+	progenitor_label.add_theme_constant_override("shadow_offset_y", 3)
+	progenitor_label.modulate.a = 0.0
 	add_child(progenitor_label)
+
+	# Dramatic fade in and out for the name reveal
+	var reveal_tween = create_tween()
+	reveal_tween.tween_property(progenitor_label, "modulate:a", 1.0, 0.5)
+	reveal_tween.tween_interval(2.5)
+	reveal_tween.tween_property(progenitor_label, "modulate:a", 0.0, 1.0)
+	reveal_tween.tween_callback(func():
+		if progenitor_label and is_instance_valid(progenitor_label):
+			progenitor_label.queue_free()
+			progenitor_label = null
+	)
 
 	# Flip the BURST button to show RETREAT functionality
 	_update_burst_button_for_convergence()

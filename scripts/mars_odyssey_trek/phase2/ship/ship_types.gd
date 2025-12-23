@@ -108,3 +108,51 @@ const CREW_COLORS = {
 
 static func get_crew_color(role: String) -> Color:
 	return CREW_COLORS.get(role, Color.WHITE)
+
+# ============================================================================
+# PHASE 2 INTEGRATION MAPPINGS
+# ============================================================================
+
+# Map P2 storage container IDs to visual rooms
+const CONTAINER_TO_ROOM = {
+	"cargo_a": RoomType.CARGO_BAY,      # Forward cargo → main cargo bay
+	"cargo_b": RoomType.QUARTERS,       # Midship → quarters (secondary storage)
+	"cargo_c": RoomType.ENGINEERING,    # Aft → engineering (secondary storage)
+	"emergency": RoomType.MEDICAL       # Emergency hab → medical bay
+}
+
+# Map P2 crew role names to visual role IDs
+const P2_ROLE_TO_VISUAL = {
+	"Commander": "commander",
+	"Engineer": "engineer",
+	"Scientist": "scientist",
+	"Medical": "medical"
+}
+
+# Reverse mapping: visual role ID to P2 role name
+const VISUAL_TO_P2_ROLE = {
+	"commander": "Commander",
+	"engineer": "Engineer",
+	"scientist": "Scientist",
+	"medical": "Medical"
+}
+
+# Which crew role should respond to which room's emergencies
+const ROOM_EMERGENCY_RESPONDER = {
+	RoomType.BRIDGE: "commander",
+	RoomType.ENGINEERING: "engineer",
+	RoomType.LIFE_SUPPORT: "engineer",
+	RoomType.MEDICAL: "medical",
+	RoomType.QUARTERS: "commander",
+	RoomType.CARGO_BAY: "scientist",
+	RoomType.CORRIDOR: "engineer"
+}
+
+static func get_room_for_container(container_id: String) -> RoomType:
+	return CONTAINER_TO_ROOM.get(container_id, RoomType.CARGO_BAY)
+
+static func get_visual_role(p2_role: String) -> String:
+	return P2_ROLE_TO_VISUAL.get(p2_role, "engineer")
+
+static func get_emergency_responder(room_type: RoomType) -> String:
+	return ROOM_EMERGENCY_RESPONDER.get(room_type, "engineer")

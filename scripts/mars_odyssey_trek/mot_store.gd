@@ -72,7 +72,7 @@ func is_ready_to_launch() -> bool:
 # ACTIONS - LAUNCH WINDOW
 # ============================================================================
 
-func set_launch_window(window: MOTOrbital.LaunchWindow) -> void:
+func set_launch_window(window: RefCounted) -> void:
 	var old_state = _state.duplicate(true)
 
 	_state.launch_window = window.get_summary()

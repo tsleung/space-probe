@@ -1,8 +1,8 @@
 class_name VnpTypes
 
-enum Team { PLAYER, ENEMY_1, NEMESIS }
-enum ShipType { FRIGATE, DESTROYER, CRUISER, HARVESTER, DEFENDER, SHIELDER, GRAVITON, STARBASE, BASE_TURRET }
-enum WeaponType { GUN, LASER, MISSILE, PDC, SHIELD, GRAVITY, TURBOLASER }
+enum Team { PLAYER, ENEMY_1, NEMESIS, PROGENITOR }
+enum ShipType { FRIGATE, DESTROYER, CRUISER, HARVESTER, DEFENDER, SHIELDER, GRAVITON, STARBASE, BASE_TURRET, PROGENITOR_DRONE }
+enum WeaponType { GUN, LASER, MISSILE, PDC, SHIELD, GRAVITY, TURBOLASER, VOID_TENDRIL }
 enum ShipSize { SMALL, MEDIUM, LARGE, MASSIVE }
 
 # The Cycle - Convergence phases
@@ -25,18 +25,19 @@ const CONVERGENCE_PHASE_NAMES = {
 }
 
 # The Progenitor - not a faction, a phenomenon
-const PROGENITOR_COLOR = Color(0.15, 0.0, 0.2)  # Deep void purple
-const PROGENITOR_ACCENT = Color(0.4, 0.1, 0.5)  # Lighter purple for effects
+const PROGENITOR_COLOR = Color(0.05, 0.15, 0.12)  # Deep void teal - alien darkness
+const PROGENITOR_ACCENT = Color(0.15, 0.5, 0.4)   # Sickly teal glow for effects
+const PROGENITOR_PULSE = Color(0.3, 0.8, 0.6)     # Bright teal pulse for highlights
 
 # Convergence timing (in seconds)
 const CONVERGENCE_TIMING = {
 	"whispers_trigger_time": 20.0,       # 20 seconds for fast debugging
-	"whispers_duration": 30.0,           # 30 seconds of warnings
-	"contact_duration": 5.0,             # 5 seconds for ??? reveal
-	"shrink_rate_base": 15.0,            # Pixels per second base shrink
-	"shrink_rate_critical": 40.0,        # Faster shrink in critical phase
-	"pull_strength_base": 50.0,          # Base gravitational pull
-	"pull_strength_critical": 150.0,     # Critical phase pull
+	"whispers_duration": 10.0,           # 10 seconds of warnings (faster for testing)
+	"contact_duration": 3.0,             # 3 seconds for ??? reveal
+	"shrink_rate_base": 40.0,            # Pixels per second base shrink (faster for testing)
+	"shrink_rate_critical": 80.0,        # Faster shrink in critical phase
+	"pull_strength_base": 80.0,          # Base gravitational pull (stronger)
+	"pull_strength_critical": 200.0,     # Critical phase pull
 	"instability_per_sacrifice": 8.0,    # Instability from sacrificing ships
 	"instability_threshold": 100.0,      # Triggers fragmentation
 	"critical_radius_percent": 0.3,      # 30% of original = critical phase
@@ -45,12 +46,14 @@ const CONVERGENCE_TIMING = {
 static func get_convergence_phase_name(phase: int) -> String:
 	return CONVERGENCE_PHASE_NAMES.get(phase, "Unknown")
 
-# Outpost system - Harvesters build mini-factories at strategic points
-const OUTPOST_CONFIG = {
-	"build_time": 12.0,              # Seconds harvester must stay at point
-	"production_interval": 30.0,     # Seconds between Frigate spawns
-	"build_radius": 80.0,            # How close harvester must be to point
+# Factory system - Harvesters build factories anywhere
+const FACTORY_CONFIG = {
+	"build_time": 4.0,               # Seconds harvester must stay to build (quick!)
+	"production_interval": 15.0,     # Seconds between ship spawns (same for all factories)
+	"build_radius": 80.0,            # How close harvester must be to build spot
 	"visual_scale": 0.8,             # Size relative to base
+	"health": 300,                   # Factory health (can be destroyed)
+	"default_production": ShipType.FRIGATE,  # Default ship to produce
 }
 
 # Strategic capture point types
@@ -84,12 +87,14 @@ const TEAM_NAMES = {
 	Team.PLAYER: "Player",
 	Team.ENEMY_1: "Enemy",
 	Team.NEMESIS: "Nemesis",
+	Team.PROGENITOR: "The Progenitor",
 }
 
 const TEAM_COLORS = {
 	Team.PLAYER: Color.DEEP_SKY_BLUE,
 	Team.ENEMY_1: Color.ORANGE_RED,
 	Team.NEMESIS: Color.DARK_VIOLET,
+	Team.PROGENITOR: Color(0.1, 0.4, 0.35),  # Sickly void teal - alien and wrong
 }
 
 # Faction-specific weapon visuals
@@ -121,6 +126,10 @@ const WEAPON_COLORS = {
 		WeaponType.GRAVITY: Color(0.15, 0.0, 0.2, 0.6),  # Deep purple void
 		WeaponType.TURBOLASER: Color(0.9, 0.2, 0.9),  # Magenta turbolaser
 	},
+	Team.PROGENITOR: {
+		WeaponType.VOID_TENDRIL: Color(0.2, 0.7, 0.5),  # Sickly teal tendril
+		WeaponType.GRAVITY: Color(0.1, 0.3, 0.25, 0.8),  # Deep void pull
+	},
 }
 
 # Base weapon types per faction - each visually unique
@@ -150,6 +159,7 @@ const SHIP_SIZES = {
 	ShipType.GRAVITON: ShipSize.LARGE,
 	ShipType.STARBASE: ShipSize.MASSIVE,
 	ShipType.BASE_TURRET: ShipSize.MEDIUM,
+	ShipType.PROGENITOR_DRONE: ShipSize.SMALL,  # Small but deadly swarm unit
 }
 
 static func get_team_name(team: int) -> String:
@@ -267,6 +277,24 @@ const SHIP_STATS = {
 		"range": 350,           # Good defensive range
 		"fire_rate": 3.0,       # Fast fire rate - 3 shots per second
 		"is_structure": true,   # Flag to identify as non-buildable structure
+	},
+	# PROGENITOR DRONE: Ancient Von Neumann Probes
+	# The original VNP - ancient hunters, but beatable with coordinated defense
+	# Threatening but not overwhelming - players should be able to survive
+	ShipType.PROGENITOR_DRONE: {
+		"name": "Ancient Hunter",
+		"weapon": WeaponType.VOID_TENDRIL,  # Void tendrils that reach out
+		"cost": 0,              # Spawned by the cycle, not built
+		"mass_cost": 0,
+		"speed": 100,           # Slow - gives time to react and position
+		"health": 120,          # Killable with a few ships focusing fire
+		"damage": 25,           # Threatening but survivable
+		"range": 100,           # Short range - must get close
+		"fire_rate": 1.5,       # Slow attacks
+		"is_progenitor": true,  # Flag for special behavior
+		"swarm_cohesion": 0.3,  # Loose coordination
+		"absorption_speed": 0.5, # Slower absorption
+		"scale": 1.4,           # Visually distinct but not massive
 	},
 }
 

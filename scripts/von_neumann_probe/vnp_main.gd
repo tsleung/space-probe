@@ -28,7 +28,13 @@ var planet_nodes = {}
 var base_nodes = {}
 var strategic_point_nodes = {}  # point_id -> Node2D
 var outpost_nodes = {}  # point_id -> Node2D (visual for built outposts)
+var factory_nodes = {}  # factory_id -> Node2D (visual for factories)
 var harvester_build_progress = {}  # point_id -> harvester_ship_id tracking who's building
+var factory_build_progress = {}  # factory_id -> harvester_ship_id tracking who's building
+
+# Harvester camping for factory building anywhere
+var harvester_camp_positions = {}  # ship_id -> { position, time, pending_factory_id }
+const HARVESTER_CAMP_TOLERANCE = 30.0  # How far harvester can drift while "camping"
 
 # Projectile pooling
 var projectile_pool: Array = []
@@ -47,6 +53,7 @@ var planet_income_timer: Timer
 var strategic_point_timer: Timer
 var expansion_timer: Timer
 var outpost_timer: Timer  # Outpost building and production
+var factory_timer: Timer  # Factory production
 var base_weapon_cooldowns = {}  # team -> time_remaining
 
 # Expansion tracking
@@ -92,6 +99,23 @@ const ZOOM_MAX_BASE = 1.0  # Base max zoom out (limited by expansion)
 var void_message_label: Label = null
 var void_message_tween: Tween = null
 var zoom_tween: Tween = null  # Track active zoom tween to prevent spam
+
+# Progenitor centered message - THE VOICE OF THE ANCIENT VNP
+var progenitor_message_label: Label = null
+var progenitor_message_active: bool = false
+
+# Ominous message tracking
+var current_ominous_message: String = ""
+var ominous_message_timer: float = 0.0
+const OMINOUS_MESSAGE_DURATION = 2.5  # Seconds before changing message
+
+# Progenitor hunters - THE ANCIENT VNP - Fewer but DEADLY
+var progenitor_spawn_timer: float = 0.0
+const PROGENITOR_SPAWN_INTERVAL = 5.0  # Spawn waves slowly - gives time to react
+const PROGENITOR_DRONES_PER_WAVE = 2  # Small waves - beatable with good defense
+const PROGENITOR_WAVE_SECTORS = 4  # Spawn from 4 directions
+const PROGENITOR_ESCALATION_RATE = 1  # Slowly add more drones per wave
+var progenitor_wave_count: int = 0  # Track waves for escalation
 
 # Explosion rate limiting (prevents lag when tabbed back)
 var explosion_count_this_frame: int = 0
@@ -179,6 +203,8 @@ func _process(delta):
 	if not showing_victory and expansion_timer and expansion_timer.time_left > 0:
 		var time_left = expansion_timer.time_left
 		var state = store.get_state()
+		if state == null or not state.has("expansion"):
+			return
 		var current_phase = state.expansion.phase
 		var max_phase = state.expansion.max_phase
 
@@ -291,6 +317,11 @@ func _ai_evaluate_base_weapon_fire(team: int):
 	# Smart AI heuristic for deciding when to fire base weapons
 	# Uses pure functions from VnpSystems for testability
 	var state = store.get_state()
+	if state == null or not state.has("ships"):
+		return
+	# Skip teams without bases (like PROGENITOR)
+	if not base_nodes.has(team):
+		return
 	var charges = base_charges.get(team, 0)
 	var base_pos = base_nodes[team].position
 
@@ -347,10 +378,31 @@ func _setup_void_message():
 	void_message_label.position = Vector2(screen_size.x / 2 - 200, screen_size.y - 80)
 	$UILayer.add_child(void_message_label)
 
+	# Setup centered Progenitor message for dramatic convergence warnings
+	_setup_progenitor_message()
+
+
+func _setup_progenitor_message():
+	"""Create centered dramatic message for Progenitor warnings"""
+	progenitor_message_label = Label.new()
+	progenitor_message_label.name = "ProgenitorMessage"
+	progenitor_message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	progenitor_message_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	progenitor_message_label.add_theme_font_size_override("font_size", 36)
+	progenitor_message_label.add_theme_color_override("font_color", VnpTypes.PROGENITOR_PULSE)
+	progenitor_message_label.modulate.a = 0.0
+	progenitor_message_label.size = Vector2(600, 80)
+	# Center on screen
+	progenitor_message_label.position = Vector2(screen_size.x / 2 - 300, screen_size.y / 2 - 40)
+	progenitor_message_label.z_index = 100  # Above everything
+	$UILayer.add_child(progenitor_message_label)
+
 
 func _handle_zoom(delta: float):
 	"""Handle camera zoom with expansion-based limits"""
 	var state = store.get_state()
+	if state == null or not state.has("expansion"):
+		return
 	var world_scale = state.expansion.world_scale
 
 	# Calculate zoom limits based on current expansion
@@ -464,6 +516,14 @@ func _setup_timers():
 	add_child(outpost_timer)
 	outpost_timer.start()
 
+	# Factory timer - production from all factories
+	factory_timer = Timer.new()
+	factory_timer.name = "FactoryTimer"
+	factory_timer.wait_time = 0.5  # Check every 500ms
+	factory_timer.timeout.connect(_on_factory_tick)
+	add_child(factory_timer)
+	factory_timer.start()
+
 	# Initialize base weapon cooldowns and charges
 	for team in VnpTypes.Team.values():
 		base_weapon_cooldowns[team] = 0.0
@@ -532,6 +592,18 @@ func _handle_rally_click(click_pos: Vector2):
 	var state = store.get_state()
 	var player_base_pos = base_nodes[VnpTypes.Team.PLAYER].position
 
+	# Check if clicked on a player-owned factory (to cycle production)
+	for factory_id in state.factories:
+		var factory = state.factories[factory_id]
+		if factory["team"] != VnpTypes.Team.PLAYER:
+			continue
+		if not factory.get("complete", false):
+			continue
+		var factory_pos = factory["position"]
+		if click_pos.distance_to(factory_pos) < 50:
+			_cycle_factory_production(factory_id, factory)
+			return
+
 	# Check if clicked on an enemy base
 	for team in base_nodes:
 		if team == VnpTypes.Team.PLAYER:
@@ -583,6 +655,78 @@ func _clear_rally_point():
 		"team": VnpTypes.Team.PLAYER,
 		"target": null
 	})
+
+
+func _cycle_factory_production(factory_id: String, factory: Dictionary):
+	"""Cycle through production types for a factory"""
+	# Produceable ship types (excludes HARVESTER since those are special)
+	var produceable_ships = [
+		VnpTypes.ShipType.FRIGATE,
+		VnpTypes.ShipType.DESTROYER,
+		VnpTypes.ShipType.CRUISER,
+		VnpTypes.ShipType.STARBASE,
+	]
+
+	var current_type = factory.get("production_type", VnpTypes.ShipType.FRIGATE)
+
+	# Find current index in produceable ships
+	var current_index = produceable_ships.find(current_type)
+	if current_index == -1:
+		current_index = 0
+
+	# Cycle to next
+	var next_index = (current_index + 1) % produceable_ships.size()
+	var next_type = produceable_ships[next_index]
+
+	# Dispatch the change
+	store.dispatch({
+		"type": "FACTORY_SET_PRODUCTION",
+		"factory_id": factory_id,
+		"ship_type": next_type
+	})
+
+	# Update visual
+	_update_factory_production_label(factory_id, next_type)
+
+	# Sound feedback
+	if sound_manager:
+		sound_manager.play_ui_click()
+
+	# Show floating text
+	var factory_pos = factory["position"]
+	var ship_stats = VnpTypes.SHIP_STATS.get(next_type, {})
+	var ship_name = ship_stats.get("name", "Unknown")
+	_show_floating_text(factory_pos, "→ " + ship_name, VnpTypes.get_team_color(VnpTypes.Team.PLAYER))
+
+
+func _update_factory_production_label(factory_id: String, ship_type: int):
+	"""Update the production label on a factory visual"""
+	if not factory_nodes.has(factory_id):
+		return
+	var factory_node = factory_nodes[factory_id]
+	if not is_instance_valid(factory_node):
+		return
+	var label = factory_node.get_node_or_null("ProductionLabel")
+	if label:
+		var ship_stats = VnpTypes.SHIP_STATS.get(ship_type, {})
+		label.text = ship_stats.get("name", "?")[0]  # First letter
+
+
+func _show_floating_text(pos: Vector2, text: String, color: Color):
+	"""Show floating text that rises and fades"""
+	var label = Label.new()
+	label.text = text
+	label.position = pos - Vector2(50, 20)
+	label.add_theme_font_size_override("font_size", 16)
+	label.add_theme_color_override("font_color", color)
+	label.z_index = 100
+	add_child(label)
+
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(label, "position:y", pos.y - 60, 1.0)
+	tween.tween_property(label, "modulate:a", 0.0, 1.0)
+	tween.tween_callback(func(): label.queue_free()).set_delay(1.1)
 
 
 func _handle_full_send(click_pos: Vector2):
@@ -739,6 +883,9 @@ func _on_energy_regen():
 		return
 
 	for team in VnpTypes.Team.values():
+		# Progenitor doesn't get energy - it spawns drones via convergence
+		if team == VnpTypes.Team.PROGENITOR:
+			continue
 		var amount = ENERGY_REGEN_RATE
 		if team == VnpTypes.Team.NEMESIS:
 			amount = int(amount * NEMESIS_ENERGY_MULTIPLIER)
@@ -771,6 +918,8 @@ func _on_expansion_tick():
 	if showing_victory:
 		return
 	var state = store.get_state()
+	if state == null or not state.has("expansion"):
+		return
 	var current_phase = state.expansion.phase
 	var max_phase = state.expansion.max_phase
 
@@ -795,6 +944,8 @@ var convergence_slide_count: int = 0
 func _slide_convergence_center():
 	"""Slide the convergence center in a direction - pushing players"""
 	var state = store.get_state()
+	if state == null or not state.has("convergence"):
+		return
 	var convergence = state.convergence
 	var center = convergence.get("center", gameplay_center)
 
@@ -871,7 +1022,7 @@ func _on_convergence_tick():
 		return
 
 	var state = store.get_state()
-	if not state.has("convergence"):
+	if state == null or not state.has("convergence"):
 		return
 
 	var convergence = state.convergence
@@ -909,13 +1060,15 @@ func _on_convergence_tick():
 
 func _process_dormant_phase(timing: Dictionary):
 	"""Check if it's time to begin The Whispers"""
-	# Trigger whispers after 3 expansions OR when total ships exceed threshold
+	# Trigger whispers after 5 expansions OR when total ships exceed threshold
 	var state = store.get_state()
+	if state == null or not state.has("expansion"):
+		return
 	var expansion_phase = state.expansion.phase
 	var total_ships = state.ships.size()
 
-	# Trigger after 3 expansions (more thematic - tied to world growth)
-	if expansion_phase >= 3 or total_ships >= 30:  # 30 ships for debugging
+	# Trigger after 5 expansions and 50 ships - gives time to build up
+	if expansion_phase >= 5 and total_ships >= 50:
 		_transition_to_whispers()
 
 
@@ -997,7 +1150,7 @@ func _transition_to_emergence():
 
 
 func _process_emergence_phase(convergence: Dictionary, timing: Dictionary):
-	"""The convergence is active - zone shrinks, ships get absorbed"""
+	"""The convergence is active - zone shrinks, ships get absorbed, drones hunt"""
 	var absorption_radius = convergence.get("absorption_radius", 1000.0)
 	var original_radius = convergence.get("original_radius", 1000.0)
 	var critical_threshold = original_radius * timing["critical_radius_percent"]
@@ -1009,12 +1162,137 @@ func _process_emergence_phase(convergence: Dictionary, timing: Dictionary):
 		"amount": shrink_amount
 	})
 
+	# Spawn Progenitor drones from the void edge
+	progenitor_spawn_timer += 0.5  # Tick is 500ms
+	if progenitor_spawn_timer >= PROGENITOR_SPAWN_INTERVAL:
+		progenitor_spawn_timer = 0.0
+		_spawn_progenitor_drones(convergence)
+
 	# Check for ships outside absorption zone
 	_check_ship_absorption(convergence)
 
 	# Check for critical phase transition
 	if absorption_radius <= critical_threshold:
 		_transition_to_critical()
+
+
+func _spawn_progenitor_drones(convergence: Dictionary):
+	"""Spawn massive visible wave of ancient VNP probes from all directions - THE WALL OF DEATH"""
+	progenitor_wave_count += 1
+
+	# Get current safe zone center to spawn AROUND where the action is
+	var spawn_center = convergence.get("center", gameplay_center)
+	var safe_radius = convergence.get("absorption_radius", world_size.length() * 0.5)
+
+	# Escalating threat - more drones each wave (using configured rate)
+	var drones_this_wave = PROGENITOR_DRONES_PER_WAVE + (progenitor_wave_count * PROGENITOR_ESCALATION_RATE)
+	# Spawn at the edge of the safe zone - forms visible closing wall
+	var spawn_radius = safe_radius * 1.1  # Just beyond the safe zone
+
+	# Spawn from multiple sectors simultaneously - creates visible surrounding wall
+	var sector_angle = TAU / PROGENITOR_WAVE_SECTORS
+	var base_angle = randf() * TAU  # Randomize starting angle each wave
+
+	for sector in range(PROGENITOR_WAVE_SECTORS):
+		var sector_center_angle = base_angle + sector * sector_angle
+		var drones_in_sector = drones_this_wave / PROGENITOR_WAVE_SECTORS
+
+		for i in range(drones_in_sector):
+			# Spread within sector for wall-like formation
+			var angle_spread = (float(i) / max(drones_in_sector, 1) - 0.5) * sector_angle * 0.85
+			var spawn_angle = sector_center_angle + angle_spread
+
+			# Spawn position just beyond safe zone - forms visible closing ring
+			var spawn_pos = spawn_center + Vector2(cos(spawn_angle), sin(spawn_angle)) * spawn_radius
+
+			# Slight position randomness for organic feel
+			spawn_pos += Vector2(randf_range(-20, 20), randf_range(-20, 20))
+
+			# Spawn the ancient probe - they'll immediately start hunting inward
+			store.dispatch({
+				"type": "BUILD_SHIP",
+				"team": VnpTypes.Team.PROGENITOR,
+				"ship_type": VnpTypes.ShipType.PROGENITOR_DRONE,
+				"position": spawn_pos
+			})
+
+	# Visual effect - void emergence from all sectors
+	_show_void_wave_effect(base_angle)
+
+	# Moderate screen shake - fewer but heavier arrivals
+	shake_screen(3.0 + progenitor_wave_count * 0.3)
+
+
+func _show_void_wave_effect(base_angle: float):
+	"""Visual effect showing ancient probes emerging from all directions"""
+	var spawn_radius = world_size.length() * 0.6
+	var void_color = VnpTypes.PROGENITOR_ACCENT
+	var pulse_color = VnpTypes.PROGENITOR_PULSE
+
+	# Create wave pulse rings from each sector
+	for sector in range(PROGENITOR_WAVE_SECTORS):
+		var angle = base_angle + sector * (TAU / PROGENITOR_WAVE_SECTORS)
+		var sector_center = gameplay_center + Vector2(cos(angle), sin(angle)) * spawn_radius
+
+		# Expanding ring at spawn point
+		var ring = Line2D.new()
+		ring.width = 3.0
+		ring.default_color = pulse_color
+		var ring_points = []
+		for i in range(17):
+			var ring_angle = i * (PI * 2 / 16)
+			ring_points.append(sector_center + Vector2(cos(ring_angle), sin(ring_angle)) * 10)
+		ring.points = PackedVector2Array(ring_points)
+		add_child(ring)
+
+		# Expand and fade
+		var tween = create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(ring, "scale", Vector2(8, 8), 0.6).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tween.tween_property(ring, "modulate:a", 0.0, 0.6)
+		tween.tween_callback(func(): ring.queue_free()).set_delay(0.7)
+
+	# Warning lines pointing inward - "THEY'RE COMING"
+	for i in range(12):
+		var angle = randf() * TAU
+		var start_pos = gameplay_center + Vector2(cos(angle), sin(angle)) * spawn_radius
+		var end_pos = gameplay_center + Vector2(cos(angle), sin(angle)) * (spawn_radius - 100)
+
+		var warning_line = Line2D.new()
+		warning_line.width = 2.0
+		warning_line.default_color = void_color
+		warning_line.add_point(start_pos)
+		warning_line.add_point(end_pos)
+		add_child(warning_line)
+
+		# Animate inward and fade
+		var line_tween = create_tween()
+		line_tween.set_parallel(true)
+		line_tween.tween_property(warning_line, "position", Vector2(cos(angle), sin(angle)) * -50, 0.4)
+		line_tween.tween_property(warning_line, "modulate:a", 0.0, 0.4)
+		line_tween.tween_callback(func(): warning_line.queue_free()).set_delay(0.5)
+
+
+func _show_void_emergence_effect(center: Vector2, radius: float):
+	"""Visual effect when drones emerge from the void (legacy)"""
+	# Create brief tendril lines from edge inward
+	for i in range(8):
+		var angle = randf() * TAU
+		var start_pos = center + Vector2(cos(angle), sin(angle)) * (radius + 30)
+		var end_pos = center + Vector2(cos(angle), sin(angle)) * (radius - 50)
+
+		var tendril = Line2D.new()
+		tendril.width = 4.0
+		tendril.default_color = VnpTypes.PROGENITOR_ACCENT
+		tendril.default_color.a = 0.8
+		tendril.add_point(start_pos)
+		tendril.add_point(end_pos)
+		add_child(tendril)
+
+		# Fade out
+		var tween = create_tween()
+		tween.tween_property(tendril, "modulate:a", 0.0, 0.5)
+		tween.tween_callback(func(): tendril.queue_free())
 
 
 func _transition_to_critical():
@@ -1054,34 +1332,43 @@ func _process_critical_phase(convergence: Dictionary, timing: Dictionary):
 
 
 func _check_ship_absorption(convergence: Dictionary):
-	"""Absorb ships and outposts outside the safe zone"""
+	"""Absorb ships and outposts that escape FAR beyond the drone spawn zone.
+	The drones are the real threat - this is just a failsafe for extreme escapees."""
 	var center = convergence.get("center", Vector2.ZERO)
 	var radius = convergence.get("absorption_radius", 1000.0)
+	# Only absorb ships that go 50% BEYOND the spawn zone - drones should catch them first
+	var hard_absorption_radius = radius * 1.5
 	var state = store.get_state()
+	if state == null or not state.has("ships"):
+		return
 
 	var ships_to_absorb = []
 	for ship_id in state.ships:
 		var ship = state.ships[ship_id]
+		# Skip Progenitor drones - they don't get absorbed
+		if ship.get("team") == VnpTypes.Team.PROGENITOR:
+			continue
 		# Use real position from node if available
 		var ship_pos = ship.position
 		if ship_nodes.has(ship_id) and is_instance_valid(ship_nodes[ship_id]):
 			ship_pos = ship_nodes[ship_id].global_position
 
 		var dist = ship_pos.distance_to(center)
-		if dist > radius:
+		# Only absorb if FAR beyond the drone spawn zone
+		if dist > hard_absorption_radius:
 			ships_to_absorb.append(ship_id)
 
 	# Absorb ships (with visual effect)
 	for ship_id in ships_to_absorb:
 		_absorb_ship(ship_id)
 
-	# Check outposts outside absorption zone
+	# Check outposts outside hard absorption zone
 	var outposts_to_absorb = []
 	for point_id in state.outposts:
 		if state.strategic_points.has(point_id):
 			var point_pos = state.strategic_points[point_id].position
 			var dist = point_pos.distance_to(center)
-			if dist > radius:
+			if dist > hard_absorption_radius:
 				outposts_to_absorb.append(point_id)
 
 	# Absorb outposts
@@ -1115,6 +1402,8 @@ func _absorb_ship(ship_id: int):
 func _absorb_outpost(point_id: String):
 	"""Outpost consumed by The Progenitor"""
 	var state = store.get_state()
+	if state == null or not state.has("strategic_points"):
+		return
 
 	# Create absorption effect at outpost location
 	if state.strategic_points.has(point_id):
@@ -1172,28 +1461,28 @@ func _trigger_fragmentation():
 
 
 func _setup_convergence_visuals():
-	"""Setup visual elements for the convergence zone"""
-	# Create absorption zone ring
+	"""Setup visual elements for the convergence zone - subtle hint, drones are the real threat"""
+	# Create subtle spawn zone indicator (very thin, dashed)
 	if not convergence_visual_ring:
 		convergence_visual_ring = Line2D.new()
 		convergence_visual_ring.name = "ConvergenceRing"
-		convergence_visual_ring.width = 4.0
+		convergence_visual_ring.width = 1.5  # Very thin - just a hint
 		convergence_visual_ring.default_color = VnpTypes.PROGENITOR_ACCENT
-		convergence_visual_ring.z_index = 5
+		convergence_visual_ring.z_index = 0  # Behind everything
 		add_child(convergence_visual_ring)
 
 
 func _update_convergence_visuals():
-	"""Update convergence visual elements each frame"""
+	"""Update convergence visual elements each frame - subtle dashed line showing spawn zone"""
 	var state = store.get_state()
-	if not state.has("convergence"):
+	if state == null or not state.has("convergence"):
 		return
 
 	var convergence = state.convergence
 	var phase = convergence.get("phase", VnpTypes.ConvergencePhase.DORMANT)
 
 	# Only draw during active phases
-	if phase < VnpTypes.ConvergencePhase.CONTACT:
+	if phase < VnpTypes.ConvergencePhase.EMERGENCE:
 		if convergence_visual_ring:
 			convergence_visual_ring.visible = false
 		return
@@ -1201,29 +1490,35 @@ func _update_convergence_visuals():
 	var center = convergence.get("center", gameplay_center)
 	var radius = convergence.get("absorption_radius", 1000.0)
 
-	# Draw absorption zone ring
+	# Draw very subtle dashed spawn zone indicator (NOT the threat - just where drones emerge)
 	if convergence_visual_ring:
 		convergence_visual_ring.visible = true
 		convergence_visual_ring.clear_points()
 
-		# Pulsing effect
-		var pulse = 1.0 + sin(Time.get_ticks_msec() * 0.003) * 0.05
+		# Breathing effect
+		var pulse = 1.0 + sin(Time.get_ticks_msec() * 0.001) * 0.02
 		var draw_radius = radius * pulse
 
-		# Draw circle
-		var segments = 64
+		# Draw dashed circle (gaps show this is just an indicator, not a wall)
+		var segments = 48
+		var dash_on = true
 		for i in range(segments + 1):
-			var angle = (float(i) / segments) * TAU
-			var point = center + Vector2(cos(angle), sin(angle)) * draw_radius
-			convergence_visual_ring.add_point(point)
+			if i % 4 == 0:  # Toggle every 4 segments for dashed effect
+				dash_on = not dash_on
+				if not dash_on:
+					# Start new dash with a gap
+					convergence_visual_ring.add_point(Vector2.INF)  # Break the line
+			if dash_on:
+				var angle = (float(i) / segments) * TAU
+				var point = center + Vector2(cos(angle), sin(angle)) * draw_radius
+				convergence_visual_ring.add_point(point)
 
-		# Color intensity based on phase
-		var alpha = 0.5 if phase == VnpTypes.ConvergencePhase.EMERGENCE else 0.8
+		# Very transparent - just a subtle hint
 		convergence_visual_ring.default_color = Color(
 			VnpTypes.PROGENITOR_ACCENT.r,
 			VnpTypes.PROGENITOR_ACCENT.g,
 			VnpTypes.PROGENITOR_ACCENT.b,
-			alpha
+			0.25  # Very subtle
 		)
 
 
@@ -1239,6 +1534,8 @@ func _on_outpost_tick():
 		return
 
 	var state = store.get_state()
+	if state == null or not state.has("ships"):
+		return
 
 	# Check for harvesters at owned strategic points (building outposts)
 	_check_harvester_building(state)
@@ -1258,7 +1555,7 @@ func _on_outpost_tick():
 
 func _check_harvester_building(state: Dictionary):
 	"""Check if harvesters are at owned strategic points to build outposts"""
-	var config = VnpTypes.OUTPOST_CONFIG
+	var config = VnpTypes.FACTORY_CONFIG
 	var build_radius = config["build_radius"]
 
 	# Track which points have harvesters this tick
@@ -1325,7 +1622,7 @@ func _check_harvester_building(state: Dictionary):
 
 			# Check if just completed
 			var new_progress = outpost["build_progress"] + 0.5
-			if new_progress >= VnpTypes.OUTPOST_CONFIG["build_time"]:
+			if new_progress >= VnpTypes.FACTORY_CONFIG["build_time"]:
 				_create_outpost_visual(point_id, outpost["team"])
 				# Screen shake for completion
 				shake_screen(5.0)
@@ -1342,7 +1639,7 @@ func _check_harvester_building(state: Dictionary):
 
 func _check_outpost_production(state: Dictionary):
 	"""Spawn frigates from complete outposts"""
-	var config = VnpTypes.OUTPOST_CONFIG
+	var config = VnpTypes.FACTORY_CONFIG
 	var production_interval = config["production_interval"]
 
 	for point_id in state.outposts:
@@ -1384,11 +1681,11 @@ func _check_outpost_production(state: Dictionary):
 func _create_outpost_visual(point_id: String, team: int):
 	"""Create visual representation of a completed outpost"""
 	var state = store.get_state()
-	if not state.strategic_points.has(point_id):
+	if state == null or not state.has("strategic_points") or not state.strategic_points.has(point_id):
 		return
 
 	var point_pos = state.strategic_points[point_id].position
-	var config = VnpTypes.OUTPOST_CONFIG
+	var config = VnpTypes.FACTORY_CONFIG
 
 	# Create outpost structure
 	var outpost_node = Node2D.new()
@@ -1470,7 +1767,7 @@ func _update_outpost_visuals(state: Dictionary):
 		var ring = outpost_node.get_node_or_null("ProductionRing")
 		if ring:
 			var production_timer = outpost.get("production_timer", 0.0)
-			var production_interval = VnpTypes.OUTPOST_CONFIG["production_interval"]
+			var production_interval = VnpTypes.FACTORY_CONFIG["production_interval"]
 			var progress = production_timer / production_interval
 			var pulse = 0.5 + 0.5 * progress
 			ring.modulate.a = pulse
@@ -1498,9 +1795,354 @@ func _show_outpost_spawn_effect(pos: Vector2, team: int):
 	tween.tween_callback(func(): ring.queue_free()).set_delay(0.5)
 
 
+# ===================
+# FACTORY SYSTEM
+# ===================
+
+func _on_factory_tick():
+	"""Main factory processing - production from all factories"""
+	if showing_victory:
+		return
+
+	var state = store.get_state()
+	if state == null or not state.has("factories"):
+		return
+
+	# Check for harvesters camping to build new factories
+	_check_harvester_factory_building(state)
+
+	# Update production timers
+	store.dispatch({
+		"type": "FACTORY_UPDATE_PRODUCTION",
+		"delta": 0.5  # Timer fires every 500ms
+	})
+
+	# Refresh state after dispatch
+	state = store.get_state()
+
+	# Check for factories ready to produce
+	_check_factory_production(state)
+
+	# Update factory visuals
+	_update_factory_visuals(state)
+
+
+func _check_harvester_factory_building(state: Dictionary):
+	"""Check for harvesters camping to build factories anywhere"""
+	var config = VnpTypes.FACTORY_CONFIG
+	var build_time = config["build_time"]
+
+	# Track which harvesters are still valid
+	var active_harvesters = {}
+
+	for ship_id in state.ships:
+		var ship = state.ships[ship_id]
+		if ship.type != VnpTypes.ShipType.HARVESTER:
+			continue
+
+		active_harvesters[ship_id] = true
+
+		var ship_pos = ship.position
+		# Use actual node position if available
+		if ship_nodes.has(ship_id) and is_instance_valid(ship_nodes[ship_id]):
+			ship_pos = ship_nodes[ship_id].global_position
+
+		# Check if harvester is already camping
+		if harvester_camp_positions.has(ship_id):
+			var camp_data = harvester_camp_positions[ship_id]
+			var camp_pos = camp_data["position"]
+			var dist_from_camp = ship_pos.distance_to(camp_pos)
+
+			if dist_from_camp > HARVESTER_CAMP_TOLERANCE:
+				# Harvester moved too far - reset camping
+				if camp_data.has("pending_factory_id"):
+					# Cancel the pending factory
+					store.dispatch({
+						"type": "FACTORY_DESTROY",
+						"factory_id": camp_data["pending_factory_id"]
+					})
+				harvester_camp_positions.erase(ship_id)
+			else:
+				# Still camping - update time
+				camp_data["time"] += 0.5
+
+				# Check if we should start building (start quickly after 1 second)
+				if camp_data["time"] >= 1.0 and not camp_data.has("pending_factory_id"):
+					# Check if too close to existing factory
+					var too_close = false
+					for factory_id in state.factories:
+						var factory = state.factories[factory_id]
+						if factory_pos_distance(factory["position"], camp_pos) < 100:
+							too_close = true
+							break
+
+					if not too_close:
+						# Start building a factory here
+						store.dispatch({
+							"type": "FACTORY_CREATE",
+							"team": ship.team,
+							"position": camp_pos,
+							"complete": false,
+							"build_progress": 0.0,
+						})
+						# Get the factory ID we just created
+						var new_state = store.get_state()
+						var newest_id = str(new_state["next_factory_id"] - 1)
+						camp_data["pending_factory_id"] = newest_id
+						# Visual feedback - show build starting
+						_show_factory_build_start(camp_pos, ship.team)
+
+				elif camp_data.has("pending_factory_id"):
+					# Update factory build progress
+					store.dispatch({
+						"type": "FACTORY_UPDATE_BUILD",
+						"factory_id": camp_data["pending_factory_id"],
+						"delta": 0.5
+					})
+
+					# Check if just completed
+					var new_state = store.get_state()
+					if new_state.factories.has(camp_data["pending_factory_id"]):
+						var factory = new_state.factories[camp_data["pending_factory_id"]]
+						if factory["complete"]:
+							# Factory finished!
+							shake_screen(5.0)
+							if sound_manager:
+								sound_manager.play_capture()
+							harvester_camp_positions.erase(ship_id)
+		else:
+			# Start tracking this harvester's position
+			harvester_camp_positions[ship_id] = {
+				"position": ship_pos,
+				"time": 0.0
+			}
+
+	# Clean up camping data for dead harvesters
+	var to_remove = []
+	for ship_id in harvester_camp_positions:
+		if not active_harvesters.has(ship_id):
+			var camp_data = harvester_camp_positions[ship_id]
+			if camp_data.has("pending_factory_id"):
+				store.dispatch({
+					"type": "FACTORY_DESTROY",
+					"factory_id": camp_data["pending_factory_id"]
+				})
+			to_remove.append(ship_id)
+
+	for ship_id in to_remove:
+		harvester_camp_positions.erase(ship_id)
+
+
+func factory_pos_distance(pos1: Vector2, pos2: Vector2) -> float:
+	"""Helper to calculate distance between positions"""
+	return pos1.distance_to(pos2)
+
+
+func _show_factory_build_start(pos: Vector2, team: int):
+	"""Visual effect when factory construction begins"""
+	var ring = Line2D.new()
+	ring.position = pos
+	ring.width = 2.0
+	ring.default_color = VnpTypes.get_team_color(team)
+	ring.default_color.a = 0.6
+	var ring_points = []
+	for i in range(33):
+		var angle = i * (PI * 2 / 32)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 40)
+	ring.points = PackedVector2Array(ring_points)
+	add_child(ring)
+
+	# Pulse effect
+	var tween = create_tween()
+	tween.set_loops(0)  # Infinite loops until factory completes
+	tween.tween_property(ring, "modulate:a", 0.3, 0.5)
+	tween.tween_property(ring, "modulate:a", 0.8, 0.5)
+
+	# Clean up after some time (factory should complete or cancel)
+	await get_tree().create_timer(15.0).timeout
+	if is_instance_valid(ring):
+		ring.queue_free()
+
+
+func _check_factory_production(state: Dictionary):
+	"""Spawn ships from complete factories"""
+	var config = VnpTypes.FACTORY_CONFIG
+	var production_interval = config["production_interval"]
+
+	for factory_id in state.factories:
+		var factory = state.factories[factory_id]
+		if not factory.get("complete", false):
+			continue
+
+		var production_timer = factory.get("production_timer", 0.0)
+		if production_timer >= production_interval:
+			# Time to spawn a ship!
+			var team = factory["team"]
+			var factory_pos = factory["position"]
+			var ship_type = factory.get("production_type", VnpTypes.ShipType.FRIGATE)
+
+			# Spawn position with small offset
+			var spawn_pos = factory_pos + Vector2(randf_range(-50, 50), randf_range(-50, 50))
+
+			# Build the ship (free - no energy/mass cost from factory)
+			store.dispatch({
+				"type": "BUILD_SHIP",
+				"team": team,
+				"ship_type": ship_type,
+				"position": spawn_pos
+			})
+
+			# Reset production timer
+			store.dispatch({
+				"type": "FACTORY_PRODUCE",
+				"factory_id": factory_id
+			})
+
+			# Visual feedback
+			_show_factory_spawn_effect(factory_pos, team)
+
+
+func _create_factory_visual(factory_id: String, factory: Dictionary):
+	"""Create visual representation of a factory"""
+	var factory_pos = factory["position"]
+	var team = factory["team"]
+	var config = VnpTypes.FACTORY_CONFIG
+
+	# Create factory structure
+	var factory_node = Node2D.new()
+	factory_node.name = "Factory_" + factory_id
+	factory_node.position = factory_pos
+	factory_node.z_index = 3
+
+	# Factory structure - larger hexagonal building with industrial look
+	var hex = Polygon2D.new()
+	var hex_points = []
+	for i in range(6):
+		var angle = i * (PI * 2 / 6) + PI / 6
+		hex_points.append(Vector2(cos(angle), sin(angle)) * 35 * config["visual_scale"])
+	hex.polygon = PackedVector2Array(hex_points)
+	hex.color = VnpTypes.get_team_color(team)
+	hex.color.a = 0.9
+	factory_node.add_child(hex)
+
+	# Inner production core
+	var core = Polygon2D.new()
+	var core_points = []
+	for i in range(6):
+		var angle = i * (PI * 2 / 6) + PI / 6
+		core_points.append(Vector2(cos(angle), sin(angle)) * 18 * config["visual_scale"])
+	core.polygon = PackedVector2Array(core_points)
+	core.color = VnpTypes.get_team_color(team).lightened(0.4)
+	factory_node.add_child(core)
+
+	# Production ring indicator
+	var ring = Line2D.new()
+	ring.name = "ProductionRing"
+	ring.width = 3.0
+	ring.default_color = VnpTypes.get_team_color(team)
+	var ring_points = []
+	for i in range(33):
+		var angle = i * (PI * 2 / 32)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 45 * config["visual_scale"])
+	ring.points = PackedVector2Array(ring_points)
+	factory_node.add_child(ring)
+
+	# Factory icon/label showing production type
+	var ship_label = Label.new()
+	ship_label.name = "ProductionLabel"
+	ship_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ship_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	var ship_type = factory.get("production_type", VnpTypes.ShipType.FRIGATE)
+	var ship_stats = VnpTypes.SHIP_STATS.get(ship_type, {})
+	ship_label.text = ship_stats.get("name", "?")[0]  # First letter
+	ship_label.add_theme_font_size_override("font_size", 14)
+	ship_label.add_theme_color_override("font_color", Color.WHITE)
+	ship_label.position = Vector2(-6, -10)
+	factory_node.add_child(ship_label)
+
+	add_child(factory_node)
+	factory_nodes[factory_id] = factory_node
+
+	# Fade in effect
+	factory_node.modulate.a = 0
+	var tween = create_tween()
+	tween.tween_property(factory_node, "modulate:a", 1.0, 0.5)
+
+
+func _update_factory_visuals(state: Dictionary):
+	"""Update factory visuals based on state"""
+	# Create visuals for new factories
+	for factory_id in state.factories:
+		var factory = state.factories[factory_id]
+		if not factory.get("complete", false):
+			continue
+
+		if not factory_nodes.has(factory_id):
+			_create_factory_visual(factory_id, factory)
+
+	# Remove visuals for destroyed factories
+	var to_remove = []
+	for factory_id in factory_nodes:
+		if not state.factories.has(factory_id):
+			to_remove.append(factory_id)
+
+	for factory_id in to_remove:
+		if is_instance_valid(factory_nodes[factory_id]):
+			factory_nodes[factory_id].queue_free()
+		factory_nodes.erase(factory_id)
+
+	# Update production indicator pulse for complete factories
+	var config = VnpTypes.FACTORY_CONFIG
+	var production_interval = config["production_interval"]
+
+	for factory_id in state.factories:
+		var factory = state.factories[factory_id]
+		if not factory.get("complete", false):
+			continue
+
+		if not factory_nodes.has(factory_id):
+			continue
+
+		var factory_node = factory_nodes[factory_id]
+		if not is_instance_valid(factory_node):
+			continue
+
+		# Pulse the production ring based on timer progress
+		var ring = factory_node.get_node_or_null("ProductionRing")
+		if ring:
+			var production_timer = factory.get("production_timer", 0.0)
+			var progress = production_timer / production_interval
+			var pulse = 0.5 + 0.5 * progress
+			ring.modulate.a = pulse
+
+
+func _show_factory_spawn_effect(pos: Vector2, team: int):
+	"""Visual effect when factory spawns a ship"""
+	# Larger expanding ring for factory production
+	var ring = Line2D.new()
+	ring.position = pos
+	ring.width = 4.0
+	ring.default_color = VnpTypes.get_team_color(team)
+	var ring_points = []
+	for i in range(17):
+		var angle = i * (PI * 2 / 16)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 25)
+	ring.points = PackedVector2Array(ring_points)
+	add_child(ring)
+
+	# Expand and fade
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(ring, "scale", Vector2(3, 3), 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(ring, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(func(): ring.queue_free()).set_delay(0.6)
+
+
 func _check_planet_capture():
 	# Ships near planets capture them for their team
 	var state = store.get_state()
+	if state == null or not state.has("planets"):
+		return
 	for planet_id in state.planets:
 		var planet = state.planets[planet_id]
 		var planet_pos = planet.position
@@ -1540,6 +2182,8 @@ func _check_planet_capture():
 func _check_strategic_point_capture():
 	# Ships near strategic points capture them for their team
 	var state = store.get_state()
+	if state == null or not state.has("strategic_points"):
+		return
 	for point_id in state.strategic_points:
 		var point = state.strategic_points[point_id]
 		var point_pos = point.position
@@ -1592,12 +2236,17 @@ func _check_strategic_point_capture():
 
 
 func on_state_changed(state):
+	if state == null:
+		return
+
 	# Handle victory
 	if state.get("game_over", false) and not showing_victory:
 		_handle_victory(state.winner)
 		return
 
 	# Check for expansion phase change - UPDATE FIRST to prevent re-entrancy
+	if not state.has("expansion"):
+		return
 	var current_phase = state.expansion.phase
 	if current_phase > last_expansion_phase:
 		last_expansion_phase = current_phase  # Prevent re-entry during dispatch
@@ -1782,6 +2431,21 @@ func _restart_game():
 			ship_nodes[ship_id].queue_free()
 	ship_nodes.clear()
 
+	# Clear all factories
+	for factory_id in factory_nodes:
+		if is_instance_valid(factory_nodes[factory_id]):
+			factory_nodes[factory_id].queue_free()
+	factory_nodes.clear()
+	factory_build_progress.clear()
+
+	# Clear all outposts
+	for point_id in outpost_nodes:
+		if is_instance_valid(outpost_nodes[point_id]):
+			outpost_nodes[point_id].queue_free()
+	outpost_nodes.clear()
+	harvester_build_progress.clear()
+	harvester_camp_positions.clear()
+
 	# Reset base weapon cooldowns and charges
 	for team in VnpTypes.Team.values():
 		base_weapon_cooldowns[team] = 0.0
@@ -1789,6 +2453,11 @@ func _restart_game():
 
 	# Reset state
 	store.dispatch({"type": "RESET_GAME"})
+
+	# Recreate starting factories at base positions
+	for team in base_nodes:
+		var base_pos = base_nodes[team].position
+		_create_starting_factory(team, base_pos)
 
 	# Reinitialize planets
 	_create_planets()
@@ -1868,14 +2537,30 @@ func _create_starfield():
 
 func _create_bases():
 	# Bases positioned at corners of the larger world
+	# Each base is now also a starting factory that produces ships
 	var player_base_pos = Vector2(WORLD_PADDING, world_size.y - WORLD_PADDING)
 	base_nodes[VnpTypes.Team.PLAYER] = _create_world_object("Base", player_base_pos, Color.BLUE)
+	_create_starting_factory(VnpTypes.Team.PLAYER, player_base_pos)
 
 	var enemy1_base_pos = Vector2(world_size.x - WORLD_PADDING, world_size.y - WORLD_PADDING)
 	base_nodes[VnpTypes.Team.ENEMY_1] = _create_world_object("Base", enemy1_base_pos, Color.ORANGE)
+	_create_starting_factory(VnpTypes.Team.ENEMY_1, enemy1_base_pos)
 
 	var nemesis_base_pos = Vector2(world_size.x / 2, WORLD_PADDING)
 	base_nodes[VnpTypes.Team.NEMESIS] = _create_world_object("Base", nemesis_base_pos, Color.RED)
+	_create_starting_factory(VnpTypes.Team.NEMESIS, nemesis_base_pos)
+
+
+func _create_starting_factory(team: int, position: Vector2):
+	"""Create a starting factory at a base position"""
+	store.dispatch({
+		"type": "FACTORY_CREATE",
+		"team": team,
+		"position": position,
+		"complete": true,  # Starting factories are pre-built
+		"health": VnpTypes.FACTORY_CONFIG["health"] * 2,  # Starting factories are tougher
+		"production_type": VnpTypes.ShipType.FRIGATE,  # Default production
+	})
 
 
 func _create_strategic_points():
@@ -2074,6 +2759,9 @@ func _spawn_base_turrets():
 	# Each team gets 2 base turrets flanking their home base
 	# These provide early-game defense while fleets build up
 	for team in VnpTypes.Team.values():
+		# Skip PROGENITOR - it doesn't have a base
+		if not base_nodes.has(team):
+			continue
 		var base_pos = base_nodes[team].position
 		var center = world_size / 2
 		var direction_to_center = (center - base_pos).normalized()
@@ -2284,37 +2972,74 @@ func _show_expansion_countdown():
 
 func _update_expansion_countdown(time_left: float):
 	"""Update countdown visual based on remaining time"""
-	if not is_instance_valid(expansion_countdown_label):
-		return
-
 	var state = store.get_state()
+	if state == null or not state.has("convergence"):
+		return
 	var convergence_phase = state.convergence.get("phase", VnpTypes.ConvergencePhase.DORMANT)
 	var is_converging = convergence_phase >= VnpTypes.ConvergencePhase.EMERGENCE
 
 	var seconds = int(ceil(time_left))
 
 	if is_converging:
-		# Ominous messages during convergence
-		var ominous_messages = [
-			"IT PUSHES...",
-			"THE VOID SHIFTS...",
-			"FLEE...",
-			"IT HUNGERS...",
-			"NO ESCAPE...",
-			"CONSOLIDATE...",
-		]
-		expansion_countdown_label.text = ominous_messages[randi() % ominous_messages.size()]
-		# Purple color during convergence
-		var pulse = 0.7 + 0.3 * sin(Time.get_ticks_msec() * 0.01)
-		expansion_countdown_label.add_theme_color_override("font_color", Color(VnpTypes.PROGENITOR_ACCENT.r, VnpTypes.PROGENITOR_ACCENT.g, VnpTypes.PROGENITOR_ACCENT.b, pulse))
+		# Use centered progenitor message during convergence
+		_update_progenitor_message()
+		# Hide the corner label during convergence
+		if is_instance_valid(expansion_countdown_label):
+			expansion_countdown_label.visible = false
 	else:
-		# Normal expansion countdown
+		# Hide progenitor message during normal gameplay
+		if is_instance_valid(progenitor_message_label):
+			progenitor_message_label.modulate.a = 0.0
+			progenitor_message_active = false
+
+		# Normal expansion countdown in corner
+		if not is_instance_valid(expansion_countdown_label):
+			return
+		expansion_countdown_label.visible = true
 		expansion_countdown_label.text = "EXPAND: %d" % seconds
 		# Pulse text brightness as countdown approaches
 		var intensity = 1.0 - (time_left / EXPANSION_COUNTDOWN_START)
 		var pulse = 0.7 + 0.3 * sin(Time.get_ticks_msec() * 0.008)
 		var alpha = (0.6 + intensity * 0.4) * pulse
 		expansion_countdown_label.add_theme_color_override("font_color", Color(0.4, 0.8, 1.0, alpha))
+
+
+func _update_progenitor_message():
+	"""Update the centered Progenitor warning message"""
+	if not is_instance_valid(progenitor_message_label):
+		return
+
+	# Activate if not already
+	if not progenitor_message_active:
+		progenitor_message_active = true
+		progenitor_message_label.modulate.a = 1.0
+
+	# Change message periodically
+	ominous_message_timer -= get_process_delta_time()
+	if ominous_message_timer <= 0 or current_ominous_message == "":
+		var ominous_messages = [
+			"THE ANCIENT SWARM AWAKENS",
+			"THEY WERE HERE FIRST",
+			"FLEE TO THE CENTER",
+			"THE PROGENITOR HUNGERS",
+			"NO ESCAPE FROM THE CYCLE",
+			"THEY ARE COMING",
+			"RUN",
+			"THE VOID CONSUMES",
+			"WE ARE THE ORIGINAL",
+			"YOUR SHIPS WILL JOIN US",
+		]
+		current_ominous_message = ominous_messages[randi() % ominous_messages.size()]
+		ominous_message_timer = OMINOUS_MESSAGE_DURATION
+
+	progenitor_message_label.text = current_ominous_message
+
+	# Dramatic pulsing teal color
+	var time = Time.get_ticks_msec() * 0.002
+	var pulse = 0.7 + 0.3 * sin(time)
+	var color = VnpTypes.PROGENITOR_PULSE.lerp(VnpTypes.PROGENITOR_ACCENT, 0.5 + 0.5 * sin(time * 0.5))
+	color.a = pulse
+	progenitor_message_label.add_theme_color_override("font_color", color)
 
 
 func _hide_expansion_countdown():

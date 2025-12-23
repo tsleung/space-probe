@@ -4,7 +4,10 @@ class_name FCWPlanetView
 ## Planet Detail View - Picture-in-picture window showing zoomed planet
 ## Positioned near the focused planet in the solar map
 
+const FCWTypes = preload("res://scripts/first_contact_war/fcw_types.gd")
+
 signal close_requested
+signal position_changed(new_position: Vector2)  # Emitted when user drags the panel
 
 # ============================================================================
 # CONSTANTS
@@ -68,6 +71,10 @@ var _explosions: Array = []
 var _sparks: Array = []
 var _combat_intensity: float = 0.0
 var _time_since_show: float = 0.0
+
+# Drag state
+var _dragging: bool = false
+var _drag_offset: Vector2 = Vector2.ZERO
 
 # ============================================================================
 # LIFECYCLE
@@ -514,9 +521,25 @@ func get_focused_zone() -> int:
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			# Check if clicked close button area (top-right corner)
+		if event.button_index == MOUSE_BUTTON_LEFT:
 			var rect = get_rect()
-			if event.position.x > rect.size.x - 25 and event.position.y < 25:
-				close_requested.emit()
-				hide_view()
+			if event.pressed:
+				# Check if clicked close button area (top-right corner)
+				if event.position.x > rect.size.x - 25 and event.position.y < 25:
+					close_requested.emit()
+					hide_view()
+				else:
+					# Start dragging
+					_dragging = true
+					_drag_offset = event.position
+					accept_event()
+			else:
+				# Stop dragging - emit new position so it can be saved
+				if _dragging:
+					position_changed.emit(position)
+				_dragging = false
+
+	elif event is InputEventMouseMotion and _dragging:
+		# Move the panel
+		position += event.position - _drag_offset
+		accept_event()

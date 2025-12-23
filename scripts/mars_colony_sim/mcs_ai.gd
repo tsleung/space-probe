@@ -165,6 +165,10 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 	var workforce = _MCSPopulation.get_workforce_summary(colonists)
 	var building_count = buildings.size()
 
+	# YEAR 1 SPECIAL: Only build a hab pod! Survival basics only.
+	if current_year == 1 and building_count == 0:
+		return _MCSTypes.BuildingType.HAB_POD
+
 	# Calculate current capacities
 	var housing_balance = _MCSEconomy.calc_housing_balance(buildings, colonists)
 	var power_balance = _MCSEconomy.calc_power_balance(buildings, colonists)
@@ -172,93 +176,97 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 	# Priority queue based on needs
 	var priorities: Array = []
 
-	# Housing shortage? - AGGRESSIVE expansion
-	if housing_balance.available < 10:
+	# Housing shortage? - But less aggressive in early years
+	var housing_threshold = 10 if current_year > 5 else 4
+	if housing_balance.available < housing_threshold:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.HAB_POD,
 			"priority": 100
 		})
-	# Upgrade to apartments for large colonies
-	if pop_count > 50 and housing_balance.available < 20:
+	# Upgrade to apartments for large colonies (later game)
+	if pop_count > 50 and housing_balance.available < 20 and current_year > 20:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.APARTMENT_BLOCK,
 			"priority": 95
 		})
 
-	# Power shortage? - Keep power ahead of demand
-	if power_balance.balance < 30:
+	# Power shortage? - Only worry about power after year 2
+	var power_threshold = 10 if current_year <= 3 else (20 if current_year <= 10 else 30)
+	if power_balance.balance < power_threshold and current_year >= 2:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.SOLAR_ARRAY,
 			"priority": 90
 		})
-	# Fission reactor for large colonies
-	if pop_count > 80 and power_balance.balance < 50:
+	# Fission reactor for large colonies (much later)
+	if pop_count > 80 and power_balance.balance < 50 and current_year > 30:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.FISSION_REACTOR,
 			"priority": 88
 		})
 
-	# Food production - always keep buffer
+	# Food production - only after year 2, and less aggressive early
 	var food = resources.get("food", 0.0)
 	var food_consumption = pop_count * 600.0  # Per year
-	if food < food_consumption * 2.0:
+	var food_buffer = 1.2 if current_year <= 5 else (1.5 if current_year <= 15 else 2.0)
+	if food < food_consumption * food_buffer and current_year >= 2:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.GREENHOUSE,
 			"priority": 85
 		})
-	# Hydroponics for efficiency
-	if pop_count > 40 and food < food_consumption * 2.5:
+	# Hydroponics for efficiency (later game)
+	if pop_count > 40 and food < food_consumption * 2.5 and current_year > 20:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.HYDROPONICS,
 			"priority": 82
 		})
 
-	# Water extraction - always need more
+	# Water extraction - only after year 3
 	var water = resources.get("water", 0.0)
-	if water < pop_count * 200:
+	var water_threshold = pop_count * (100 if current_year <= 5 else 200)
+	if water < water_threshold and current_year >= 3:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.WATER_EXTRACTOR,
 			"priority": 80
 		})
 
-	# Workshop for production - build early!
+	# Workshop for production - need more buildings first
 	var has_workshop = false
 	for b in buildings:
 		if b.type == _MCSTypes.BuildingType.WORKSHOP:
 			has_workshop = true
 			break
-	if not has_workshop and building_count >= 8:
+	if not has_workshop and building_count >= 12 and current_year >= 8:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.WORKSHOP,
 			"priority": 75
 		})
 
-	# Factory for large colonies
-	if pop_count > 60 and building_count > 20:
+	# Factory for large colonies (requires industrial base)
+	if pop_count > 60 and building_count > 25 and current_year > 25:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.FACTORY,
 			"priority": 72
 		})
 
-	# Medical facilities - build early
+	# Medical facilities - not until colony is established
 	var has_medical = false
 	for b in buildings:
 		if b.type == _MCSTypes.BuildingType.MEDICAL_BAY:
 			has_medical = true
 			break
-	if not has_medical and pop_count > 20:
+	if not has_medical and pop_count > 30 and current_year >= 8:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.MEDICAL_BAY,
 			"priority": 70
 		})
-	# Hospital upgrade
-	if pop_count > 100:
+	# Hospital upgrade (late game)
+	if pop_count > 100 and current_year > 40:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.HOSPITAL,
 			"priority": 68
 		})
 
-	# School - as soon as children appear
+	# School - once children appear and colony is stable
 	var has_school = false
 	for b in buildings:
 		if b.type == _MCSTypes.BuildingType.SCHOOL:
@@ -268,52 +276,52 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 	for c in colonists:
 		if c.is_alive and c.life_stage == _MCSTypes.LifeStage.CHILD:
 			child_count += 1
-	if not has_school and child_count >= 2:
+	if not has_school and child_count >= 3 and current_year >= 12:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.SCHOOL,
 			"priority": 65
 		})
-	# University for advanced colony
-	if pop_count > 80 and current_year > 20:
+	# University for advanced colony (late game)
+	if pop_count > 80 and current_year > 35:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.UNIVERSITY,
 			"priority": 60
 		})
 
-	# Lab for research
+	# Lab for research (mid-game)
 	var has_lab = false
 	for b in buildings:
 		if b.type == _MCSTypes.BuildingType.LAB:
 			has_lab = true
 			break
-	if not has_lab and pop_count > 30:
+	if not has_lab and pop_count > 40 and current_year >= 15:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.LAB,
 			"priority": 55
 		})
-	# Research center
-	if pop_count > 100 and current_year > 30:
+	# Research center (late game)
+	if pop_count > 100 and current_year > 40:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.RESEARCH_CENTER,
 			"priority": 52
 		})
 
-	# Recreation and social buildings
-	if pop_count > 25:
+	# Recreation and social buildings (mid-game comfort)
+	if pop_count > 40 and current_year >= 10:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.RECREATION_CENTER,
 			"priority": 50
 		})
 
-	# Government hall for large colony
-	if pop_count > 70 and current_year > 25:
+	# Government hall for large colony (late game)
+	if pop_count > 80 and current_year > 35:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.GOVERNMENT_HALL,
 			"priority": 45
 		})
 
-	# Temple for culture
-	if pop_count > 50 and current_year > 15:
+	# Temple for culture (mid-late game)
+	if pop_count > 60 and current_year > 25:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.TEMPLE,
 			"priority": 40
@@ -432,6 +440,13 @@ static func _get_building_cost(building_type: int) -> Dictionary:
 			return {"building_materials": 80, "machine_parts": 15}
 		_MCSTypes.BuildingType.GOVERNMENT_HALL:
 			return {"building_materials": 130, "machine_parts": 35}
+		# Superstructures - expensive mega-projects
+		_MCSTypes.BuildingType.MASS_DRIVER:
+			return {"building_materials": 500, "machine_parts": 200}
+		_MCSTypes.BuildingType.FUSION_REACTOR:
+			return {"building_materials": 600, "machine_parts": 250}
+		_MCSTypes.BuildingType.SPACE_ELEVATOR:
+			return {"building_materials": 800, "machine_parts": 350}
 		_:
 			return {"building_materials": 80, "machine_parts": 18}
 
@@ -470,12 +485,70 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 			actions.append("Repaired: %s" % _MCSTypes.get_building_name(building.get("type", 0)))
 			state = store.get_state()  # Refresh state
 
-	# 3. BUILD NEW - Build 1-4 buildings per year
+	# 3. UPGRADE EXISTING BUILDINGS - Taller, more impressive!
+	var upgraded_this_year = 0
+	var max_upgrades = 3 + rng.randi() % 4  # 3-6 upgrades per year (more aggressive!)
+	var buildings = state.get("buildings", [])
+	var current_year = state.get("current_year", 0)
+
+	for building in buildings:
+		if upgraded_this_year >= max_upgrades:
+			break
+		var tier = building.get("tier", 1)
+		# Default constructed_year to year 1 if not set (legacy buildings)
+		var constructed_year = building.get("constructed_year", 1)
+		var age = current_year - constructed_year
+		# Upgrade every 3 years per tier (faster upgrades for visual impact)
+		if tier < 5 and age >= (tier * 3) and rng.randf() < 0.6:
+			var building_id = building.get("id", "")
+			if store.has_method("upgrade_building"):
+				store.upgrade_building(building_id)
+				actions.append("Upgraded: %s to Tier %d" % [_MCSTypes.get_building_name(building.get("type", 0)), tier + 1])
+				state = store.get_state()
+				upgraded_this_year += 1
+
+	# 4. BUILD SUPERSTRUCTURES - One every 5 years, targeting 10 by year 50
+	if current_year >= 5 and current_year % 5 == 0:
+		var superstructure = _choose_superstructure(state, rng.randf())
+		if superstructure >= 0:
+			var cost = _get_building_cost(superstructure)
+			var resources = state.get("resources", {})
+			var can_afford = true
+			for resource_name in cost:
+				if resources.get(resource_name, 0.0) < cost[resource_name]:
+					can_afford = false
+					break
+			if can_afford:
+				store.start_construction(superstructure)
+				actions.append("SUPERSTRUCTURE: Started %s (Year %d milestone)" % [_MCSTypes.get_building_name(superstructure), current_year])
+				state = store.get_state()
+
+	# 5. BUILD NEW - Slow early growth, earn your colony!
+	var building_count = buildings.size()
+
+	# SLOW progression: start tiny, grow gradually over decades
+	# This creates the feeling of earning each building
+	var base_builds: int
+	if current_year == 1:
+		base_builds = 1  # Year 1: Just 1 hab pod - survival mode!
+	elif current_year <= 3:
+		base_builds = 1 + rng.randi() % 2  # Years 2-3: 1-2 buildings (scraping by)
+	elif current_year <= 8:
+		base_builds = 2 + rng.randi() % 2  # Years 4-8: 2-3 buildings (establishing)
+	elif current_year <= 15:
+		base_builds = 2 + rng.randi() % 3  # Years 9-15: 2-4 buildings (growing)
+	elif current_year <= 30:
+		base_builds = 3 + rng.randi() % 3  # Years 16-30: 3-5 buildings (thriving)
+	elif current_year <= 60:
+		base_builds = 3 + rng.randi() % 4  # Years 31-60: 3-6 buildings (expanding)
+	else:
+		base_builds = 4 + rng.randi() % 4  # Years 60+: 4-7 buildings (mega-colony)
+
 	var buildings_this_year = 0
-	var max_buildings = 1 + rng.randi() % 4  # 1-4 buildings
+	var max_buildings = base_builds
 
 	while buildings_this_year < max_buildings:
-		var should_build = rng.randf() < 0.85 or _has_critical_need(state)
+		var should_build = rng.randf() < 0.90 or _has_critical_need(state)
 		if not should_build and buildings_this_year > 0:
 			break
 
@@ -526,6 +599,50 @@ static func _get_broken_buildings_by_priority(state: Dictionary) -> Array:
 	)
 
 	return broken
+
+## Choose which superstructure to build
+## Cycles through: Mass Driver -> Fusion Reactor -> Space Elevator -> repeat
+static func _choose_superstructure(state: Dictionary, random_value: float) -> int:
+	var buildings = state.get("buildings", [])
+
+	# Count existing superstructures
+	var superstructure_counts = {
+		_MCSTypes.BuildingType.MASS_DRIVER: 0,
+		_MCSTypes.BuildingType.FUSION_REACTOR: 0,
+		_MCSTypes.BuildingType.SPACE_ELEVATOR: 0
+	}
+
+	for b in buildings:
+		var btype = b.get("type", -1)
+		if btype in superstructure_counts:
+			superstructure_counts[btype] += 1
+
+	# Build order priority - cycle through types
+	# Start with mass driver (cargo), then fusion (power), then elevator (transport)
+	var build_order = [
+		_MCSTypes.BuildingType.MASS_DRIVER,
+		_MCSTypes.BuildingType.FUSION_REACTOR,
+		_MCSTypes.BuildingType.SPACE_ELEVATOR
+	]
+
+	# Find the superstructure type with the fewest built
+	var min_count = 999
+	var candidates: Array = []
+	for stype in build_order:
+		var count = superstructure_counts[stype]
+		if count < min_count:
+			min_count = count
+			candidates = [stype]
+		elif count == min_count:
+			candidates.append(stype)
+
+	# Pick from candidates (first one, or random if multiple have same count)
+	if candidates.size() == 1:
+		return candidates[0]
+	elif candidates.size() > 1:
+		return candidates[int(random_value * candidates.size()) % candidates.size()]
+
+	return build_order[0]  # Default to mass driver
 
 static func _has_critical_need(state: Dictionary) -> bool:
 	var colonists = state.get("colonists", [])

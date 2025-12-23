@@ -38,8 +38,11 @@ func get_initial_state():
 			"time_in_phase": 0.0,             # Time tracker for transitions
 			"progenitor_revealed": false,     # Has ??? become THE PROGENITOR?
 		},
-		# Outpost system - mini-factories at strategic points
+		# Outpost system - mini-factories at strategic points (legacy)
 		"outposts": {},  # point_id -> { team, build_progress, production_timer }
+		# Factory system - larger production facilities that can be built anywhere
+		"factories": {},  # factory_id -> { team, position, health, complete, production_timer, production_type }
+		"next_factory_id": 1,
 		"next_ship_id": 1,
 		"next_expansion_point_id": 0,
 		"game_over": false,
@@ -48,6 +51,9 @@ func get_initial_state():
 
 # Reducer function to update state based on actions
 func reduce(state, action):
+	if state == null:
+		push_warning("Reducer received null state")
+		return null
 	var new_state = state.duplicate(true)  # Deep copy to detect changes
 
 	match action["type"]:
@@ -58,13 +64,19 @@ func reduce(state, action):
 			var energy_cost = ship_stats["cost"]
 			var mass_cost = ship_stats.get("mass_cost", 0)
 
-			var has_energy = new_state["teams"][team]["energy"] >= energy_cost
-			var has_mass = new_state["teams"][team]["mass"] >= mass_cost
+			# PROGENITOR team doesn't have a normal team entry - spawns are free
+			var can_build = false
+			if team == VnpTypes.Team.PROGENITOR:
+				can_build = true  # Progenitor spawns freely
+			elif new_state["teams"].has(team):
+				var has_energy = new_state["teams"][team]["energy"] >= energy_cost
+				var has_mass = new_state["teams"][team]["mass"] >= mass_cost
+				if has_energy and has_mass:
+					new_state["teams"][team]["energy"] -= energy_cost
+					new_state["teams"][team]["mass"] -= mass_cost
+					can_build = true
 
-			if has_energy and has_mass:
-				new_state["teams"][team]["energy"] -= energy_cost
-				new_state["teams"][team]["mass"] -= mass_cost
-
+			if can_build:
 				var ship_id = new_state["next_ship_id"]
 				new_state["next_ship_id"] += 1
 
@@ -116,8 +128,8 @@ func reduce(state, action):
 			if new_state["planets"].has(planet_id):
 				var old_owner = new_state["planets"][planet_id].get("owner", null)
 				new_state["planets"][planet_id]["owner"] = team
-				# Capturing a planet gives bonus energy
-				if old_owner != team:
+				# Capturing a planet gives bonus energy (only for teams with economy)
+				if old_owner != team and new_state["teams"].has(team):
 					var bonus = 100  # Capture bonus
 					new_state["teams"][team]["energy"] += bonus
 
@@ -139,8 +151,8 @@ func reduce(state, action):
 			if new_state["strategic_points"].has(point_id):
 				var old_owner = new_state["strategic_points"][point_id].get("owner", null)
 				new_state["strategic_points"][point_id]["owner"] = team
-				# Capturing gives instant bonus
-				if old_owner != team:
+				# Capturing gives instant bonus (only for teams with economy)
+				if old_owner != team and new_state["teams"].has(team):
 					new_state["teams"][team]["energy"] += 50
 					new_state["teams"][team]["mass"] += 10
 
@@ -208,13 +220,28 @@ func reduce(state, action):
 				var teams_alive = []
 				for team in new_state.teams:
 					var has_ships = _team_has_ships(new_state, team)
+					var has_factories = _team_has_factories(new_state, team)
 					var can_build = new_state.teams[team].energy >= MIN_SHIP_COST
-					if has_ships or can_build:
+					# Team is alive if they have ships, factories, or can build
+					if has_ships or has_factories or can_build:
 						teams_alive.append(team)
 
-				if teams_alive.size() <= 1:
+				# Check if Progenitor is active and hunting
+				var convergence_phase = new_state["convergence"].get("phase", VnpTypes.ConvergencePhase.DORMANT)
+				var progenitor_active = convergence_phase >= VnpTypes.ConvergencePhase.EMERGENCE
+				var progenitor_has_ships = _team_has_ships(new_state, VnpTypes.Team.PROGENITOR)
+
+				if teams_alive.size() == 0:
+					# Everyone wiped out
 					new_state["game_over"] = true
-					new_state["winner"] = teams_alive[0] if teams_alive.size() == 1 else -1
+					if progenitor_active or progenitor_has_ships:
+						# Progenitor wins - the cycle continues
+						new_state["winner"] = VnpTypes.Team.PROGENITOR
+					else:
+						new_state["winner"] = -1  # Mutual destruction
+				elif teams_alive.size() == 1:
+					new_state["game_over"] = true
+					new_state["winner"] = teams_alive[0]
 
 		"RESET_GAME":
 			new_state = get_initial_state()
@@ -336,7 +363,7 @@ func reduce(state, action):
 				var outpost = new_state["outposts"][point_id]
 				if not outpost["complete"]:
 					outpost["build_progress"] += delta
-					var build_time = VnpTypes.OUTPOST_CONFIG["build_time"]
+					var build_time = VnpTypes.FACTORY_CONFIG["build_time"]
 					if outpost["build_progress"] >= build_time:
 						outpost["complete"] = true
 						outpost["production_timer"] = 0.0
@@ -376,11 +403,91 @@ func reduce(state, action):
 				# Outpost is destroyed when point changes hands
 				new_state["outposts"].erase(point_id)
 
+		# ======================
+		# FACTORY SYSTEM ACTIONS
+		# ======================
+
+		"FACTORY_CREATE":
+			# Create a new factory (starting factory or harvester-built)
+			var factory_id = str(new_state["next_factory_id"])
+			new_state["next_factory_id"] += 1
+			var config = VnpTypes.FACTORY_CONFIG
+			new_state["factories"][factory_id] = {
+				"id": factory_id,
+				"team": action["team"],
+				"position": action["position"],
+				"health": action.get("health", config["health"]),
+				"complete": action.get("complete", true),
+				"build_progress": action.get("build_progress", 0.0),
+				"production_timer": 0.0,
+				"production_type": action.get("production_type", config["default_production"]),
+			}
+
+		"FACTORY_DAMAGE":
+			# Damage a factory
+			var factory_id = action["factory_id"]
+			var damage = action["damage"]
+			if new_state["factories"].has(factory_id):
+				new_state["factories"][factory_id]["health"] -= damage
+				if new_state["factories"][factory_id]["health"] <= 0:
+					new_state["factories"].erase(factory_id)
+
+		"FACTORY_DESTROY":
+			# Remove a factory
+			var factory_id = action["factory_id"]
+			if new_state["factories"].has(factory_id):
+				new_state["factories"].erase(factory_id)
+
+		"FACTORY_UPDATE_PRODUCTION":
+			# Tick production timers for all complete factories
+			var delta = action["delta"]
+			for factory_id in new_state["factories"]:
+				var factory = new_state["factories"][factory_id]
+				if factory["complete"]:
+					factory["production_timer"] += delta
+
+		"FACTORY_PRODUCE":
+			# Factory produced a ship - reset timer
+			var factory_id = action["factory_id"]
+			if new_state["factories"].has(factory_id):
+				new_state["factories"][factory_id]["production_timer"] = 0.0
+
+		"FACTORY_SET_PRODUCTION":
+			# Change what ship type the factory produces
+			var factory_id = action["factory_id"]
+			var ship_type = action["ship_type"]
+			if new_state["factories"].has(factory_id):
+				new_state["factories"][factory_id]["production_type"] = ship_type
+
+		"FACTORY_UPDATE_BUILD":
+			# Update build progress for a factory being built
+			var factory_id = action["factory_id"]
+			var delta = action["delta"]
+			if new_state["factories"].has(factory_id):
+				var factory = new_state["factories"][factory_id]
+				if not factory["complete"]:
+					factory["build_progress"] += delta
+					var build_time = VnpTypes.FACTORY_CONFIG["build_time"]
+					if factory["build_progress"] >= build_time:
+						factory["complete"] = true
+						factory["production_timer"] = 0.0
+
 	return new_state
 
 func _team_has_ships(state: Dictionary, team: int) -> bool:
 	for ship_id in state.ships:
 		if state.ships[ship_id].team == team:
+			return true
+	return false
+
+
+func _team_has_factories(state: Dictionary, team: int) -> bool:
+	"""Check if team has any complete factories"""
+	if not state.has("factories"):
+		return false
+	for factory_id in state.factories:
+		var factory = state.factories[factory_id]
+		if factory.get("team", -1) == team and factory.get("complete", false):
 			return true
 	return false
 

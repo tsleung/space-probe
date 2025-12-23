@@ -52,7 +52,7 @@ class LaunchWindow:
 
 	func _init():
 		launch_day = 0
-		travel_days = OPTIMAL_TRANSFER_DAYS
+		travel_days = MOTOrbital.OPTIMAL_TRANSFER_DAYS
 		fuel_multiplier = 1.0
 		phase_deviation = 0.0
 		quality = "optimal"

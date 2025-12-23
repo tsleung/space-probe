@@ -4,6 +4,8 @@ class_name FCWBattleSystem
 ## Named Ships, Battle Reports, and Tactical Combat
 ## "They have names. They have crews. They die for us."
 
+const FCWTypes = preload("res://scripts/first_contact_war/fcw_types.gd")
+
 # ============================================================================
 # SHIP NAME GENERATION
 # ============================================================================

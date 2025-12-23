@@ -103,6 +103,8 @@ func init(vnp_store, initial_data, controller = null, snd_manager = null, main_r
 		_setup_starbase_visuals()
 	elif ship_data.type == VnpTypes.ShipType.BASE_TURRET:
 		_setup_turret_visuals()
+	elif ship_data.type == VnpTypes.ShipType.PROGENITOR_DRONE:
+		_setup_progenitor_drone_visuals()
 
 	var fire_rate = ship_stats.get("fire_rate", 1.0)
 	if fire_rate > 0:
@@ -113,6 +115,11 @@ func _setup_engine_trail():
 	# Simple line trail + spark for performance
 	var team_color = VnpTypes.get_team_color(ship_data.team)
 	var ship_size = VnpTypes.get_ship_size(ship_data.type)
+
+	# Progenitor drones have a special void trail
+	if ship_data.type == VnpTypes.ShipType.PROGENITOR_DRONE:
+		_setup_void_trail()
+		return
 
 	# Trail length based on ship size
 	var trail_lengths = {
@@ -151,11 +158,57 @@ func _setup_engine_trail():
 	spark.color = team_color.lightened(0.5)
 	add_child(spark)
 
+
+func _setup_void_trail():
+	# Special trail for Progenitor drones - wisps of void energy
+	var void_color = VnpTypes.PROGENITOR_ACCENT
+	var dark_void = VnpTypes.PROGENITOR_COLOR
+
+	# Main void trail - darker, more sinister
+	engine_trail = Line2D.new()
+	engine_trail.name = "VoidTrail"
+	engine_trail.width = 4.0
+	engine_trail.default_color = void_color
+	engine_trail.add_point(Vector2(-8, 0))
+	engine_trail.add_point(Vector2(-25, 0))
+
+	# Gradient to dark void
+	var grad = Gradient.new()
+	grad.set_color(0, void_color)
+	grad.set_color(1, Color(dark_void.r, dark_void.g, dark_void.b, 0))
+	engine_trail.gradient = grad
+
+	add_child(engine_trail)
+
+	# Secondary wispy trails - adds ethereal quality
+	for i in range(2):
+		var wisp = Line2D.new()
+		wisp.name = "VoidWisp_%d" % i
+		wisp.width = 2.0
+		var offset_y = (i * 2 - 1) * 4  # -4 and +4
+		wisp.add_point(Vector2(-6, offset_y))
+		wisp.add_point(Vector2(-18, offset_y * 1.5))
+		wisp.default_color = Color(void_color.r, void_color.g, void_color.b, 0.5)
+
+		var wisp_grad = Gradient.new()
+		wisp_grad.set_color(0, void_color)
+		wisp_grad.set_color(1, Color(dark_void.r, dark_void.g, dark_void.b, 0))
+		wisp.gradient = wisp_grad
+
+		add_child(wisp)
+
+
 func _setup_muzzle_flash():
 	muzzle_flash = Polygon2D.new()
 	muzzle_flash.name = "MuzzleFlash"
 
-	var weapon_type = ship_stats.get("weapon", VnpTypes.WeaponType.GUN)
+	var weapon_type = ship_stats.get("weapon", null)
+	# Ships without weapons (like PROGENITOR_DRONE) don't need muzzle flash
+	if weapon_type == null:
+		muzzle_flash.visible = false
+		add_child(muzzle_flash)
+		return
+
 	var flash_color = VnpTypes.get_weapon_color(ship_data.team, weapon_type)
 
 	# Weapon-specific muzzle flash shapes and sizes
@@ -340,7 +393,7 @@ func _setup_pdc_kill_zone():
 func _animate_pdc_sweep():
 	# No animation needed - simplified
 	var pulse_tween = create_tween()
-	pulse_tween.set_loops()
+	pulse_tween.set_loops(0)  # 0 = infinite
 	pulse_tween.tween_property(pdc_range_ring, "modulate:a", 0.5, 1.0).set_trans(Tween.TRANS_SINE)
 	pulse_tween.tween_property(pdc_range_ring, "modulate:a", 1.0, 1.0).set_trans(Tween.TRANS_SINE)
 
@@ -474,12 +527,12 @@ func _setup_starbase_visuals():
 
 	# Animate the sweep rotation
 	var sweep_tween = create_tween()
-	sweep_tween.set_loops()
+	sweep_tween.set_loops(0)  # 0 = infinite
 	sweep_tween.tween_property(sweep, "rotation", TAU, 4.0).from(0.0)
 
 	# Pulse the range ring
 	var pulse_tween = create_tween()
-	pulse_tween.set_loops()
+	pulse_tween.set_loops(0)  # 0 = infinite
 	pulse_tween.tween_property(starbase_range_ring, "modulate:a", 0.4, 1.5).set_trans(Tween.TRANS_SINE)
 	pulse_tween.tween_property(starbase_range_ring, "modulate:a", 1.0, 1.5).set_trans(Tween.TRANS_SINE)
 
@@ -531,9 +584,82 @@ func _setup_turret_visuals():
 
 	# Slow pulse on range ring
 	var pulse_tween = create_tween()
-	pulse_tween.set_loops()
+	pulse_tween.set_loops(0)  # 0 = infinite
 	pulse_tween.tween_property(range_ring, "modulate:a", 0.5, 2.0).set_trans(Tween.TRANS_SINE)
 	pulse_tween.tween_property(range_ring, "modulate:a", 1.0, 2.0).set_trans(Tween.TRANS_SINE)
+
+
+func _setup_progenitor_drone_visuals():
+	# Progenitor Drone: Large alien hunter from the void
+	# Distinctive sickly teal with pulsing glow - BIGGER and more threatening
+	var void_color = VnpTypes.PROGENITOR_ACCENT
+	var pulse_color = VnpTypes.PROGENITOR_PULSE
+	var absorption_range = ship_stats.get("range", 150)
+	var drone_scale = ship_stats.get("scale", 1.8)
+
+	# Container for drone effects
+	var drone_fx = Node2D.new()
+	drone_fx.name = "DroneFX"
+	add_child(drone_fx)
+
+	# Attack range indicator - menacing ring
+	var range_ring = Line2D.new()
+	range_ring.name = "AbsorptionRange"
+	range_ring.width = 2.5
+	range_ring.default_color = Color(void_color.r, void_color.g, void_color.b, 0.2)
+	var ring_points = []
+	for i in range(25):
+		var angle = i * (PI * 2 / 24)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * absorption_range)
+	range_ring.points = PackedVector2Array(ring_points)
+	drone_fx.add_child(range_ring)
+
+	# Void core - larger inner pulsing glow
+	var core_glow = Polygon2D.new()
+	core_glow.name = "VoidCore"
+	core_glow.polygon = PackedVector2Array([
+		Vector2(12, 0), Vector2(6, -8), Vector2(-6, -8), Vector2(-12, 0),
+		Vector2(-6, 8), Vector2(6, 8)
+	])
+	core_glow.color = pulse_color
+	drone_fx.add_child(core_glow)
+
+	# Larger tendrils extending from body - wispy lines
+	for i in range(5):  # More tendrils for bigger creature
+		var tendril = Line2D.new()
+		tendril.name = "Tendril_%d" % i
+		tendril.width = 3.0
+		tendril.default_color = void_color
+		var angle_offset = (i - 2) * 0.35  # Spread across front
+		var tip = Vector2(28, 0).rotated(angle_offset)  # Longer tendrils
+		tendril.add_point(Vector2.ZERO)
+		tendril.add_point(tip * 0.4)
+		tendril.add_point(tip * 0.7)
+		tendril.add_point(tip)
+		# Gradient fade
+		var grad = Gradient.new()
+		grad.set_color(0, void_color)
+		grad.set_color(1, Color(void_color.r, void_color.g, void_color.b, 0.2))
+		tendril.gradient = grad
+		drone_fx.add_child(tendril)
+
+	# Eerie pulsing effect on core - slower for larger creature
+	var pulse_tween = create_tween()
+	pulse_tween.set_loops(0)  # 0 = infinite
+	pulse_tween.tween_property(core_glow, "modulate:a", 0.5, 0.8).set_trans(Tween.TRANS_SINE)
+	pulse_tween.tween_property(core_glow, "modulate:a", 1.0, 0.8).set_trans(Tween.TRANS_SINE)
+
+	# Slow menacing pulse on range ring
+	var range_tween = create_tween()
+	range_tween.set_loops(0)  # 0 = infinite
+	range_tween.tween_property(range_ring, "modulate:a", 0.2, 2.0).set_trans(Tween.TRANS_SINE)
+	range_tween.tween_property(range_ring, "modulate:a", 0.8, 2.0).set_trans(Tween.TRANS_SINE)
+
+	# Scale pulsing - slower, more ominous breathing
+	var scale_tween = create_tween()
+	scale_tween.set_loops(0)  # 0 = infinite
+	scale_tween.tween_property(self, "scale", Vector2(1.08, 0.92), 1.2).set_trans(Tween.TRANS_SINE)
+	scale_tween.tween_property(self, "scale", Vector2(0.92, 1.08), 1.2).set_trans(Tween.TRANS_SINE)
 
 
 func _show_muzzle_flash():
@@ -599,12 +725,19 @@ func _physics_process(delta):
 		target_cache_timer -= delta
 
 	var current_state = store.get_state()
+	if current_state == null or not current_state.has("ships"):
+		return
 	if not current_state.ships.has(ship_data.id):
 		queue_free()
 		return
 
 	var my_current_data = current_state.ships[ship_data.id]
-	
+
+	# === PROGENITOR DRONE SPECIAL BEHAVIOR ===
+	if ship_data.type == VnpTypes.ShipType.PROGENITOR_DRONE:
+		_process_progenitor_drone(delta, current_state)
+		return  # Drones don't use normal ship AI
+
 	var target_ship_data = null
 	if my_current_data.target and current_state.ships.has(my_current_data.target):
 		target_ship_data = current_state.ships.get(my_current_data.target)
@@ -631,8 +764,40 @@ func _physics_process(delta):
 			if ai_controller:
 				is_loose = ai_controller.get_adherence(ship_data.team) == VnpTypes.FleetAdherence.LOOSE
 
+			# PROGENITOR SURVIVAL MODE: When the Progenitor emerges, prioritize defense
+			var progenitor_active = _is_progenitor_active(current_state)
+			if progenitor_active and ship_data.type != VnpTypes.ShipType.HARVESTER:
+				# Hunt Progenitor drones first - they're the real threat now
+				var drone_target = _find_nearest_progenitor_drone(current_state)
+				if drone_target != -1:
+					_dispatch_state_change("attacking", drone_target)
+					return
+
+				# No drones visible - patrol between our factories
+				var patrol_target = _get_factory_patrol_target(current_state)
+				if patrol_target != Vector2.ZERO:
+					_dispatch_state_change("moving", patrol_target)
+					return
+
 			if is_loose:
 				# LOOSE: Simple old behavior - attack nearest enemy or push to center
+				# HARVESTER: Special behavior - find location to build factory
+				if ship_data.type == VnpTypes.ShipType.HARVESTER:
+					var factory_target = _find_factory_build_location(current_state)
+					if factory_target != Vector2.ZERO:
+						var dist_to_target = position.distance_to(factory_target)
+						if dist_to_target > 40:
+							# Move to build location
+							_dispatch_state_change("moving", factory_target)
+						# else: Stay put - we're at the build location, camping will handle building
+					else:
+						# No good build location - just idle near base
+						if vnp_main and vnp_main.base_nodes.has(ship_data.team):
+							var base_pos = vnp_main.base_nodes[ship_data.team].position
+							var offset = Vector2(randf_range(-100, 100), randf_range(-100, 100))
+							_dispatch_state_change("moving", base_pos + offset)
+					return
+
 				# BUT: Defensive ships always try to stick with combat ships
 				var is_support_ship = ship_data.type in [VnpTypes.ShipType.DEFENDER, VnpTypes.ShipType.SHIELDER, VnpTypes.ShipType.GRAVITON]
 
@@ -708,6 +873,16 @@ func _physics_process(delta):
 							_dispatch_state_change("moving", push_target)
 			else:
 				# TIGHT: Formation-aware behavior
+				# But harvesters always seek factory build locations
+				if ship_data.type == VnpTypes.ShipType.HARVESTER:
+					var factory_target = _find_factory_build_location(current_state)
+					if factory_target != Vector2.ZERO:
+						var dist_to_target = position.distance_to(factory_target)
+						if dist_to_target > 40:
+							_dispatch_state_change("moving", factory_target)
+						# else: Stay put - camping will handle building
+					return
+
 				var target_id = _find_nearest_enemy_for_formation(current_state)
 				if target_id != -1:
 					_dispatch_state_change("attacking", target_id)
@@ -749,6 +924,10 @@ func _physics_process(delta):
 				_dispatch_state_change("idle", null)
 
 		"attacking":
+			# PROGENITOR_DRONE doesn't attack normally - it absorbs
+			if ship_data.type == VnpTypes.ShipType.PROGENITOR_DRONE:
+				return
+
 			if not target_ship_data:
 				_dispatch_state_change("idle", null)
 				return
@@ -780,12 +959,13 @@ func _physics_process(delta):
 
 			# Get tactical behavior based on threat
 			var tactics = _get_tactical_behavior(current_threat, ship_size)
-			var effective_range = ship_stats.range * tactics.range_mult
+			var base_range = ship_stats.get("range", 200)
+			var effective_range = base_range * tactics.range_mult
 
 			# Rush behavior - close distance aggressively
 			if tactics.rush and distance_to_target > effective_range * 0.7:
 				_rush_target(target_ship_data.position, delta)
-			elif distance_to_target > ship_stats.range:
+			elif distance_to_target > base_range:
 				_move_to(target_ship_data.position)
 			else:
 				# Size-based combat movement with tactical modifiers
@@ -860,7 +1040,7 @@ func _apply_convergence_pull(delta: float):
 		return
 
 	var current_state = store.get_state()
-	if not current_state.has("convergence"):
+	if current_state == null or not current_state.has("convergence"):
 		return
 
 	var convergence = current_state.convergence
@@ -943,7 +1123,7 @@ func _strafe_around_target(target_pos: Vector2, delta: float):
 	# Fast strafing runs with momentum - small ships dart around with drift
 	var to_target = target_pos - position
 	var distance = to_target.length()
-	var optimal_range = ship_stats.range * 0.8
+	var optimal_range = ship_stats.get("range", 200) * 0.8
 
 	# Update strafe angle continuously
 	strafe_angle += strafe_direction * delta * 2.5
@@ -992,7 +1172,7 @@ func _strafe_around_target(target_pos: Vector2, delta: float):
 
 func _strafe_around_target_tactical(target_pos: Vector2, delta: float, tactics: Dictionary, state: Dictionary):
 	# Tactical strafing with momentum and scatter/flank behaviors
-	var optimal_range = ship_stats.range * tactics.range_mult
+	var optimal_range = ship_stats.get("range", 200) * tactics.range_mult
 	var orbit_speed = tactics.orbit_speed
 
 	# Update strafe angle
@@ -1089,22 +1269,23 @@ func _calculate_flank_position(target_pos: Vector2, state: Dictionary) -> Vector
 			ally_center += ship.position
 			ally_count += 1
 
+	var range_val = ship_stats.get("range", 200)
 	if ally_count == 0:
-		return target_pos + Vector2(cos(strafe_angle), sin(strafe_angle)) * ship_stats.range * 0.8
+		return target_pos + Vector2(cos(strafe_angle), sin(strafe_angle)) * range_val * 0.8
 
 	ally_center /= ally_count
 
 	# Position on opposite side of target from allies
 	var target_to_allies = (ally_center - target_pos).normalized()
 	var flank_dir = -target_to_allies  # Opposite side
-	return target_pos + flank_dir * ship_stats.range * 0.8
+	return target_pos + flank_dir * range_val * 0.8
 
 
 func _orbit_target(target_pos: Vector2, delta: float, speed_mult: float = 0.5):
 	# Slower orbit for medium ships with momentum - controlled but weighty
 	var to_target = target_pos - position
 	var distance = to_target.length()
-	var optimal_range = ship_stats.range * 0.85
+	var optimal_range = ship_stats.get("range", 200) * 0.85
 
 	# Slow orbit
 	strafe_angle += strafe_direction * delta * 1.2
@@ -1435,6 +1616,8 @@ func _find_uncaptured_planet(state):
 
 func _on_fire_rate_timer_timeout():
 	var current_state = store.get_state()
+	if current_state == null or not current_state.has("ships"):
+		return
 	var my_current_data = current_state.ships.get(ship_data.id)
 	
 	if not my_current_data or my_current_data.state != "attacking":
@@ -1442,22 +1625,28 @@ func _on_fire_rate_timer_timeout():
 
 	var target_id = my_current_data.target
 	if current_state.ships.has(target_id):
+		# Skip firing for ships without weapons (like PROGENITOR_DRONE)
+		var weapon = ship_stats.get("weapon", null)
+		if weapon == null:
+			return
+
 		var target_data = current_state.ships[target_id]
 		var target_stats = VnpTypes.SHIP_STATS[target_data.type]
 		# Get damage multiplier safely - some weapons (PDC, TURBOLASER, etc) don't have multipliers
-		var weapon_multipliers = VnpTypes.DAMAGE_MULTIPLIERS.get(ship_stats.weapon, {})
+		var weapon_multipliers = VnpTypes.DAMAGE_MULTIPLIERS.get(weapon, {})
 		var damage_multiplier = weapon_multipliers.get(target_stats.get("weapon", -1), 1.0)
 
 		# Apply damage bonus from controlled strategic points (e.g., Command Center)
 		var point_damage_bonus = _get_strategic_point_damage_bonus(current_state, ship_data.team)
-		var total_damage = ship_stats.damage * damage_multiplier * (1.0 + point_damage_bonus)
+		var base_damage = ship_stats.get("damage", 0)
+		var total_damage = base_damage * damage_multiplier * (1.0 + point_damage_bonus)
 
 		# Show muzzle flash for all weapons
 		_show_muzzle_flash()
 
 		# Play weapon sound
 		if sound_manager:
-			match ship_stats.weapon:
+			match weapon:
 				VnpTypes.WeaponType.LASER:
 					sound_manager.play_laser()
 				VnpTypes.WeaponType.GUN:
@@ -1467,7 +1656,12 @@ func _on_fire_rate_timer_timeout():
 				VnpTypes.WeaponType.TURBOLASER:
 					sound_manager.play_turbolaser()
 
-		match ship_stats.weapon:
+		match weapon:
+			VnpTypes.WeaponType.VOID_TENDRIL:
+				# VOID TENDRIL: Ancient probe attack - reaching tendrils of void energy
+				_fire_void_tendril(target_id, target_data, total_damage)
+				return
+
 			VnpTypes.WeaponType.LASER:
 				# LASER: Instant hit with sustained burn effect
 				var laser_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.LASER)
@@ -1510,7 +1704,7 @@ func _on_fire_rate_timer_timeout():
 				var projectile = vnp_main.get_projectile()
 				projectile.init({
 					"team": ship_data.team,
-					"weapon_type": ship_stats.weapon,
+					"weapon_type": weapon,
 					"damage": total_damage,
 					"start_position": self.global_position,
 					"start_rotation": self.rotation,
@@ -1534,7 +1728,7 @@ func _on_fire_rate_timer_timeout():
 						# Spread missiles with different arc offsets
 						m_projectile.init({
 							"team": ship_data.team,
-							"weapon_type": ship_stats.weapon,
+							"weapon_type": weapon,
 							"damage": total_damage / missile_count,  # Split damage across salvo
 							"start_position": self.global_position,
 							"start_rotation": self.rotation + (spread_index - 1) * 0.12,  # Slight angle spread
@@ -1562,6 +1756,76 @@ func _on_fire_rate_timer_timeout():
 					"store": store,
 					"vnp_main": vnp_main,
 				})
+
+func _fire_void_tendril(target_id: int, target_data: Dictionary, damage: float):
+	"""Fire void tendril attack - reaching tendrils of ancient void energy"""
+	var tendril_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.VOID_TENDRIL)
+	var target_pos = target_data.position
+
+	# Create multiple wispy tendrils reaching toward target
+	for i in range(3):
+		var tendril = Line2D.new()
+		tendril.width = 3.0 + randf() * 2.0
+		tendril.default_color = Color(tendril_color.r, tendril_color.g, tendril_color.b, 0.7)
+		tendril.z_index = 5
+
+		# Create wavy tendril path
+		var points = []
+		var segments = 8
+		var local_target = to_local(target_pos)
+		for j in range(segments + 1):
+			var t = float(j) / segments
+			var base_pos = Vector2.ZERO.lerp(local_target, t)
+			# Add waviness that's perpendicular to direction
+			var perp = local_target.normalized().orthogonal()
+			var wave = sin(t * PI * 3 + i * PI / 3) * (20 - t * 15)  # Waves diminish near target
+			points.append(base_pos + perp * wave)
+		tendril.points = PackedVector2Array(points)
+		add_child(tendril)
+
+		# Animate tendril - reaches out then fades
+		var tendril_tween = create_tween()
+		tendril_tween.tween_property(tendril, "modulate:a", 0.0, 0.3).set_delay(0.1 + i * 0.05)
+		tendril_tween.tween_callback(func(): tendril.queue_free())
+
+	# Void pulse at our position
+	var pulse = Line2D.new()
+	pulse.width = 4.0
+	pulse.default_color = VnpTypes.PROGENITOR_PULSE
+	var pulse_points = []
+	for k in range(17):
+		var angle = k * (PI * 2 / 16)
+		pulse_points.append(Vector2(cos(angle), sin(angle)) * 15)
+	pulse.points = PackedVector2Array(pulse_points)
+	add_child(pulse)
+
+	var pulse_tween = create_tween()
+	pulse_tween.set_parallel(true)
+	pulse_tween.tween_property(pulse, "scale", Vector2(2.5, 2.5), 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	pulse_tween.tween_property(pulse, "modulate:a", 0.0, 0.2)
+	pulse_tween.tween_callback(func(): pulse.queue_free())
+
+	# Absorption effect at target
+	var impact = Line2D.new()
+	impact.width = 3.0
+	impact.default_color = VnpTypes.PROGENITOR_ACCENT
+	var impact_points = []
+	for m in range(13):
+		var angle = m * (PI * 2 / 12)
+		impact_points.append(Vector2(cos(angle), sin(angle)) * 25)
+	impact.points = PackedVector2Array(impact_points)
+	impact.position = to_local(target_pos)
+	add_child(impact)
+
+	var impact_tween = create_tween()
+	impact_tween.set_parallel(true)
+	impact_tween.tween_property(impact, "scale", Vector2(0.3, 0.3), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	impact_tween.tween_property(impact, "modulate:a", 0.0, 0.25)
+	impact_tween.tween_callback(func(): impact.queue_free())
+
+	# Deal damage
+	store.dispatch({ "type": "DAMAGE_SHIP", "ship_id": target_id, "damage": damage })
+
 
 func _show_turbolaser_charge():
 	# Dramatic charging effect before turbolaser fires
@@ -1650,6 +1914,16 @@ func _apply_styles():
 				Vector2(-14, -8), Vector2(-14, 8), Vector2(-6, 14), Vector2(6, 14),
 				Vector2(14, 8)
 			])
+		VnpTypes.ShipType.PROGENITOR_DRONE:
+			# Large alien hunter - organic and terrifying
+			# Massive tendrils reaching forward like grasping claws
+			var drone_scale = ship_stats.get("scale", 1.8)
+			polygon.polygon = _scale_polygon([
+				Vector2(24, 0), Vector2(16, -5), Vector2(10, -14), Vector2(4, -8),
+				Vector2(-4, -16), Vector2(-10, -6), Vector2(-16, -10), Vector2(-12, 0),
+				Vector2(-16, 10), Vector2(-10, 6), Vector2(-4, 16), Vector2(4, 8),
+				Vector2(10, 14), Vector2(16, 5)
+			], drone_scale)
 
 	polygon.color = VnpTypes.get_team_color(ship_data.team)
 
@@ -1920,3 +2194,556 @@ func _get_rally_point(state: Dictionary) -> Vector2:
 	if rally is Vector2:
 		return rally
 	return Vector2.ZERO
+
+
+func _is_progenitor_active(state: Dictionary) -> bool:
+	"""Check if Progenitor has emerged and is a threat"""
+	if not state.has("convergence"):
+		return false
+	var phase = state.convergence.get("phase", VnpTypes.ConvergencePhase.DORMANT)
+	return phase >= VnpTypes.ConvergencePhase.EMERGENCE
+
+
+func _find_nearest_progenitor_drone(state: Dictionary) -> int:
+	"""Find the nearest Progenitor drone to attack"""
+	var nearest_id = -1
+	var nearest_dist = INF
+
+	for other_id in state.ships:
+		var other = state.ships[other_id]
+		if other.type != VnpTypes.ShipType.PROGENITOR_DRONE:
+			continue
+
+		var other_pos = other.position
+		if vnp_main and vnp_main.ship_nodes.has(other_id):
+			var node = vnp_main.ship_nodes[other_id]
+			if is_instance_valid(node):
+				other_pos = node.global_position
+
+		var dist = position.distance_to(other_pos)
+		if dist < nearest_dist:
+			nearest_dist = dist
+			nearest_id = other_id
+
+	return nearest_id
+
+
+# ==============================================================================
+# STRATEGIC COMMAND SYSTEM
+# ==============================================================================
+#
+# This system manages fleet allocation and offensive targeting across factories.
+# It runs periodically (every 3 seconds) to avoid per-frame overhead.
+#
+# ALGORITHM OVERVIEW:
+# ==================
+#
+# PHASE 1: STRATEGIC ASSESSMENT (every 3 seconds)
+# -----------------------------------------------
+# 1. Calculate CENTER OF MASS of all team factories
+# 2. For each factory, calculate ATTACK PROBABILITY based on:
+#    a) Distance from center of mass (further = more exposed)
+#    b) Distance to world edge (closer = Progenitor threat)
+#    c) Proximity to enemy factories (closer = faction threat)
+#    d) Proximity to unclaimed strategic points (opportunity cost)
+#
+# 3. Normalize probabilities so they sum to 1.0
+#
+# PHASE 2: FLEET ALLOCATION
+# -------------------------
+# 1. Each ship is assigned to a factory based on attack probability weights
+# 2. Higher probability factories get proportionally more defenders
+# 3. Assignment is deterministic (ship ID based) for stability
+#
+# PHASE 3: OFFENSIVE TARGETING (per factory)
+# ------------------------------------------
+# Each factory garrison has an OFFENSIVE TARGET priority:
+#
+# IF Progenitor active:
+#   - Primary: Hunt Progenitor drones near this factory
+#   - Secondary: Defend factory perimeter
+#
+# IF normal gameplay:
+#   - Primary: Nearest enemy factory (destroy enemy production)
+#   - Secondary: Nearest unclaimed strategic point (expand territory)
+#   - Tertiary: Patrol factory perimeter
+#
+# Ships oscillate between defending their factory and pushing toward
+# their factory's offensive target, creating a "breathing" defense.
+#
+# ==============================================================================
+
+# Strategic command cache - recalculated periodically
+var _strategic_cache = {
+	"center_of_mass": Vector2.ZERO,
+	"factories": {},        # factory_id -> FactoryTactics
+	"last_update": 0.0,
+}
+const STRATEGIC_RECALC_INTERVAL = 3.0  # Recalculate every 3 seconds
+
+# FactoryTactics structure:
+# {
+#   "position": Vector2,
+#   "attack_probability": float (0-1),
+#   "cumulative_weight": float (for weighted selection),
+#   "offensive_target": Vector2 or null,
+#   "offensive_target_type": "enemy_factory" | "strategic_point" | "progenitor" | "patrol"
+# }
+
+
+func _get_factory_patrol_target(state: Dictionary) -> Vector2:
+	"""Get patrol/attack target for this ship based on strategic allocation"""
+	_update_strategic_cache_if_needed(state)
+
+	if _strategic_cache["factories"].is_empty():
+		# No factories - fall back to base
+		if vnp_main and vnp_main.base_nodes.has(ship_data.team):
+			return vnp_main.base_nodes[ship_data.team].position
+		return Vector2.ZERO
+
+	# Get this ship's assigned factory
+	var assigned = _get_ship_factory_assignment()
+	if assigned.is_empty():
+		return Vector2.ZERO
+
+	var factory_pos = assigned["position"]
+	var offensive_target = assigned.get("offensive_target", null)
+
+	# Determine behavior: defend or push toward offensive target
+	var progenitor_active = _is_progenitor_active(state)
+
+	if progenitor_active:
+		# During Progenitor: Stay closer to factory, hunt nearby drones
+		var drone_target = _find_nearest_progenitor_drone(state)
+		if drone_target != -1:
+			# Found a drone - this will be handled by attacking state
+			return Vector2.ZERO  # Signal to attack instead
+
+		# No drones - patrol around factory
+		return _get_patrol_position(factory_pos, 80.0)
+
+	else:
+		# Normal gameplay: Oscillate between defense and offense
+		# Use time-based oscillation so ships "breathe" between positions
+		var cycle_time = Time.get_ticks_msec() / 1000.0
+		var oscillation = sin(cycle_time * 0.5 + ship_data.id * 0.3)  # -1 to 1
+
+		if offensive_target and oscillation > 0.2:
+			# Push toward offensive target (but not too far from factory)
+			var push_distance = 150.0 * oscillation
+			var direction = (offensive_target - factory_pos).normalized()
+			return factory_pos + direction * push_distance
+		else:
+			# Defend factory perimeter
+			return _get_patrol_position(factory_pos, 100.0)
+
+
+func _update_strategic_cache_if_needed(state: Dictionary):
+	"""Recalculate strategic cache if interval elapsed"""
+	var current_time = Time.get_ticks_msec() / 1000.0
+	if current_time - _strategic_cache["last_update"] < STRATEGIC_RECALC_INTERVAL:
+		return
+
+	_recalculate_strategic_cache(state)
+	_strategic_cache["last_update"] = current_time
+
+
+func _recalculate_strategic_cache(state: Dictionary):
+	"""
+	PHASE 1 & 2: Calculate attack probabilities and offensive targets
+	"""
+	_strategic_cache["factories"].clear()
+
+	if not state.has("factories"):
+		return
+
+	# Collect our team's factories
+	var our_factories = []
+	for factory_id in state.factories:
+		var factory = state.factories[factory_id]
+		if factory.get("team", -1) == ship_data.team and factory.get("complete", false):
+			our_factories.append({
+				"id": factory_id,
+				"position": factory["position"]
+			})
+
+	if our_factories.is_empty():
+		return
+
+	# === PHASE 1A: Calculate Center of Mass ===
+	var center_of_mass = Vector2.ZERO
+	for f in our_factories:
+		center_of_mass += f["position"]
+	center_of_mass /= our_factories.size()
+	_strategic_cache["center_of_mass"] = center_of_mass
+
+	# Get world parameters
+	var world_size = vnp_main.world_size if vnp_main else Vector2(1200, 800)
+	var progenitor_active = _is_progenitor_active(state)
+
+	# Collect enemy factories and unclaimed strategic points
+	var enemy_factories = []
+	for factory_id in state.factories:
+		var factory = state.factories[factory_id]
+		var factory_team = factory.get("team", -1)
+		if factory_team != ship_data.team and factory_team != VnpTypes.Team.PROGENITOR:
+			enemy_factories.append(factory["position"])
+
+	var unclaimed_points = []
+	if state.has("strategic_points"):
+		for point_id in state.strategic_points:
+			var point = state.strategic_points[point_id]
+			if point.get("owner", null) == null:
+				unclaimed_points.append(point["position"])
+
+	# === PHASE 1B: Calculate Attack Probability for Each Factory ===
+	var total_threat = 0.0
+	var factory_data = []
+
+	for f in our_factories:
+		var pos = f["position"]
+		var threat = _calculate_factory_threat(pos, center_of_mass, world_size,
+			enemy_factories, progenitor_active)
+
+		# Find offensive target for this factory
+		var offensive_target = null
+		var target_type = "patrol"
+
+		if progenitor_active:
+			# During Progenitor: No offensive target, pure defense
+			target_type = "progenitor"
+		else:
+			# Find nearest enemy factory
+			var nearest_enemy = _find_nearest_position(pos, enemy_factories)
+			if nearest_enemy != Vector2.ZERO:
+				offensive_target = nearest_enemy
+				target_type = "enemy_factory"
+			else:
+				# No enemy factories - target unclaimed points
+				var nearest_point = _find_nearest_position(pos, unclaimed_points)
+				if nearest_point != Vector2.ZERO:
+					offensive_target = nearest_point
+					target_type = "strategic_point"
+
+		factory_data.append({
+			"id": f["id"],
+			"position": pos,
+			"threat": threat,
+			"offensive_target": offensive_target,
+			"offensive_target_type": target_type
+		})
+		total_threat += threat
+
+	# === PHASE 2: Normalize to Probabilities and Build Cache ===
+	var cumulative = 0.0
+	for fd in factory_data:
+		var probability = fd["threat"] / total_threat if total_threat > 0 else 1.0 / factory_data.size()
+		cumulative += probability
+
+		_strategic_cache["factories"][fd["id"]] = {
+			"position": fd["position"],
+			"attack_probability": probability,
+			"cumulative_weight": cumulative,
+			"offensive_target": fd["offensive_target"],
+			"offensive_target_type": fd["offensive_target_type"]
+		}
+
+
+func _calculate_factory_threat(pos: Vector2, center_of_mass: Vector2,
+	world_size: Vector2, enemy_factories: Array, progenitor_active: bool) -> float:
+	"""
+	Calculate attack probability for a single factory.
+	Higher value = more likely to be attacked = needs more defense.
+	"""
+	var threat = 0.0
+
+	# Factor 1: Distance from Center of Mass (30% weight)
+	# Factories further from our center are more exposed
+	var dist_from_com = pos.distance_to(center_of_mass)
+	threat += dist_from_com * 0.3
+
+	# Factor 2: Edge Exposure (40% weight during Progenitor, 20% otherwise)
+	# Factories near world edges are vulnerable to Progenitor drones
+	var dist_to_edge = min(
+		pos.x,
+		world_size.x - pos.x,
+		pos.y,
+		world_size.y - pos.y
+	)
+	var edge_weight = 0.4 if progenitor_active else 0.2
+	var edge_exposure = max(0, 300 - dist_to_edge)
+	threat += edge_exposure * edge_weight
+
+	# Factor 3: Enemy Factory Proximity (30% weight)
+	# Factories near enemy production are under threat
+	for enemy_pos in enemy_factories:
+		var dist = pos.distance_to(enemy_pos)
+		if dist < 400:
+			threat += (400 - dist) * 0.3
+
+	# Minimum threat ensures every factory gets some defense
+	return max(threat, 50.0)
+
+
+func _get_ship_factory_assignment() -> Dictionary:
+	"""Get the factory this ship is assigned to defend"""
+	if _strategic_cache["factories"].is_empty():
+		return {}
+
+	# Deterministic assignment based on ship ID
+	var ship_hash = (ship_data.id * 7919) % 10000
+	var pick_value = ship_hash / 10000.0
+
+	# Find factory based on cumulative probability distribution
+	for factory_id in _strategic_cache["factories"]:
+		var data = _strategic_cache["factories"][factory_id]
+		if pick_value <= data["cumulative_weight"]:
+			return data
+
+	# Fallback to last factory
+	var keys = _strategic_cache["factories"].keys()
+	if keys.size() > 0:
+		return _strategic_cache["factories"][keys.back()]
+	return {}
+
+
+func _get_patrol_position(center: Vector2, radius: float) -> Vector2:
+	"""Get a patrol position orbiting around a center point"""
+	var angle = (ship_data.id * 0.7) + (Time.get_ticks_msec() / 3000.0)
+	var offset = Vector2(cos(angle), sin(angle)) * radius
+	return center + offset
+
+
+func _find_nearest_position(from: Vector2, positions: Array) -> Vector2:
+	"""Find the nearest position from an array of positions"""
+	var nearest = Vector2.ZERO
+	var nearest_dist = INF
+
+	for pos in positions:
+		var dist = from.distance_to(pos)
+		if dist < nearest_dist:
+			nearest_dist = dist
+			nearest = pos
+
+	return nearest
+
+
+func _find_factory_build_location(state: Dictionary) -> Vector2:
+	"""Find a good location for harvester to build a factory"""
+	var my_team = ship_data.team
+	var my_pos = position
+	var min_factory_distance = 150.0  # Don't build too close to existing factories
+
+	# Get existing factory positions
+	var factory_positions = []
+	if state.has("factories"):
+		for factory_id in state.factories:
+			var factory = state.factories[factory_id]
+			factory_positions.append(factory["position"])
+
+	# Priority 1: Strategic points we own that don't have factories nearby
+	if state.has("strategic_points"):
+		var best_point = Vector2.ZERO
+		var best_dist = INF
+
+		for point_id in state.strategic_points:
+			var point = state.strategic_points[point_id]
+			var point_owner = point.get("owner", null)
+
+			# Only consider points we own
+			if point_owner != my_team:
+				continue
+
+			var point_pos = point["position"]
+
+			# Check if there's already a factory nearby
+			var has_factory_nearby = false
+			for fac_pos in factory_positions:
+				if point_pos.distance_to(fac_pos) < min_factory_distance:
+					has_factory_nearby = true
+					break
+
+			if not has_factory_nearby:
+				var dist = my_pos.distance_to(point_pos)
+				if dist < best_dist:
+					best_dist = dist
+					best_point = point_pos
+
+		if best_point != Vector2.ZERO:
+			return best_point
+
+	# Priority 2: Find open space away from existing factories
+	# Try a few random positions and pick the best one
+	var best_pos = Vector2.ZERO
+	var best_score = -INF
+
+	for _i in range(5):
+		# Generate candidate position - spread out from our base
+		var base_pos = Vector2.ZERO
+		if vnp_main and vnp_main.base_nodes.has(my_team):
+			base_pos = vnp_main.base_nodes[my_team].position
+
+		# Random offset from base, biased toward center of map
+		var world_center = vnp_main.world_size / 2 if vnp_main else Vector2(600, 400)
+		var toward_center = (world_center - base_pos).normalized()
+		var random_offset = toward_center * randf_range(100, 400) + Vector2(randf_range(-200, 200), randf_range(-200, 200))
+		var candidate = base_pos + random_offset
+
+		# Score this position
+		var score = 0.0
+
+		# Closer to harvester is better
+		score -= my_pos.distance_to(candidate) * 0.5
+
+		# Further from existing factories is better
+		var min_fac_dist = INF
+		for fac_pos in factory_positions:
+			var d = candidate.distance_to(fac_pos)
+			if d < min_fac_dist:
+				min_fac_dist = d
+
+		if min_fac_dist < min_factory_distance:
+			continue  # Too close to existing factory
+
+		score += min_fac_dist * 0.3
+
+		if score > best_score:
+			best_score = score
+			best_pos = candidate
+
+	return best_pos
+
+
+# === PROGENITOR DRONE BEHAVIOR ===
+
+func _process_progenitor_drone(delta: float, state: Dictionary):
+	"""Progenitor drones hunt ships, fire void tendrils at range, and absorb on close contact"""
+	# Find nearest non-Progenitor ship to hunt
+	var nearest_target = null
+	var nearest_dist = INF
+
+	for ship_id in state.ships:
+		var ship = state.ships[ship_id]
+		if ship.team == VnpTypes.Team.PROGENITOR:
+			continue  # Don't target other drones
+
+		var target_pos = ship.position
+		var dist = global_position.distance_to(target_pos)
+		if dist < nearest_dist:
+			nearest_dist = dist
+			nearest_target = {"id": ship_id, "position": target_pos}
+
+	if nearest_target == null:
+		# No targets - drift toward center
+		var convergence = state.get("convergence", {})
+		var center = convergence.get("center", Vector2(500, 400))
+		_move_drone_toward(center, delta)
+		return
+
+	var attack_range = ship_stats.get("range", 100)
+	var absorption_range = 40.0  # Very close for melee absorption
+
+	# Check for absorption (VERY close - melee grab)
+	if nearest_dist <= absorption_range:
+		# ABSORB THE TARGET - instant kill
+		_absorb_target(nearest_target.id)
+		return
+
+	# If in attack range, set as target so we can fire void tendrils
+	if nearest_dist <= attack_range:
+		# Update ship state to attacking so fire timer works
+		if ship_data.state != "attacking" or ship_data.get("target") != nearest_target.id:
+			_dispatch_state_change("attacking", nearest_target.id)
+		# Start fire rate timer if not already running
+		if fire_rate_timer and fire_rate_timer.is_stopped():
+			fire_rate_timer.start()
+
+	# Move toward target with swarm behavior
+	var target_pos = nearest_target.position
+
+	# Add swarm cohesion - slightly attract toward other nearby drones
+	var swarm_offset = _calculate_swarm_offset(state)
+	var adjusted_target = target_pos + swarm_offset * 0.3
+
+	_move_drone_toward(adjusted_target, delta)
+
+	# Look menacing - face the target
+	look_at(target_pos)
+
+
+func _move_drone_toward(target_pos: Vector2, delta: float):
+	"""Move drone toward target with blob-like smooth motion"""
+	var to_target = target_pos - global_position
+	var direction = to_target.normalized()
+	var distance = to_target.length()
+
+	# Slow, relentless movement
+	var speed = ship_stats.get("speed", 120)
+
+	# Blob-like wobble
+	var wobble = Vector2(
+		sin(Time.get_ticks_msec() * 0.003 + ship_data.id * 0.7),
+		cos(Time.get_ticks_msec() * 0.004 + ship_data.id * 1.1)
+	) * 30
+
+	var move_dir = direction
+	if distance > 100:
+		move_dir = (direction + wobble.normalized() * 0.2).normalized()
+
+	# Apply movement with smooth acceleration
+	current_velocity = current_velocity.lerp(move_dir * speed, 3.0 * delta)
+
+	# Apply velocity
+	velocity = current_velocity
+	move_and_slide()
+
+
+func _calculate_swarm_offset(state: Dictionary) -> Vector2:
+	"""Calculate offset to stay somewhat close to other drones (swarm cohesion)"""
+	var nearby_drones = []
+	var cohesion_radius = 150.0
+
+	for ship_id in state.ships:
+		var ship = state.ships[ship_id]
+		if ship.team != VnpTypes.Team.PROGENITOR:
+			continue
+		if ship_id == ship_data.id:
+			continue
+
+		var dist = global_position.distance_to(ship.position)
+		if dist < cohesion_radius:
+			nearby_drones.append(ship.position)
+
+	if nearby_drones.is_empty():
+		return Vector2.ZERO
+
+	# Calculate center of nearby drones
+	var center = Vector2.ZERO
+	for pos in nearby_drones:
+		center += pos
+	center /= nearby_drones.size()
+
+	# Offset toward the group center
+	return (center - global_position).normalized() * 50
+
+
+func _absorb_target(target_id: int):
+	"""Absorb a ship - drone sacrifices itself to consume the target"""
+	# Dispatch absorption - removes BOTH the target and this drone
+	store.dispatch({
+		"type": "CONVERGENCE_ABSORB_SHIP",
+		"ship_id": target_id
+	})
+
+	# Add instability from absorption (drones contribute to cycle ending)
+	store.dispatch({
+		"type": "CONVERGENCE_ADD_INSTABILITY",
+		"amount": VnpTypes.CONVERGENCE_TIMING["instability_per_sacrifice"]
+	})
+
+	# Destroy self after absorbing
+	store.dispatch({
+		"type": "DAMAGE_SHIP",
+		"ship_id": ship_data.id,
+		"damage": 9999  # Self-destruct
+	})

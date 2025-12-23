@@ -82,7 +82,9 @@ enum BuildingType {
 	# Social
 	RECREATION_CENTER, TEMPLE, GOVERNMENT_HALL, PRISON,
 	# Infrastructure
-	STORAGE, AIRLOCK, LANDING_PAD, COMMUNICATIONS
+	STORAGE, AIRLOCK, LANDING_PAD, COMMUNICATIONS,
+	# Megastructures
+	MASS_DRIVER, FUSION_REACTOR, SPACE_ELEVATOR
 }
 
 enum ResourceType {
@@ -208,6 +210,7 @@ static func create_building(overrides: Dictionary = {}) -> Dictionary:
 		"efficiency": 100.0,
 		"power_consumption": 0.0,
 		"power_generation": 0.0,
+		"tier": 1,  # 1-5, buildings upgrade over time (bigger, taller)
 
 		# Capacity
 		"housing_capacity": 0,
@@ -243,8 +246,10 @@ static func create_building(overrides: Dictionary = {}) -> Dictionary:
 # ============================================================================
 
 static func create_resource_stockpile(overrides: Dictionary = {}) -> Dictionary:
+	# MINIMAL starting resources - you landed with supplies for ~1 year
+	# Must build production infrastructure to survive!
 	var stockpile = {
-		# Primary
+		# Primary (raw materials - must extract from Mars)
 		"water_ice": 0.0,
 		"regolith": 0.0,
 		"iron_ore": 0.0,
@@ -252,27 +257,27 @@ static func create_resource_stockpile(overrides: Dictionary = {}) -> Dictionary:
 		"rare_earth": 0.0,
 		"co2": 0.0,
 
-		# Secondary
-		"water": 1000.0,
-		"oxygen": 500.0,
-		"hydrogen": 100.0,
+		# Secondary (basic processed - small landing cache)
+		"water": 200.0,      # ~1 year for small crew (was 1000)
+		"oxygen": 150.0,     # Emergency reserves (was 500)
+		"hydrogen": 20.0,    # Minimal (was 100)
 		"methane": 0.0,
 		"iron": 0.0,
 		"aluminum": 0.0,
 		"plastic": 0.0,
 
-		# Tertiary
-		"food": 500.0,
-		"medicine": 50.0,
-		"electronics": 20.0,
-		"machine_parts": 30.0,
-		"building_materials": 100.0,
-		"fuel": 200.0,
+		# Tertiary (goods - survival rations only)
+		"food": 150.0,       # ~1 year emergency rations (was 500)
+		"medicine": 15.0,    # First aid kit (was 50)
+		"electronics": 5.0,  # Spare parts only (was 20)
+		"machine_parts": 12.0,  # Just enough for 1 hab pod (was 30)
+		"building_materials": 50.0,  # Enough for 1 hab pod (was 100)
+		"fuel": 50.0,        # Landing reserves (was 200)
 
-		# Quaternary
+		# Quaternary (luxury - none at start!)
 		"art": 0.0,
-		"entertainment": 10.0,
-		"comfort_items": 20.0
+		"entertainment": 0.0,   # No luxuries (was 10)
+		"comfort_items": 0.0    # Survival mode (was 20)
 	}
 
 	for key in overrides:
@@ -625,6 +630,9 @@ static func get_building_name(type: BuildingType) -> String:
 		BuildingType.AIRLOCK: return "Airlock"
 		BuildingType.LANDING_PAD: return "Landing Pad"
 		BuildingType.COMMUNICATIONS: return "Communications"
+		BuildingType.MASS_DRIVER: return "Mass Driver"
+		BuildingType.FUSION_REACTOR: return "Fusion Reactor"
+		BuildingType.SPACE_ELEVATOR: return "Space Elevator"
 	return "Unknown"
 
 static func get_trait_name(t: ColonistTrait) -> String:

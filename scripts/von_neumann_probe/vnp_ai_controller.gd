@@ -8,7 +8,22 @@ var base_positions = {}
 
 # AI decision timers per team
 var build_timers = {}
+var territory_timers = {}  # For territory capture decisions
 const BUILD_DECISION_INTERVAL = 0.3  # Faster build checks
+const TERRITORY_DECISION_INTERVAL = 2.0  # Check territory every 2 seconds
+
+# Target fleet composition - what percentage of fleet each ship type should be
+# This ensures we always have critical ships like harvesters
+const TARGET_COMPOSITION = {
+	VnpTypes.ShipType.FRIGATE: 0.30,      # 30% - main assault
+	VnpTypes.ShipType.DESTROYER: 0.25,    # 25% - snipers
+	VnpTypes.ShipType.CRUISER: 0.15,      # 15% - artillery
+	VnpTypes.ShipType.DEFENDER: 0.10,     # 10% - missile defense
+	VnpTypes.ShipType.SHIELDER: 0.08,     # 8% - shield support
+	VnpTypes.ShipType.GRAVITON: 0.07,     # 7% - railgun defense
+	VnpTypes.ShipType.HARVESTER: 0.05,    # 5% - resource gathering (at least 1)
+}
+const COMPOSITION_TOLERANCE = 0.10  # 10% tolerance before random selection kicks in
 
 # Fleet stance per team - player can modify their own
 var team_stances = {
@@ -51,6 +66,7 @@ func init(vnp_store, bases: Dictionary):
 	self.base_positions = bases
 
 	for team in [VnpTypes.Team.PLAYER, VnpTypes.Team.ENEMY_1, VnpTypes.Team.NEMESIS]:
+		# Build decision timer
 		var timer = Timer.new()
 		timer.wait_time = BUILD_DECISION_INTERVAL + randf() * 0.3
 		timer.one_shot = false  # Keep repeating
@@ -59,8 +75,20 @@ func init(vnp_store, bases: Dictionary):
 		build_timers[team] = timer
 		timer.start()
 
+		# Territory capture timer (AI only, not player)
+		if team != VnpTypes.Team.PLAYER:
+			var territory_timer = Timer.new()
+			territory_timer.wait_time = TERRITORY_DECISION_INTERVAL + randf() * 1.0
+			territory_timer.one_shot = false
+			territory_timer.timeout.connect(_on_territory_decision.bind(team))
+			add_child(territory_timer)
+			territory_timers[team] = territory_timer
+			territory_timer.start()
+
 func _on_build_decision(team: int):
 	var state = store.get_state()
+	if state == null or not state.has("teams"):
+		return
 
 	if state.get("game_over", false):
 		return
@@ -79,61 +107,82 @@ func _on_build_decision(team: int):
 		})
 
 func _choose_ship_type(team: int, energy: int, state: Dictionary) -> int:
-	# Get fleet policy for this team's stance
+	var mass = state.teams[team].get("mass", 0)
+
+	# Get current fleet composition
+	var fleet_counts = _get_fleet_composition(team, state)
+	var total_ships = 0
+	for count in fleet_counts.values():
+		total_ships += count
+
+	# === COMPOSITION-BASED BUILDING ===
+	# Build whatever ship type is furthest below target composition
+	var most_needed_type = -1
+	var biggest_deficit = -1.0
+
+	for ship_type in TARGET_COMPOSITION:
+		var target_percent = TARGET_COMPOSITION[ship_type]
+		var current_count = fleet_counts.get(ship_type, 0)
+		var current_percent = 0.0 if total_ships == 0 else float(current_count) / float(total_ships)
+
+		var deficit = target_percent - current_percent
+
+		# Check if we can afford this ship
+		var ship_stats = VnpTypes.SHIP_STATS.get(ship_type, {})
+		var energy_cost = ship_stats.get("cost", 999)
+		var mass_cost = ship_stats.get("mass_cost", 0)
+
+		if energy >= energy_cost and mass >= mass_cost:
+			# Special case: always ensure at least 1 harvester
+			if ship_type == VnpTypes.ShipType.HARVESTER and current_count == 0:
+				return ship_type
+
+			if deficit > biggest_deficit:
+				biggest_deficit = deficit
+				most_needed_type = ship_type
+
+	# If any ship type is significantly below target, build it
+	if biggest_deficit > COMPOSITION_TOLERANCE and most_needed_type != -1:
+		return most_needed_type
+
+	# === FALLBACK: Weighted random selection when composition is balanced ===
 	var stance = team_stances.get(team, VnpTypes.FleetStance.BALANCED)
 	var policy = VnpTypes.get_fleet_policy(stance)
 	var weights = policy.get("weights", {})
-	var mass = state.teams[team].get("mass", 0)
 
-	# Get all buildable ship types (excluding harvester, starbase, and base turret)
-	var all_buildable = []
-	var max_energy_cost = 0
-	for ship_type in VnpTypes.SHIP_STATS:
-		if ship_type == VnpTypes.ShipType.HARVESTER:
-			continue
+	# Get affordable ships (exclude starbase and base turret from random builds)
+	var affordable = []
+	for ship_type in TARGET_COMPOSITION:
 		if ship_type == VnpTypes.ShipType.STARBASE:
 			continue
 		if ship_type == VnpTypes.ShipType.BASE_TURRET:
 			continue
-		all_buildable.append(ship_type)
-		var cost = VnpTypes.SHIP_STATS[ship_type].cost
-		if cost > max_energy_cost:
-			max_energy_cost = cost
-
-	# KEY ALGORITHM: Wait until we can afford ALL energy-only ships before building
-	# This prevents bias toward cheap ships
-	if energy < max_energy_cost:
-		return -1  # Save up until we can afford anything
-
-	# Filter to ships we can actually afford (considering mass)
-	var affordable = []
-	for ship_type in all_buildable:
-		var ship_stats = VnpTypes.SHIP_STATS[ship_type]
+		var ship_stats = VnpTypes.SHIP_STATS.get(ship_type, {})
+		var energy_cost = ship_stats.get("cost", 999)
 		var mass_cost = ship_stats.get("mass_cost", 0)
-		if mass >= mass_cost:
+		if energy >= energy_cost and mass >= mass_cost:
 			affordable.append(ship_type)
 
 	if affordable.is_empty():
-		return -1  # Can't afford anything with current mass
+		return -1
 
-	# Analyze enemy composition for counter-picking
-	var enemy_weapons = _analyze_enemy_weapons(team, state)
-
-	# Only counter-pick if there are actual enemies to counter
-	var total_enemy_weapons = 0
-	for w in enemy_weapons.values():
-		total_enemy_weapons += w
-
-	if total_enemy_weapons > 0:
-		var counter_type = _get_counter_ship_type(enemy_weapons, stance)
-		# Counter-pick chance based on policy (reduced to let weights matter more)
-		var counter_chance = policy.get("counter_pick_chance", 0.6) * 0.5  # Halved
-		# Only counter-pick if we can afford the counter ship
-		if counter_type in affordable and randf() < counter_chance:
-			return counter_type
-
-	# Weighted random selection from affordable ships
 	return _weighted_ship_selection(team, affordable, weights)
+
+
+func _get_fleet_composition(team: int, state: Dictionary) -> Dictionary:
+	"""Count ships by type for a team"""
+	var counts = {}
+	for ship_type in TARGET_COMPOSITION:
+		counts[ship_type] = 0
+
+	for ship_id in state.ships:
+		var ship = state.ships[ship_id]
+		if ship.team == team:
+			var ship_type = ship.type
+			if counts.has(ship_type):
+				counts[ship_type] += 1
+
+	return counts
 
 
 func _weighted_ship_selection(team: int, affordable: Array, weights: Dictionary) -> int:
@@ -236,13 +285,76 @@ func _get_counter_ship_type(enemy_weapons: Dictionary, stance: int) -> int:
 
 	return VnpTypes.ShipType.FRIGATE
 
+func _on_territory_decision(team: int):
+	"""AI decides to capture unclaimed or enemy strategic points"""
+	var state = store.get_state()
+	if state == null or not state.has("strategic_points"):
+		return
+	if state.get("game_over", false):
+		return
+
+	# Find best strategic point to capture
+	var best_point = _find_best_capture_target(team, state)
+	if best_point == null:
+		return
+
+	# Set rally point to that location to send ships there
+	store.dispatch({
+		"type": "SET_RALLY_POINT",
+		"team": team,
+		"target": best_point.position
+	})
+
+
+func _find_best_capture_target(team: int, state: Dictionary):
+	"""Find the best strategic point for this team to capture"""
+	var base_pos = base_positions.get(team, Vector2.ZERO)
+	var best_point = null
+	var best_score = -INF
+
+	for point_id in state.strategic_points:
+		var point = state.strategic_points[point_id]
+		var owner = point.get("owner", null)
+
+		# Skip if we already own it
+		if owner == team:
+			continue
+
+		var point_pos = point.position
+		var distance = point_pos.distance_to(base_pos)
+
+		# Score based on distance (closer is better) and value
+		var point_type = point.get("type", VnpTypes.PointType.ASTEROID_FIELD)
+		var value_mult = 1.0
+		if point_type == VnpTypes.PointType.CENTER:
+			value_mult = 2.0  # Center is very valuable
+		elif point_type == VnpTypes.PointType.ASTEROID_FIELD:
+			value_mult = 1.5  # Mass income is good
+
+		# Unowned points are easier targets
+		var ownership_mult = 1.0 if owner == null else 0.7
+
+		# Score: higher value and closer distance = better
+		var score = (value_mult * ownership_mult * 1000.0) / (distance + 100.0)
+
+		if score > best_score:
+			best_score = score
+			best_point = point
+
+	return best_point
+
+
 func stop_all():
 	for team in build_timers:
 		build_timers[team].stop()
+	for team in territory_timers:
+		territory_timers[team].stop()
 
 func start_all():
 	for team in build_timers:
 		build_timers[team].start()
+	for team in territory_timers:
+		territory_timers[team].start()
 
 
 # === Fleet Formation Info for Ships ===
@@ -258,6 +370,8 @@ func get_adherence(team: int) -> int:
 func get_fleet_center(team: int) -> Vector2:
 	"""Get center of gravity for a team's fleet, biased toward rally point for attack-move"""
 	var state = store.get_state()
+	if state == null or not state.has("ships"):
+		return base_positions.get(team, Vector2.ZERO)
 	var formation = get_formation(team)
 	var base_pos = base_positions.get(team, Vector2.ZERO)
 	var rally_point = get_rally_point(team)
@@ -272,7 +386,7 @@ func get_fleet_center(team: int) -> Vector2:
 func get_rally_point(team: int) -> Vector2:
 	"""Get rally point for a team from state"""
 	var state = store.get_state()
-	if not state.teams.has(team):
+	if state == null or not state.has("teams") or not state.teams.has(team):
 		return Vector2.ZERO
 	var team_data = state.teams[team]
 	var rally = team_data.get("rally_point", null)
@@ -284,6 +398,8 @@ func get_rally_point(team: int) -> Vector2:
 func get_fleet_front_line(team: int) -> Vector2:
 	"""Get the front line of engagement - where the fighting is happening"""
 	var state = store.get_state()
+	if state == null or not state.has("ships"):
+		return get_fleet_center(team)
 	var fleet_center = get_fleet_center(team)
 
 	# Find nearest enemy

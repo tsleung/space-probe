@@ -5,8 +5,8 @@ class_name OrbitalSelector
 ## Shows Earth and Mars positions, calculates transfer windows,
 ## and lets the player choose when to launch
 
-signal window_selected(window: MOTOrbital.LaunchWindow)
-signal launch_now_pressed(window: MOTOrbital.LaunchWindow)
+signal window_selected(window: RefCounted)
+signal launch_now_pressed(window: RefCounted)
 
 # ============================================================================
 # CONFIGURATION
@@ -35,7 +35,7 @@ signal launch_now_pressed(window: MOTOrbital.LaunchWindow)
 # STATE
 # ============================================================================
 
-var selected_window: MOTOrbital.LaunchWindow = null
+var selected_window: RefCounted = null
 var windows_timeline: Array = []
 var hover_day: int = -1
 var is_animating: bool = false
@@ -304,7 +304,7 @@ func select_day(day: int) -> void:
 	_update_display()
 	window_selected.emit(selected_window)
 
-func get_selected_window() -> MOTOrbital.LaunchWindow:
+func get_selected_window() -> RefCounted:
 	return selected_window
 
 # ============================================================================

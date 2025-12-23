@@ -174,20 +174,71 @@ func _complete_task() -> void:
 	task_completed.emit(completed_task)
 
 # ============================================================================
+# HEALTH/MORALE VISUALS
+# ============================================================================
+
+var health_visual: float = 100.0
+var morale_visual: float = 100.0
+var base_color: Color = Color.WHITE
+
+func set_health_visual(health: float) -> void:
+	## Update visual based on crew health
+	health_visual = health
+	_update_base_color()
+
+func set_morale_visual(morale: float) -> void:
+	## Update visual based on crew morale
+	morale_visual = morale
+	_update_base_color()
+
+func _update_base_color() -> void:
+	## Calculate base color from health and morale
+	var health_factor = clamp(health_visual / 100.0, 0.3, 1.0)
+	var morale_factor = clamp(morale_visual / 100.0, 0.5, 1.0)
+
+	# Low health = more red/dim
+	# Low morale = slightly blue/grey
+	if health_visual < 50:
+		base_color = Color(1.0, health_factor, health_factor)
+	elif morale_visual < 40:
+		base_color = Color(morale_factor, morale_factor, 1.0)
+	else:
+		base_color = Color(health_factor, health_factor * morale_factor, morale_factor)
+
+func start_resting() -> void:
+	## Crew is too tired - go rest
+	start_task(ShipTypes.TaskType.REST)
+
+func finish_task() -> void:
+	## External call to finish current task early
+	_complete_task()
+
+# ============================================================================
 # VISUALS
 # ============================================================================
 
 func _update_visuals() -> void:
+	var final_color = base_color
+
 	# Pulse when working
 	if current_state == ShipTypes.CrewState.WORKING:
 		var pulse = 0.8 + sin(Time.get_ticks_msec() * 0.01) * 0.2
-		sprite.modulate = Color(pulse, pulse, pulse)
+		final_color = Color(pulse * base_color.r, pulse * base_color.g, pulse * base_color.b)
 	elif current_state == ShipTypes.CrewState.EMERGENCY:
 		# Flash when emergency
 		var flash = 1.0 if fmod(Time.get_ticks_msec(), 500) < 250 else 0.7
-		sprite.modulate = Color(flash, flash * 0.5, flash * 0.5)
-	else:
-		sprite.modulate = Color.WHITE
+		final_color = Color(flash, flash * 0.5 * base_color.g, flash * 0.5 * base_color.b)
+	elif current_state == ShipTypes.CrewState.RESTING:
+		# Dim when resting
+		final_color = base_color * 0.6
+
+	# Apply fatigue dimming (low health dims the whole sprite)
+	if health_visual < 30:
+		final_color = final_color.darkened(0.4)
+	elif health_visual < 60:
+		final_color = final_color.darkened(0.2)
+
+	sprite.modulate = final_color
 
 func get_state_text() -> String:
 	match current_state:

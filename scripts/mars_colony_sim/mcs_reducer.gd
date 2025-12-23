@@ -32,6 +32,7 @@ enum ActionType {
 	COMPLETE_CONSTRUCTION,
 	DEMOLISH_BUILDING,
 	REPAIR_BUILDING,
+	UPGRADE_BUILDING,
 
 	# Resources
 	UPDATE_RESOURCE,
@@ -88,6 +89,8 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_demolish_building(state, action)
 		ActionType.REPAIR_BUILDING:
 			return _reduce_repair_building(state, action)
+		ActionType.UPGRADE_BUILDING:
+			return _reduce_upgrade_building(state, action)
 		ActionType.UPDATE_RESOURCE:
 			return _reduce_update_resource(state, action)
 		ActionType.APPLY_PRODUCTION:
@@ -186,6 +189,12 @@ static func action_demolish_building(building_id: String) -> Dictionary:
 static func action_repair_building(building_id: String) -> Dictionary:
 	return {
 		"type": ActionType.REPAIR_BUILDING,
+		"building_id": building_id
+	}
+
+static func action_upgrade_building(building_id: String) -> Dictionary:
+	return {
+		"type": ActionType.UPGRADE_BUILDING,
 		"building_id": building_id
 	}
 
@@ -810,6 +819,14 @@ static func _reduce_start_construction(state: Dictionary, action: Dictionary) ->
 	if not result.get("success", false):
 		return state
 
+	# Add constructed_year to the newly added building
+	var new_buildings = result.get("buildings", [])
+	if new_buildings.size() > 0:
+		var last_building = new_buildings[new_buildings.size() - 1].duplicate(true)
+		last_building["constructed_year"] = state.get("current_year", 1)
+		new_buildings = new_buildings.duplicate()
+		new_buildings[new_buildings.size() - 1] = last_building
+
 	var new_log = state.get("mission_log", []).duplicate()
 	new_log.append({
 		"year": state.get("current_year", 1),
@@ -818,7 +835,7 @@ static func _reduce_start_construction(state: Dictionary, action: Dictionary) ->
 	})
 
 	return _with_fields(state, {
-		"buildings": result.get("buildings", []),
+		"buildings": new_buildings,
 		"resources": result.get("resources", {}),
 		"mission_log": new_log
 	})
@@ -904,6 +921,29 @@ static func _reduce_repair_building(state: Dictionary, action: Dictionary) -> Di
 		"resources": result.get("resources", {}),
 		"mission_log": new_log
 	})
+
+static func _reduce_upgrade_building(state: Dictionary, action: Dictionary) -> Dictionary:
+	"""Upgrade a building to the next tier (taller, more capacity)"""
+	var building_id = action.get("building_id", "")
+	var new_buildings: Array = []
+
+	for building in state.get("buildings", []):
+		if building.get("id", "") == building_id:
+			var tier = building.get("tier", 1)
+			if tier < 5:  # Max tier is 5
+				var upgraded = building.duplicate(true)
+				upgraded["tier"] = tier + 1
+				# Boost stats with each tier
+				upgraded["housing_capacity"] = int(upgraded.get("housing_capacity", 0) * 1.3)
+				upgraded["worker_capacity"] = int(upgraded.get("worker_capacity", 0) * 1.2)
+				upgraded["efficiency"] = minf(upgraded.get("efficiency", 100.0) + 5.0, 150.0)
+				new_buildings.append(upgraded)
+			else:
+				new_buildings.append(building)
+		else:
+			new_buildings.append(building)
+
+	return _with_field(state, "buildings", new_buildings)
 
 static func _reduce_update_resource(state: Dictionary, action: Dictionary) -> Dictionary:
 	var new_resources = state.get("resources", {}).duplicate(true)

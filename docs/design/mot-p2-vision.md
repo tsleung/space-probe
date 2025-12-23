@@ -1,5 +1,11 @@
 # MOT Phase 2: What Makes It Compelling?
 
+**Document Created:** December 2024
+**Last Updated:** December 22, 2024
+**Status:** Vision established, implementation in progress
+
+---
+
 ## The Question
 
 What would make a 183-day space journey a compelling spectacle that people replay, stream, and watch?

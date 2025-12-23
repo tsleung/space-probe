@@ -120,6 +120,8 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 # TURN PROCESSING
 # ============================================================================
 
+const MAX_EVENT_LOG_SIZE = 100  # Prevent unbounded growth
+
 static func _reduce_tick(state: Dictionary, random_values: Array) -> Dictionary:
 	## Advance time by 1 hour - the primary time advancement action
 	## Runs hourly, daily, and weekly updates as appropriate
@@ -136,6 +138,10 @@ static func _reduce_tick(state: Dictionary, random_values: Array) -> Dictionary:
 		"detections": [],
 		"arrivals": []
 	}
+
+	# Trim event log to prevent memory leak
+	while new_state.event_log.size() > MAX_EVENT_LOG_SIZE:
+		new_state.event_log.pop_front()
 
 	# 1. SNAPSHOT: Save current positions for interpolation
 	new_state = _snapshot_positions(new_state)
@@ -982,7 +988,7 @@ static func _reduce_recall_fleet(state: Dictionary, from_zone: int, to_zone: int
 		var travel_time = FCWTypes.get_travel_time(from_zone, to_zone)
 		new_state.event_log.append(FCWTypes.create_log_entry(
 			new_state.turn,
-			"%d %s(s) transferring %s → %s (ETA: %d weeks)" % [
+			"%d %s(s) transferring %s -> %s (ETA: %d weeks)" % [
 				to_recall,
 				FCWTypes.get_ship_name(ship_type),
 				FCWTypes.get_zone_name(from_zone),
@@ -1013,10 +1019,21 @@ static func get_available_ships(state: Dictionary) -> Dictionary:
 		for ship_type in zone.assigned_fleet:
 			available[ship_type] = available.get(ship_type, 0) - zone.assigned_fleet.get(ship_type, 0)
 
-	# Subtract ships in transit
+	# Subtract ships in transit (legacy array)
 	for transit in state.get("fleets_in_transit", []):
 		var ship_type = transit.ship_type
 		available[ship_type] = available.get(ship_type, 0) - transit.count
+
+	# Subtract warship entities currently in transit (burning or coasting)
+	# This prevents AI from deploying the same ships multiple times
+	for entity in state.get("entities", []):
+		if entity.get("entity_type") == FCWTypes.EntityType.WARSHIP:
+			if entity.get("faction") == FCWTypes.Faction.HUMAN:
+				var move_state = entity.get("movement_state", FCWTypes.MovementState.ORBITING)
+				if move_state == FCWTypes.MovementState.BURNING or move_state == FCWTypes.MovementState.COASTING:
+					var ship_type = entity.get("ship_type", FCWTypes.ShipType.FRIGATE)
+					var count = entity.get("count", 1)
+					available[ship_type] = available.get(ship_type, 0) - count
 
 	return available
 

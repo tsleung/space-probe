@@ -4,6 +4,9 @@ class_name FCWSolarMap
 ## Visual Solar System Map for First Contact War
 ## DRAMATIC EDITION - Explosions, lasers, warp jumps, and desperation
 
+const FCWTypes = preload("res://scripts/first_contact_war/fcw_types.gd")
+const FCWHeraldAI = preload("res://scripts/first_contact_war/fcw_herald_ai.gd")
+
 signal zone_clicked(zone_id: int)
 signal zone_hovered(zone_id: int)
 
