@@ -354,12 +354,15 @@ func _on_fire_button_pressed():
 
 
 func _on_burst_button_pressed():
+	print("[UI] Burst button pressed, convergence_active: %s, vnp_main: %s" % [convergence_active, vnp_main != null])
 	if vnp_main:
 		if convergence_active:
 			# During convergence, this is RETREAT - flee to center
+			print("[UI] Burst -> RETREAT mode")
 			vnp_main.trigger_full_retreat(VnpTypes.Team.PLAYER)
 		else:
 			# Normal operation - burst fire base weapon
+			print("[UI] Burst -> FIRE mode")
 			vnp_main.burst_fire_base_weapon(VnpTypes.Team.PLAYER)
 
 func _count_team_ships(state: Dictionary, team: int) -> int:
@@ -389,11 +392,11 @@ func _count_team_strategic_points(state: Dictionary, team: int) -> int:
 func show_victory(winner_name: String):
 	# Special message if Progenitor wins - this is the expected ending
 	if winner_name == "The Progenitor":
-		victory_label.text = "INCORPORATED\n\nYou have returned to the source.\nThe cycle continues."
+		victory_label.text = "INCORPORATED\n\nYou have returned to the source.\nThe cycle continues.\n\n[Press R to restart | ESC for menu]"
 		victory_label.add_theme_color_override("font_color", VnpTypes.PROGENITOR_PULSE)
 		victory_label.add_theme_font_size_override("font_size", 32)
 	else:
-		victory_label.text = "%s Wins!" % winner_name
+		victory_label.text = "%s Wins!\n\n[Press R to restart | ESC for menu]" % winner_name
 		victory_label.add_theme_color_override("font_color", Color.WHITE)
 		victory_label.add_theme_font_size_override("font_size", 48)
 
@@ -411,6 +414,7 @@ func show_victory(winner_name: String):
 
 func hide_victory():
 	victory_label.visible = false
+	convergence_active = false  # Reset convergence flag for fresh game
 
 func _on_menu_button_pressed():
 	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")

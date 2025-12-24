@@ -50,6 +50,22 @@
     "pregnancy_months": 9
   },
 
+  "artificial_births": {
+    "_comment": "Colony gestation program - births via medical infrastructure",
+    "capacity_per_medical_bay_tier": 2,
+    "capacity_per_hospital_tier": 6,
+    "success_rate": 0.80,
+    "medicine_cost_per_birth": 5.0
+  },
+
+  "immigration": {
+    "_comment": "Colonists arriving from Earth via transport infrastructure",
+    "starport_capacity_per_tier": 2,
+    "space_station_capacity_per_tier": 5,
+    "food_surplus_required": true,
+    "housing_required": true
+  },
+
   "buildings": {
     "degradation_min_per_year": 1.5,
     "degradation_max_per_year": 4.0,

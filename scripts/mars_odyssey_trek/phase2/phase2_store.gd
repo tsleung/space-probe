@@ -34,6 +34,9 @@ signal mars_visible()
 signal arrival()
 signal log_added(entry: Dictionary)
 signal game_over(reason: String)
+signal eva_triggered(crew_role: String, target: String)
+signal eva_drift_triggered(crew_role: String)
+signal crew_gather(location: String)  # For events like movie night - crew gathers in quarters
 
 # ============================================================================
 # STATE
@@ -484,6 +487,7 @@ func _setup_event_pool() -> void:
 						Phase2Types.create_outcome(0.9, [
 							Phase2Types.create_effect("food", -8, "all"),
 							Phase2Types.create_effect("morale", 15, "all"),
+							Phase2Types.create_effect("crew_gather", 0, "quarters"),
 							Phase2Types.create_effect("log", 0, "The celebration was worth it! Crew spirits are high.")
 						], "Great celebration!"),
 						Phase2Types.create_outcome(0.1, [
@@ -499,6 +503,7 @@ func _setup_event_pool() -> void:
 					"outcomes": [
 						Phase2Types.create_outcome(1.0, [
 							Phase2Types.create_effect("morale", 8, "all"),
+							Phase2Types.create_effect("crew_gather", 0, "quarters"),
 							Phase2Types.create_effect("log", 0, "Movie night was a hit. Good for morale without using supplies.")
 						], "Simple pleasures.")
 					]
@@ -514,6 +519,220 @@ func _setup_event_pool() -> void:
 							Phase2Types.create_effect("morale", -5, "all"),
 							Phase2Types.create_effect("log", 0, "All work and no play... morale dips slightly.")
 						], "A bit disappointing.")
+					]
+				})
+			]
+		}),
+
+		# =====================================================================
+		# EVA EVENTS - Exterior work requiring spacewalk
+		# =====================================================================
+		Phase2Types.create_event({
+			"type": Phase2Types.EventType.COMPONENT_MALFUNCTION,
+			"title": "ENGINE NOZZLE DEBRIS",
+			"description": "Sensors detect debris buildup on the main engine nozzle. Must be cleared before next course correction burn.",
+			"is_eva_event": true,
+			"eva_target": "engine",
+			"options": [
+				Phase2Types.create_event_option({
+					"label": "EVA to clear debris",
+					"description": "Spacewalk to manually remove the debris.",
+					"outcomes": [
+						Phase2Types.create_outcome(0.7, [
+							Phase2Types.create_effect("fatigue", 25, "engineer"),
+							Phase2Types.create_effect("morale", 5, "all"),
+							Phase2Types.create_effect("log", 0, "EVA successful! Engine nozzle cleared.")
+						], "Clean spacewalk - debris removed."),
+						Phase2Types.create_outcome(0.15, [
+							Phase2Types.create_effect("fatigue", 35, "engineer"),
+							Phase2Types.create_effect("morale", 8, "all"),
+							Phase2Types.create_effect("eva_drift", 0, "engineer"),
+							Phase2Types.create_effect("log", 0, "Debris cleared but spacewalker drifted on tether - rescue required!")
+						], "Success but crew member drifted!"),
+						Phase2Types.create_outcome(0.15, [
+							Phase2Types.create_effect("health", -15, "engineer"),
+							Phase2Types.create_effect("fatigue", 40, "engineer"),
+							Phase2Types.create_effect("log", 0, "Sharp debris caused suit tear. Minor injury, mission accomplished.")
+						], "Completed with injury.")
+					]
+				}),
+				Phase2Types.create_event_option({
+					"label": "Remote burn to dislodge",
+					"description": "RISKY: Engine pulse might damage the nozzle further.",
+					"outcomes": [
+						Phase2Types.create_outcome(0.25, [
+							Phase2Types.create_effect("fuel", -15, "all"),
+							Phase2Types.create_effect("log", 0, "Burn cleared debris but wasted significant fuel.")
+						], "Fuel wasted but cleared."),
+						Phase2Types.create_outcome(0.45, [
+							Phase2Types.create_effect("fuel", -20, "all"),
+							Phase2Types.create_effect("morale", -10, "all"),
+							Phase2Types.create_effect("log", 0, "Debris compacted into nozzle! Thrust reduced 30% until EVA repair.")
+						], "Made it MUCH worse!"),
+						Phase2Types.create_outcome(0.30, [
+							Phase2Types.create_effect("fuel", -25, "all"),
+							Phase2Types.create_effect("health", -10, "all"),
+							Phase2Types.create_effect("morale", -15, "all"),
+							Phase2Types.create_effect("log", 0, "CRITICAL: Engine backfire! Crew shaken, fuel venting.")
+						], "Catastrophic backfire!")
+					]
+				}),
+				Phase2Types.create_event_option({
+					"label": "[ENGINEER] Precision EVA",
+					"description": "Mitchell's expertise minimizes risk.",
+					"is_blue_option": true,
+					"requires_crew": "engineer",
+					"outcomes": [
+						Phase2Types.create_outcome(0.9, [
+							Phase2Types.create_effect("fatigue", 20, "engineer"),
+							Phase2Types.create_effect("morale", 10, "all"),
+							Phase2Types.create_effect("log", 0, "Mitchell's expert EVA work cleared everything perfectly!")
+						], "Flawless EVA work."),
+						Phase2Types.create_outcome(0.1, [
+							Phase2Types.create_effect("fatigue", 25, "engineer"),
+							Phase2Types.create_effect("eva_drift", 0, "engineer"),
+							Phase2Types.create_effect("log", 0, "Even Mitchell drifted on this one - but quickly recovered!")
+						], "Brief drift, fast recovery.")
+					]
+				})
+			]
+		}),
+
+		Phase2Types.create_event({
+			"type": Phase2Types.EventType.COMMUNICATION_STATIC,
+			"title": "ANTENNA MISALIGNMENT",
+			"description": "The main antenna has shifted out of alignment. Communications with Earth are degrading.",
+			"is_eva_event": true,
+			"eva_target": "antenna",
+			"options": [
+				Phase2Types.create_event_option({
+					"label": "EVA to realign antenna",
+					"description": "Manual adjustment from outside the hull.",
+					"outcomes": [
+						Phase2Types.create_outcome(0.65, [
+							Phase2Types.create_effect("fatigue", 25, "all"),
+							Phase2Types.create_effect("morale", 8, "all"),
+							Phase2Types.create_effect("log", 0, "Antenna realigned! Communications restored.")
+						], "Perfect alignment achieved."),
+						Phase2Types.create_outcome(0.2, [
+							Phase2Types.create_effect("fatigue", 35, "random"),
+							Phase2Types.create_effect("eva_drift", 0, "random"),
+							Phase2Types.create_effect("log", 0, "Antenna fixed but spacewalker got pushed by torque - drifting on tether!")
+						], "Fixed but spacewalker adrift!"),
+						Phase2Types.create_outcome(0.15, [
+							Phase2Types.create_effect("fatigue", 30, "random"),
+							Phase2Types.create_effect("log", 0, "Partial realignment. Comms improved but not perfect.")
+						], "Partial success.")
+					]
+				}),
+				Phase2Types.create_event_option({
+					"label": "Use backup antenna",
+					"description": "RISKY: Backup is low-power. May lose Earth contact entirely.",
+					"outcomes": [
+						Phase2Types.create_outcome(0.20, [
+							Phase2Types.create_effect("morale", -10, "all"),
+							Phase2Types.create_effect("log", 0, "Backup antenna active. Limited contact with Earth.")
+						], "Limited comms."),
+						Phase2Types.create_outcome(0.40, [
+							Phase2Types.create_effect("morale", -20, "all"),
+							Phase2Types.create_effect("log", 0, "Backup antenna failing! Very limited Earth contact. Crew anxious.")
+						], "Comms nearly lost!"),
+						Phase2Types.create_outcome(0.40, [
+							Phase2Types.create_effect("morale", -30, "all"),
+							Phase2Types.create_effect("health", -5, "all"),
+							Phase2Types.create_effect("log", 0, "TOTAL BLACKOUT: No Earth contact! Crew feels isolated and abandoned.")
+						], "Complete communications blackout!")
+					]
+				}),
+				Phase2Types.create_event_option({
+					"label": "[SCIENTIST] Calibrated EVA",
+					"description": "Tanaka brings precision instruments for exact alignment.",
+					"is_blue_option": true,
+					"requires_crew": "scientist",
+					"outcomes": [
+						Phase2Types.create_outcome(0.95, [
+							Phase2Types.create_effect("fatigue", 20, "scientist"),
+							Phase2Types.create_effect("morale", 12, "all"),
+							Phase2Types.create_effect("log", 0, "Tanaka's scientific precision resulted in better-than-original alignment!")
+						], "Better than factory settings!"),
+						Phase2Types.create_outcome(0.05, [
+							Phase2Types.create_effect("fatigue", 25, "scientist"),
+							Phase2Types.create_effect("eva_drift", 0, "scientist"),
+							Phase2Types.create_effect("log", 0, "Alignment perfect but Tanaka lost grip - tether caught them!")
+						], "Great work, minor drift.")
+					]
+				})
+			]
+		}),
+
+		Phase2Types.create_event({
+			"type": Phase2Types.EventType.POWER_SURGE,
+			"title": "SOLAR PANEL DAMAGE",
+			"description": "A micrometeorite struck a solar panel. Power generation is reduced by 30%. Repair possible via EVA.",
+			"is_eva_event": true,
+			"eva_target": "solar",
+			"options": [
+				Phase2Types.create_event_option({
+					"label": "EVA to repair panel",
+					"description": "Spacewalk to patch and rewire the damaged cells.",
+					"outcomes": [
+						Phase2Types.create_outcome(0.6, [
+							Phase2Types.create_effect("fatigue", 30, "engineer"),
+							Phase2Types.create_effect("power", 5, "all"),
+							Phase2Types.create_effect("morale", 5, "all"),
+							Phase2Types.create_effect("log", 0, "Solar panel repaired! Power generation restored.")
+						], "Full repair successful."),
+						Phase2Types.create_outcome(0.2, [
+							Phase2Types.create_effect("fatigue", 40, "engineer"),
+							Phase2Types.create_effect("eva_drift", 0, "engineer"),
+							Phase2Types.create_effect("power", 3, "all"),
+							Phase2Types.create_effect("log", 0, "Panel partially fixed - but solar wind pushed spacewalker off!")
+						], "Repair done, crew adrift!"),
+						Phase2Types.create_outcome(0.2, [
+							Phase2Types.create_effect("fatigue", 35, "engineer"),
+							Phase2Types.create_effect("power", 2, "all"),
+							Phase2Types.create_effect("log", 0, "Partial repair. Some cells unreachable.")
+						], "Partial success.")
+					]
+				}),
+				Phase2Types.create_event_option({
+					"label": "Reroute around damage",
+					"description": "RISKY: Rerouting may overload remaining panels.",
+					"outcomes": [
+						Phase2Types.create_outcome(0.15, [
+							Phase2Types.create_effect("power", -8, "all"),
+							Phase2Types.create_effect("log", 0, "Power rerouted. Significant capacity loss but stable.")
+						], "Lost 30% power."),
+						Phase2Types.create_outcome(0.45, [
+							Phase2Types.create_effect("power", -15, "all"),
+							Phase2Types.create_effect("morale", -10, "all"),
+							Phase2Types.create_effect("log", 0, "Rerouting strained other panels! Power generation cut in half.")
+						], "Power cascade failure!"),
+						Phase2Types.create_outcome(0.40, [
+							Phase2Types.create_effect("power", -20, "all"),
+							Phase2Types.create_effect("morale", -15, "all"),
+							Phase2Types.create_effect("log", 0, "CRITICAL: Reroute caused secondary panel failure! Operating on emergency power only.")
+						], "Critical power failure!")
+					]
+				}),
+				Phase2Types.create_event_option({
+					"label": "[ENGINEER] Precision EVA repair",
+					"description": "Mitchell can do a thorough repair job.",
+					"is_blue_option": true,
+					"requires_crew": "engineer",
+					"outcomes": [
+						Phase2Types.create_outcome(0.85, [
+							Phase2Types.create_effect("fatigue", 25, "engineer"),
+							Phase2Types.create_effect("power", 8, "all"),
+							Phase2Types.create_effect("morale", 8, "all"),
+							Phase2Types.create_effect("log", 0, "Mitchell's expert repair fully restored the panel, plus improved efficiency!")
+						], "Better than before!"),
+						Phase2Types.create_outcome(0.15, [
+							Phase2Types.create_effect("fatigue", 30, "engineer"),
+							Phase2Types.create_effect("power", 5, "all"),
+							Phase2Types.create_effect("eva_drift", 0, "engineer"),
+							Phase2Types.create_effect("log", 0, "Excellent repair but Mitchell caught a solar gust - safe on tether!")
+						], "Good repair, brief scare.")
 					]
 				})
 			]
@@ -807,20 +1026,72 @@ func resolve_event(choice_index: int) -> void:
 
 	# Handle special effects - can be string or int enum
 	var effect = choice.get("effect", "")
-	var effect_str = str(effect)  # Convert to string for comparison
+	var is_repair = false
+	var is_eva_retrieval = false
 
-	if effect_str == "repair_section" or effect == Phase2Types.EventEffectType.REPAIR_SECTION:
+	# Check both string and enum forms
+	if effect is String:
+		is_repair = effect == "repair_section"
+		is_eva_retrieval = effect == "eva_retrieval"
+	elif effect is int:
+		is_repair = effect == Phase2Types.EventEffectType.REPAIR_SECTION
+		is_eva_retrieval = effect == Phase2Types.EventEffectType.EVA_RETRIEVAL
+
+	if is_repair:
 		# Start repair (using hours now)
 		var container_id = event.get("blocked_container_id", "")
 		var repair_hours = _rng.randi_range(Phase2Types.REPAIR_MIN_HOURS, Phase2Types.REPAIR_MAX_HOURS)
 		dispatch(Phase2Reducer.action_start_repair(container_id, repair_hours))
-	elif effect_str == "eva_retrieval" or effect == Phase2Types.EventEffectType.EVA_RETRIEVAL:
+	elif is_eva_retrieval:
 		# Attempt EVA retrieval
 		var container_id = event.get("blocked_container_id", "")
 		dispatch(Phase2Reducer.action_eva_retrieval(container_id, _rng.randf()))
 	else:
 		# Standard event resolution
 		dispatch(Phase2Reducer.action_resolve_event(choice_index, _rng.randf()))
+
+	# Check if this is an EVA event and trigger visual EVA
+	if event.get("is_eva_event", false):
+		var eva_target = event.get("eva_target", "engine")
+		# Determine which crew role does the EVA based on the choice
+		var crew_role = _get_eva_crew_role(choice)
+		eva_triggered.emit(crew_role, eva_target)
+
+		# Check if the outcome includes eva_drift effect
+		var outcomes = choice.get("outcomes", [])
+		if not outcomes.is_empty():
+			# Roll for outcome
+			var roll = _rng.randf()
+			var cumulative = 0.0
+			for outcome in outcomes:
+				cumulative += outcome.get("weight", 0.0)
+				if roll <= cumulative:
+					# Check for eva_drift effect in this outcome
+					for eff in outcome.get("effects", []):
+						if eff.get("type", "") == "eva_drift":
+							var drift_target = eff.get("target", crew_role)
+							if drift_target == "random":
+								var roles = ["commander", "engineer", "scientist", "medical"]
+								drift_target = roles[_rng.randi() % roles.size()]
+							eva_drift_triggered.emit(drift_target)
+					break
+
+	# Check for crew_gather effects (for morale events like movie night)
+	var outcomes = choice.get("outcomes", [])
+	for outcome in outcomes:
+		for eff in outcome.get("effects", []):
+			if eff.get("type", "") == "crew_gather":
+				var location = eff.get("target", "quarters")
+				crew_gather.emit(location)
+				break
+
+func _get_eva_crew_role(choice: Dictionary) -> String:
+	## Determine which crew role does the EVA based on choice
+	var requires_crew = choice.get("requires_crew", "")
+	if requires_crew:
+		return requires_crew
+	# Default to engineer for EVA work
+	return "engineer"
 
 func trigger_event(event: Dictionary) -> void:
 	dispatch(Phase2Reducer.action_trigger_event(event))

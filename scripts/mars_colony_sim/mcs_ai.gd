@@ -262,22 +262,52 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 			"priority": 72
 		})
 
-	# Medical facilities - not until colony is established
-	var has_medical = false
+	# STARPORT - enables immigration for population growth!
+	# Critical for expanding the colony beyond natural birth rate
+	var has_starport = false
 	for b in buildings:
-		if b.type == _MCSTypes.BuildingType.MEDICAL_BAY:
-			has_medical = true
+		if b.type == _MCSTypes.BuildingType.STARPORT:
+			has_starport = true
 			break
-	if not has_medical and pop_count > 30 and current_year >= 8:
+	if not has_starport and current_year >= 5:
+		# First starport is HIGH priority - enables immigration
+		priorities.append({
+			"type": _MCSTypes.BuildingType.STARPORT,
+			"priority": 92  # Very high - population growth is critical!
+		})
+
+	# SPACE_STATION - mass immigration (late game, tech locked)
+	# TODO: Add tech requirement check once research system is implemented
+	var has_space_station = false
+	for b in buildings:
+		if b.type == _MCSTypes.BuildingType.SPACE_STATION:
+			has_space_station = true
+			break
+	if not has_space_station and current_year >= 25 and pop_count >= 50:
+		priorities.append({
+			"type": _MCSTypes.BuildingType.SPACE_STATION,
+			"priority": 78
+		})
+
+	# Medical facilities - HIGH priority for birth capacity!
+	# Medical Bay enables artificial births (2 per tier per year)
+	var medical_count = 0
+	for b in buildings:
+		if b.type == _MCSTypes.BuildingType.MEDICAL_BAY or b.type == _MCSTypes.BuildingType.HOSPITAL:
+			medical_count += 1
+	# Want enough medical capacity for ~10% population growth per year
+	var target_birth_capacity = maxi(2, pop_count / 10)  # At least 2 births/year
+	var current_birth_capacity = medical_count * 2  # ~2 per Medical Bay
+	if current_birth_capacity < target_birth_capacity and current_year >= 3:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.MEDICAL_BAY,
-			"priority": 70
+			"priority": 88  # HIGH - birth capacity drives population growth!
 		})
-	# Hospital upgrade (late game)
-	if pop_count > 100 and current_year > 40:
+	# Hospital upgrade (mid game - more efficient births)
+	if pop_count > 60 and medical_count < 3 and current_year > 15:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.HOSPITAL,
-			"priority": 68
+			"priority": 75
 		})
 
 	# School - once children appear and colony is stable
@@ -454,6 +484,11 @@ static func _get_building_cost(building_type: int) -> Dictionary:
 			return {"building_materials": 80, "machine_parts": 15}
 		_MCSTypes.BuildingType.GOVERNMENT_HALL:
 			return {"building_materials": 130, "machine_parts": 35}
+		# Transport/Immigration
+		_MCSTypes.BuildingType.STARPORT:
+			return {"building_materials": 100, "machine_parts": 35}
+		_MCSTypes.BuildingType.SPACE_STATION:
+			return {"building_materials": 300, "machine_parts": 120}
 		# Superstructures - expensive mega-projects
 		_MCSTypes.BuildingType.MASS_DRIVER:
 			return {"building_materials": 500, "machine_parts": 200}

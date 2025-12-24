@@ -544,6 +544,12 @@ func _draw_system_view(rect: Rect2) -> void:
 	for zone_id in FCWTypes.ZoneId.values():
 		_draw_zone(zone_id, rect, offset)
 
+	# Draw zone signature bars (detection levels for Herald targeting)
+	_draw_zone_signatures(offset)
+
+	# Draw Herald attention arrow (shows where Herald is tracking)
+	_draw_herald_attention_arrow(offset)
+
 	# Draw skirmishes (combat zones)
 	_draw_skirmishes(offset)
 
@@ -4889,3 +4895,184 @@ func _get_capital_ship_name(index: int, ship_type: int) -> String:
 
 	var name_idx = index % names.size()
 	return "%s %s" % [type_prefix, names[name_idx]]
+
+# ============================================================================
+# ZONE SIGNATURE VISUALIZATION - Shows detection risk for Herald targeting
+# ============================================================================
+
+func _draw_zone_signatures(offset: Vector2) -> void:
+	## Draw signature bars below each zone showing detection level
+	## This is the core mechanic visualization - player sees why Herald targets zones
+	var zone_signatures = _state.get("zone_signatures", {})
+	var herald_current_zone = _state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
+
+	for zone_id in FCWTypes.ZoneId.values():
+		var zone_data = _zones.get(zone_id, {})
+		if zone_data.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+			continue
+
+		var sig = zone_signatures.get(zone_id, 0.0)
+		var zone_pos = _get_zone_pixel_pos(zone_id) + offset
+		var zone_size = ZONE_SIZES.get(zone_id, 20.0)
+
+		# Position signature bar below zone name and defense
+		var bar_y = zone_size + 42
+		var bar_width = 60.0
+		var bar_height = 6.0
+		var bar_x = -bar_width / 2.0
+
+		# Background bar (dark)
+		var bar_rect = Rect2(zone_pos.x + bar_x, zone_pos.y + bar_y, bar_width, bar_height)
+		draw_rect(bar_rect, Color(0.1, 0.1, 0.1, 0.8))
+
+		# Fill bar based on signature level
+		var fill_width = bar_width * clampf(sig, 0.0, 1.0)
+		var sig_color = _get_signature_color(sig)
+		if fill_width > 0:
+			var fill_rect = Rect2(zone_pos.x + bar_x, zone_pos.y + bar_y, fill_width, bar_height)
+			draw_rect(fill_rect, sig_color)
+
+		# Bar border
+		draw_rect(bar_rect, sig_color.lightened(0.3), false, 1.0)
+
+		# Signature label text
+		var font = ThemeDB.fallback_font
+		var sig_text = _get_signature_label(sig)
+		var text_color = sig_color
+
+		# Pulsing warning for high signatures
+		if sig >= FCWTypes.HERALD_SKIP_THRESHOLD:
+			var pulse = sin(_global_time * 4.0) * 0.3 + 0.7
+			text_color.a = pulse
+			# Warning border around bar
+			var warn_rect = Rect2(zone_pos.x + bar_x - 2, zone_pos.y + bar_y - 2, bar_width + 4, bar_height + 4)
+			draw_rect(warn_rect, Color(1.0, 0.3, 0.1, pulse * 0.5), false, 2.0)
+
+		# Draw percentage and label
+		var percent_text = "%d%%" % int(sig * 100)
+		draw_string(font, Vector2(zone_pos.x + bar_x, zone_pos.y + bar_y + bar_height + 12),
+			percent_text, HORIZONTAL_ALIGNMENT_LEFT, 30, 9, text_color)
+		draw_string(font, Vector2(zone_pos.x + bar_x + 32, zone_pos.y + bar_y + bar_height + 12),
+			sig_text, HORIZONTAL_ALIGNMENT_LEFT, 60, 9, text_color.darkened(0.2))
+
+func _get_signature_color(sig: float) -> Color:
+	## Get color for signature level
+	## Green (safe) -> Yellow (caution) -> Orange (risky) -> Red (danger)
+	if sig >= 0.6:
+		return Color(1.0, 0.2, 0.1)  # Red - critical
+	elif sig >= 0.4:  # Skip threshold
+		return Color(1.0, 0.5, 0.1)  # Orange - danger (can trigger skip)
+	elif sig >= 0.2:
+		return Color(1.0, 0.8, 0.2)  # Yellow - moderate
+	elif sig >= 0.1:
+		return Color(0.6, 0.8, 0.3)  # Yellow-green - low
+	else:
+		return Color(0.3, 0.7, 0.3)  # Green - dark/safe
+
+func _get_signature_label(sig: float) -> String:
+	## Get human-readable label for signature level
+	if sig >= 0.6:
+		return "CRITICAL"
+	elif sig >= 0.4:
+		return "High"
+	elif sig >= 0.2:
+		return "Moderate"
+	elif sig >= 0.1:
+		return "Low"
+	else:
+		return "Dark"
+
+func _draw_herald_attention_arrow(offset: Vector2) -> void:
+	## Draw arrow from Herald to its highest-priority target zone
+	## Shows player WHERE Herald is looking and WHY
+	var herald_current_zone = _state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
+	var zone_signatures = _state.get("zone_signatures", {})
+
+	# Find zones Herald can reach from current position
+	var reachable = FCWTypes.get_all_reachable_zones(herald_current_zone)
+	if reachable.is_empty():
+		return
+
+	# Find highest signature zone that's reachable and not fallen
+	var highest_sig = -1.0
+	var target_zone = -1
+	for zone_id in reachable:
+		var zone_data = _zones.get(zone_id, {})
+		if zone_data.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+			continue
+		var sig = zone_signatures.get(zone_id, 0.0)
+		if sig > highest_sig:
+			highest_sig = sig
+			target_zone = zone_id
+
+	# Also consider default inward path if no strong signal
+	if highest_sig < FCWTypes.HERALD_MIN_SIG_TO_ATTRACT:
+		var default_next = FCWTypes.get_zone_default_next(herald_current_zone)
+		if default_next >= 0:
+			var zone_data = _zones.get(default_next, {})
+			if zone_data.get("status", 0) != FCWTypes.ZoneStatus.FALLEN:
+				target_zone = default_next
+
+	if target_zone < 0:
+		return
+
+	# Get positions
+	var herald_pos = _get_zone_pixel_pos(herald_current_zone) + offset
+	var target_pos = _get_zone_pixel_pos(target_zone) + offset
+
+	# Calculate arrow properties
+	var direction = (target_pos - herald_pos).normalized()
+	var distance = herald_pos.distance_to(target_pos)
+	var herald_size = ZONE_SIZES.get(herald_current_zone, 20.0)
+	var target_size = ZONE_SIZES.get(target_zone, 20.0)
+
+	# Start arrow from edge of Herald zone, end before target zone
+	var start_pos = herald_pos + direction * (herald_size + 45)
+	var end_pos = target_pos - direction * (target_size + 60)
+
+	# Only draw if there's enough distance
+	if start_pos.distance_to(end_pos) < 50:
+		return
+
+	# Arrow color based on signature strength
+	var arrow_color = _get_signature_color(highest_sig)
+	var pulse = sin(_global_time * 2.5) * 0.2 + 0.8
+	arrow_color.a = pulse * 0.7
+
+	# Draw dashed line
+	var dash_length = 15.0
+	var gap_length = 8.0
+	var current_dist = 0.0
+	var total_dist = start_pos.distance_to(end_pos)
+	var drawing = true
+
+	while current_dist < total_dist:
+		var segment_length = dash_length if drawing else gap_length
+		var segment_end = minf(current_dist + segment_length, total_dist)
+
+		if drawing:
+			var seg_start = start_pos + direction * current_dist
+			var seg_end = start_pos + direction * segment_end
+			draw_line(seg_start, seg_end, arrow_color, 2.0)
+
+		current_dist = segment_end
+		drawing = not drawing
+
+	# Draw arrowhead
+	var arrow_size = 12.0
+	var arrow_angle = 0.4  # radians
+	var arrow_left = end_pos - direction.rotated(arrow_angle) * arrow_size
+	var arrow_right = end_pos - direction.rotated(-arrow_angle) * arrow_size
+	var arrow_points = PackedVector2Array([end_pos, arrow_left, arrow_right])
+	draw_colored_polygon(arrow_points, arrow_color)
+
+	# Draw "TRACKING" label at midpoint for high signatures
+	if highest_sig >= FCWTypes.HERALD_MIN_SIG_TO_ATTRACT:
+		var mid_pos = start_pos.lerp(end_pos, 0.5)
+		var font = ThemeDB.fallback_font
+		var label_offset = direction.orthogonal() * 15
+		var tracking_text = "TRACKING"
+		if highest_sig >= FCWTypes.HERALD_SKIP_THRESHOLD:
+			tracking_text = "LOCKED"
+		draw_string(font, mid_pos + label_offset + Vector2(-25, 4),
+			tracking_text, HORIZONTAL_ALIGNMENT_CENTER, 60, 9, arrow_color)

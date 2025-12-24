@@ -93,6 +93,10 @@ text = "Normal"
 layout_mode = 2
 text = "Fast"
 
+[node name="Ludicrous" type="Button" parent="SpeedControls"]
+layout_mode = 2
+text = "LUDICROUS"
+
 [node name="Pause" type="Button" parent="SpeedControls"]
 layout_mode = 2
 text = "Pause"

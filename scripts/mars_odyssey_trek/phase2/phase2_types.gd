@@ -14,7 +14,8 @@ enum Speed {
 	SLOW,
 	NORMAL,
 	FAST,
-	ULTRA
+	ULTRA,
+	LUDICROUS  # 10x faster than ULTRA - for debugging
 }
 
 enum ContainerStatus {
@@ -76,10 +77,11 @@ const TOTAL_TRAVEL_HOURS = TOTAL_TRAVEL_DAYS * HOURS_PER_DAY  # 4392 hours
 # Real-time seconds per game hour at each speed
 const SECONDS_PER_HOUR = {
 	Speed.PAUSED: 0.0,
-	Speed.SLOW: 0.5,     # 12 seconds per day
-	Speed.NORMAL: 0.2,   # ~5 seconds per day
-	Speed.FAST: 0.05,    # ~1.2 seconds per day
-	Speed.ULTRA: 0.005   # ~0.12 seconds per day (whole journey in ~22 seconds)
+	Speed.SLOW: 0.5,       # 12 seconds per day
+	Speed.NORMAL: 0.2,     # ~5 seconds per day
+	Speed.FAST: 0.05,      # ~1.2 seconds per day
+	Speed.ULTRA: 0.005,    # ~0.12 seconds per day (whole journey in ~22 seconds)
+	Speed.LUDICROUS: 0.0005  # 10x ULTRA (~2 seconds for whole journey)
 }
 
 # Hourly consumption rates (daily rates / 24)
@@ -428,6 +430,7 @@ static func get_speed_name(speed: Speed) -> String:
 		Speed.NORMAL: return "Normal"
 		Speed.FAST: return "Fast"
 		Speed.ULTRA: return "ULTRA"
+		Speed.LUDICROUS: return "LUDICROUS"
 	return "Unknown"
 
 static func get_container_status_name(status: ContainerStatus) -> String:

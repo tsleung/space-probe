@@ -150,6 +150,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				store.set_speed(Phase2Types.Speed.FAST)
 			KEY_4:
 				store.set_speed(Phase2Types.Speed.ULTRA)
+			KEY_5:
+				store.set_speed(Phase2Types.Speed.LUDICROUS)
+				print("[CONTROLLER] LUDICROUS SPEED!")
 			KEY_SPACE:
 				store.toggle_pause()
 			KEY_A:
@@ -171,6 +174,11 @@ func set_speed_normal() -> void:
 func set_speed_fast() -> void:
 	if store:
 		store.set_speed(Phase2Types.Speed.FAST)
+
+func set_speed_ludicrous() -> void:
+	if store:
+		store.set_speed(Phase2Types.Speed.LUDICROUS)
+		print("[CONTROLLER] LUDICROUS SPEED!")
 
 func toggle_pause() -> void:
 	if store:
@@ -315,6 +323,16 @@ func _ai_pick_choice(event: Dictionary, options: Array) -> int:
 			Phase2Types.EventType.MIDPOINT_CRISIS:
 				# All-hands repair is safest
 				if i == 0: score += 15.0
+
+		# EVA event preferences - strongly prefer EVA options
+		if event.get("is_eva_event", false):
+			var label = option.get("label", "").to_lower()
+			if label.contains("eva"):
+				score += 50.0  # Strongly prefer EVA options
+			elif option.get("is_blue_option", false):
+				score += 60.0  # Blue EVA options are even better
+			else:
+				score -= 40.0  # Non-EVA options are very risky
 
 		# Add small random factor for variety
 		score += randf() * 5.0

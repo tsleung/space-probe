@@ -9,9 +9,9 @@ var weapon_type: int = -1
 var base_position: Vector2 = Vector2.ZERO
 var charge_count: int = 1  # Number of charges fired (1-5)
 
-# Charge scaling constants
-const BASE_RANGE = 350.0       # x1 range - close/desperation
-const MAX_RANGE = 1400.0       # x5 range - reaches center and beyond
+# Charge scaling constants (ranges increased 1.5x for factory network coverage)
+const BASE_RANGE = 525.0       # x1 range - close/desperation (was 350)
+const MAX_RANGE = 2100.0       # x5 range - reaches across map (was 1400)
 const BASE_DAMAGE = 80.0       # x1 damage
 const DAMAGE_PER_CHARGE = 40.0 # Additional damage per charge
 
@@ -63,12 +63,16 @@ func _fire_arc_storm():
 	print("[ARC STORM] Firing with %d charges, range: %.0f, from base at %s" % [charge_count, max_range, base_position])
 
 	# Find all enemies in range - use REAL ship node positions, not stale state
+	# This includes ALL non-player ships: Enemy, Nemesis, AND Progenitor
 	var enemies_in_range = []
 	var total_enemies = 0
+	var progenitor_count = 0
 	for ship_id in state.ships:
 		var ship_data = state.ships[ship_id]
-		if ship_data.team != team:
+		if ship_data.team != team:  # All non-player ships are valid targets
 			total_enemies += 1
+			if ship_data.team == VnpTypes.Team.PROGENITOR:
+				progenitor_count += 1
 			# Get real position from ship node if available
 			var ship_pos = ship_data.position  # Fallback to state position
 			if vnp_main and vnp_main.ship_nodes.has(ship_id):
@@ -77,9 +81,9 @@ func _fire_arc_storm():
 					ship_pos = ship_node.global_position
 			var dist = ship_pos.distance_to(base_position)
 			if dist <= max_range:
-				enemies_in_range.append({"id": ship_id, "pos": ship_pos, "dist": dist})
+				enemies_in_range.append({"id": ship_id, "pos": ship_pos, "dist": dist, "team": ship_data.team})
 
-	print("[ARC STORM] Found %d enemies total, %d in range" % [total_enemies, enemies_in_range.size()])
+	print("[ARC STORM] Found %d enemies total (%d Progenitor), %d in range" % [total_enemies, progenitor_count, enemies_in_range.size()])
 
 	if enemies_in_range.is_empty():
 		print("[ARC STORM] No enemies in range! Closest enemy might be too far.")

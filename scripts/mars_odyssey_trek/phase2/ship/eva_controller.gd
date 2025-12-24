@@ -15,6 +15,7 @@ const ShipNavigation = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship
 
 signal eva_started(crew_role: String, target: int)
 signal eva_completed(crew_role: String, success: bool)
+signal eva_repair_completed(waypoint: int)  # Emitted when exterior surface repaired
 signal crew_drifted(crew_role: String)
 signal rescue_started(rescuer_role: String, victim_role: String)
 signal rescue_completed(victim_role: String)
@@ -260,7 +261,13 @@ func _create_circle(radius: float, segments: int = 12) -> PackedVector2Array:
 # ============================================================================
 
 func start_eva(crew_role: String, target_waypoint: int) -> void:
-	## Start an EVA to an exterior location
+	## Start a full EVA sequence to an exterior location
+	## This is an async function that handles all 4 phases:
+	## 1. Interior transit (walk to cargo bay)
+	## 2. Airlock sequence (suit up, exit)
+	## 3. Exterior work (move to target, work)
+	## 4. Return (back through airlock)
+
 	if active_eva.has(crew_role):
 		return  # Already on EVA
 
@@ -272,19 +279,174 @@ func start_eva(crew_role: String, target_waypoint: int) -> void:
 
 	active_eva[crew_role] = {
 		"target": target_waypoint,
-		"phase": "departing",  # departing, outside, working, returning, complete
+		"phase": "interior_transit",
 		"start_time": Time.get_ticks_msec(),
 	}
 
-	# Create tether
+	eva_started.emit(crew_role, target_waypoint)
+
+	# Run the full EVA sequence
+	_run_eva_sequence(crew_role, target_waypoint)
+
+func _run_eva_sequence(crew_role: String, target_waypoint: int) -> void:
+	## Async function that runs the full EVA sequence
+	var crew_member = ship_view.crew.get(crew_role)
+	if not crew_member:
+		return
+
+	# ========================================
+	# PHASE 1: Interior Transit to Cargo Bay
+	# ========================================
+	active_eva[crew_role].phase = "interior_transit"
+	print("[EVA] Phase 1: %s walking to cargo bay..." % crew_role.capitalize())
+
+	# Get path from current room to cargo bay
+	var interior_path = ship_nav.find_path(crew_member.current_room, ShipTypes.RoomType.CARGO_BAY)
+
+	if interior_path.size() > 0:
+		crew_member.move_along_path(ShipTypes.RoomType.CARGO_BAY, interior_path, null, false)
+
+		# Wait for crew to arrive at cargo bay
+		await crew_member.arrived_at_destination
+
+	# Check if EVA was cancelled
+	if not active_eva.has(crew_role):
+		return
+
+	# ========================================
+	# PHASE 2: Airlock Sequence
+	# ========================================
+	active_eva[crew_role].phase = "airlock"
+	await _begin_airlock_sequence(crew_role, target_waypoint)
+
+	# Check if EVA was cancelled or crew drifted
+	if not active_eva.has(crew_role) or drifting_crew.has(crew_role):
+		return
+
+	# ========================================
+	# PHASE 3: Exterior Work
+	# ========================================
+	active_eva[crew_role].phase = "exterior_work"
+	var drifted = await _begin_exterior_work(crew_role, target_waypoint)
+
+	# If crew drifted, the rescue system handles the rest
+	if drifted or not active_eva.has(crew_role):
+		return
+
+	# ========================================
+	# PHASE 4: Return through Airlock
+	# ========================================
+	active_eva[crew_role].phase = "returning"
+	await _begin_return_sequence(crew_role)
+
+func _begin_airlock_sequence(crew_role: String, target_waypoint: int) -> void:
+	## Phase 2: Suiting up and exiting through airlock
+	var crew_member = ship_view.crew.get(crew_role)
+	if not crew_member:
+		return
+
+	# Move to airlock position within cargo bay
+	var airlock_pos = ship_nav.get_waypoint_position(ShipNavigation.Waypoint.AIRLOCK)
+	print("[EVA] Phase 2: %s at airlock, suiting up..." % crew_role.capitalize())
+
+	var tween = create_tween()
+	tween.tween_property(crew_member, "global_position", airlock_pos, 0.8)
+	await tween.finished
+
+	# Suiting up pause
+	await get_tree().create_timer(1.5).timeout
+
+	# Animate airlock door open
+	_animate_airlock_open()
+	await get_tree().create_timer(0.3).timeout
+
+	# Create tether from airlock to crew
 	_create_tether(crew_role)
 
-	# Send crew to exterior location
-	var path = ship_nav.find_eva_path(crew_member.current_room, target_waypoint)
-	crew_member.move_along_path(ShipTypes.RoomType.CARGO_BAY, path, null, false)
+	# Change crew to EVA state (visuals handled by crew_member)
 	crew_member.set_state(ShipTypes.CrewState.EVA)
+	print("[EVA] %s exiting airlock, tether attached" % crew_role.capitalize())
 
-	eva_started.emit(crew_role, target_waypoint)
+func _begin_exterior_work(crew_role: String, target_waypoint: int) -> bool:
+	## Phase 3: Move to exterior target and work
+	## Returns true if crew drifted, false otherwise
+	var crew_member = ship_view.crew.get(crew_role)
+	if not crew_member:
+		return false
+
+	var target_pos = ship_nav.get_waypoint_position(target_waypoint)
+	print("[EVA] Phase 3: %s moving to %s..." % [crew_role.capitalize(), ShipNavigation.get_exterior_name(target_waypoint)])
+
+	# EVA movement is slower and floaty
+	var eva_speed = 30.0
+	var distance = crew_member.global_position.distance_to(target_pos)
+	var duration = distance / eva_speed
+
+	var tween = create_tween()
+	tween.tween_property(crew_member, "global_position", target_pos, duration)
+	await tween.finished
+
+	# Work at target
+	print("[EVA] Working on %s..." % ShipNavigation.get_exterior_name(target_waypoint))
+	var work_time = ShipTypes.TASK_DURATIONS.get(ShipTypes.TaskType.EVA_REPAIR, 4.0)
+	await get_tree().create_timer(work_time).timeout
+
+	# Check for drift
+	if check_for_drift(crew_role):
+		return true
+
+	# Repair completed successfully - emit signal so exterior surface can be repaired
+	print("[EVA] Repair complete: %s" % ShipNavigation.get_exterior_name(target_waypoint))
+	eva_repair_completed.emit(target_waypoint)
+
+	return false
+
+func _begin_return_sequence(crew_role: String) -> void:
+	## Phase 4: Return through airlock
+	var crew_member = ship_view.crew.get(crew_role)
+	if not crew_member:
+		return
+
+	print("[EVA] Phase 4: %s returning to airlock..." % crew_role.capitalize())
+
+	# Move back to airlock
+	var airlock_pos = ship_nav.get_waypoint_position(ShipNavigation.Waypoint.AIRLOCK)
+	var distance = crew_member.global_position.distance_to(airlock_pos)
+	var duration = distance / 35.0  # Slightly faster on return
+
+	var tween = create_tween()
+	tween.tween_property(crew_member, "global_position", airlock_pos, duration)
+	await tween.finished
+
+	# Animate airlock close
+	_animate_airlock_close()
+	await get_tree().create_timer(0.3).timeout
+
+	# Removing suit pause
+	print("[EVA] %s removing suit..." % crew_role.capitalize())
+	await get_tree().create_timer(1.0).timeout
+
+	# Complete EVA
+	complete_eva(crew_role, true)
+
+func _animate_airlock_open() -> void:
+	## Animate the airlock door opening
+	var airlock_node = get_node_or_null("Airlock")
+	if not airlock_node:
+		return
+
+	var tween = create_tween()
+	tween.tween_property(airlock_node, "scale", Vector2(0.2, 1.0), 0.3)
+	# Could add depressurization particles here
+
+func _animate_airlock_close() -> void:
+	## Animate the airlock door closing
+	var airlock_node = get_node_or_null("Airlock")
+	if not airlock_node:
+		return
+
+	var tween = create_tween()
+	tween.tween_property(airlock_node, "scale", Vector2(1.0, 1.0), 0.3)
 
 func _create_tether(crew_role: String) -> void:
 	var tether = Line2D.new()

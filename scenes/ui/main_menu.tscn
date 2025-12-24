@@ -62,11 +62,6 @@ custom_minimum_size = Vector2(0, 50)
 layout_mode = 2
 text = "Mars Odyssey Trek: Travel to Mars"
 
-[node name="VNPGameButton" type="Button" parent="VBoxContainer"]
-custom_minimum_size = Vector2(0, 50)
-layout_mode = 2
-text = "Von Neumann Probe"
-
 [node name="MCSButton" type="Button" parent="VBoxContainer"]
 custom_minimum_size = Vector2(0, 50)
 layout_mode = 2
@@ -76,6 +71,11 @@ text = "Mars Colony Sim"
 custom_minimum_size = Vector2(0, 50)
 layout_mode = 2
 text = "First Contact War"
+
+[node name="VNPGameButton" type="Button" parent="VBoxContainer"]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+text = "Von Neumann Probe"
 
 [node name="QuitButton" type="Button" parent="VBoxContainer"]
 custom_minimum_size = Vector2(0, 50)

@@ -273,10 +273,22 @@ func fire_base_weapon(team: int, charges: int = 1):
 	if not base_nodes.has(team):
 		return
 
+	# Fire from home base
 	var base_pos = base_nodes[team].position
 	var weapon = BaseWeapon.new()
 	add_child(weapon)
 	weapon.init(store, team, base_pos, charges, self)
+
+	# Also fire from all completed factories owned by this team
+	var state = store.get_state()
+	if state and state.has("factories"):
+		for factory_id in state.factories:
+			var factory = state.factories[factory_id]
+			if factory.team == team and factory.get("complete", false):
+				var factory_pos = factory.position
+				var factory_weapon = BaseWeapon.new()
+				add_child(factory_weapon)
+				factory_weapon.init(store, team, factory_pos, charges, self)
 
 
 func toggle_charge_mode(team: int):
@@ -294,8 +306,11 @@ func manual_fire_base_weapon(team: int):
 
 func burst_fire_base_weapon(team: int):
 	# Fire ALL charges at once
+	print("[BASE WEAPON] Burst requested for team %d, charges: %d" % [team, base_charges.get(team, 0)])
 	if base_charges[team] > 0:
 		_try_fire_base_weapon(team, true)
+	else:
+		print("[BASE WEAPON] Burst DENIED - no charges")
 
 
 func trigger_full_retreat(team: int):
@@ -418,7 +433,7 @@ func _setup_progenitor_message():
 
 
 func _handle_zoom(delta: float):
-	"""Handle camera zoom with expansion-based limits"""
+	"""Handle camera zoom toward mouse pointer with expansion-based limits"""
 	var state = store.get_state()
 	if state == null or not state.has("expansion"):
 		return
@@ -439,14 +454,54 @@ func _handle_zoom(delta: float):
 	# Clamp to valid range
 	new_zoom = clamp(new_zoom, min_zoom_in, max_zoom_out)
 
-	# Apply zoom directly for trackpad (smoother) or with tween for mouse wheel
+	# Apply zoom toward mouse pointer
 	if abs(new_zoom - current_zoom) > 0.001:
+		# Get mouse position in world coordinates BEFORE zoom
+		var mouse_screen = get_viewport().get_mouse_position()
+		var mouse_world_before = camera.position + (mouse_screen - screen_size / 2) / camera.zoom
+
+		# Apply new zoom
 		current_zoom = new_zoom
 		# Kill existing zoom tween to prevent conflicts
 		if zoom_tween and zoom_tween.is_running():
 			zoom_tween.kill()
-		# Apply zoom directly for responsive feel
 		camera.zoom = Vector2.ONE / current_zoom
+
+		# Get mouse position in world coordinates AFTER zoom
+		var mouse_world_after = camera.position + (mouse_screen - screen_size / 2) / camera.zoom
+
+		# Adjust camera position so mouse stays over same world point
+		var new_camera_pos = camera.position + (mouse_world_before - mouse_world_after)
+
+		# Clamp camera position to limits
+		var half_extent = world_size / 2
+		new_camera_pos.x = clamp(new_camera_pos.x, camera.limit_left + screen_size.x / 2 / camera.zoom.x, camera.limit_right - screen_size.x / 2 / camera.zoom.x)
+		new_camera_pos.y = clamp(new_camera_pos.y, camera.limit_top + screen_size.y / 2 / camera.zoom.y, camera.limit_bottom - screen_size.y / 2 / camera.zoom.y)
+
+		camera.position = new_camera_pos
+
+		# Show void message if we hit the edge while zooming out
+		if delta > 0:  # Zooming out
+			_check_camera_at_edge()
+
+
+func _check_camera_at_edge():
+	"""Check if camera is at the edge of the world and show void message"""
+	if not camera:
+		return
+
+	# Calculate where camera would naturally want to be (center of view)
+	var view_half_width = screen_size.x / 2 / camera.zoom.x
+	var view_half_height = screen_size.y / 2 / camera.zoom.y
+
+	# Check if we're at any edge
+	var at_left = camera.position.x <= camera.limit_left + view_half_width + 10
+	var at_right = camera.position.x >= camera.limit_right - view_half_width - 10
+	var at_top = camera.position.y <= camera.limit_top + view_half_height + 10
+	var at_bottom = camera.position.y >= camera.limit_bottom - view_half_height - 10
+
+	if at_left or at_right or at_top or at_bottom:
+		_show_void_message()
 
 
 func _show_void_message():
@@ -571,7 +626,13 @@ func _setup_rally_line():
 
 
 func _input(event):
+	# Handle victory screen input
 	if showing_victory:
+		if event is InputEventKey and event.pressed:
+			if event.keycode == KEY_R:
+				_restart_game()
+			elif event.keycode == KEY_ESCAPE:
+				get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")
 		return
 
 	# Handle scroll wheel zoom (mouse)
@@ -1093,8 +1154,8 @@ func _process_dormant_phase(timing: Dictionary):
 	var expansion_phase = state.expansion.phase
 	var total_ships = state.ships.size()
 
-	# Trigger after 5 expansions and 50 ships - gives time to build up
-	if expansion_phase >= 5 and total_ships >= 50:
+	# Trigger after 7 expansions and 50 ships - gives time to build up (adjusted for smaller expansions)
+	if expansion_phase >= 7 and total_ships >= 50:
 		_transition_to_whispers()
 
 
@@ -1360,12 +1421,11 @@ func _process_critical_phase(convergence: Dictionary, timing: Dictionary):
 
 
 func _check_ship_absorption(convergence: Dictionary):
-	"""Absorb ships and outposts that escape FAR beyond the drone spawn zone.
-	The drones are the real threat - this is just a failsafe for extreme escapees."""
+	"""Absorb ships and outposts outside the safe zone.
+	The absorption radius IS the threat - ships outside get consumed by the void."""
 	var center = convergence.get("center", Vector2.ZERO)
 	var radius = convergence.get("absorption_radius", 1000.0)
-	# Only absorb ships that go 50% BEYOND the spawn zone - drones should catch them first
-	var hard_absorption_radius = radius * 1.5
+	# Ships outside the safe zone get absorbed - the ring is the actual boundary
 	var state = store.get_state()
 	if state == null or not state.has("ships"):
 		return
@@ -1382,26 +1442,108 @@ func _check_ship_absorption(convergence: Dictionary):
 			ship_pos = ship_nodes[ship_id].global_position
 
 		var dist = ship_pos.distance_to(center)
-		# Only absorb if FAR beyond the drone spawn zone
-		if dist > hard_absorption_radius:
+		# Ships outside the absorption radius get consumed by the void
+		if dist > radius:
 			ships_to_absorb.append(ship_id)
 
 	# Absorb ships (with visual effect)
 	for ship_id in ships_to_absorb:
 		_absorb_ship(ship_id)
 
-	# Check outposts outside hard absorption zone
+	# Check outposts outside absorption zone
 	var outposts_to_absorb = []
 	for point_id in state.outposts:
 		if state.strategic_points.has(point_id):
 			var point_pos = state.strategic_points[point_id].position
 			var dist = point_pos.distance_to(center)
-			if dist > hard_absorption_radius:
+			if dist > radius:
 				outposts_to_absorb.append(point_id)
 
 	# Absorb outposts
 	for point_id in outposts_to_absorb:
 		_absorb_outpost(point_id)
+
+	# Check factories outside absorption zone
+	var factories_to_absorb = []
+	if state.has("factories"):
+		for factory_id in state.factories:
+			var factory = state.factories[factory_id]
+			var factory_pos = factory.position
+			var dist = factory_pos.distance_to(center)
+			if dist > radius:
+				factories_to_absorb.append(factory_id)
+
+	# Absorb factories
+	for factory_id in factories_to_absorb:
+		_absorb_factory(factory_id)
+
+	# Check bases outside absorption zone
+	for team in base_nodes:
+		if not is_instance_valid(base_nodes[team]):
+			continue
+		var base_pos = base_nodes[team].position
+		var dist = base_pos.distance_to(center)
+		if dist > radius:
+			_absorb_base(team)
+
+
+func _absorb_base(team: int):
+	"""Team's home base consumed by The Progenitor - team is eliminated"""
+	if not base_nodes.has(team) or not is_instance_valid(base_nodes[team]):
+		return
+
+	var base_pos = base_nodes[team].position
+
+	# Create dramatic absorption effect
+	_create_absorption_effect(base_pos)
+
+	# Dispatch base destroyed action
+	store.dispatch({
+		"type": "BASE_DESTROYED",
+		"team": team
+	})
+
+	# Remove visual node
+	base_nodes[team].queue_free()
+	base_nodes.erase(team)
+
+	# Massive instability from base absorption
+	store.dispatch({
+		"type": "CONVERGENCE_ADD_INSTABILITY",
+		"amount": 15.0
+	})
+
+	# Big screen shake
+	shake_screen(15.0)
+
+	print("[PROGENITOR] %s base ABSORBED - team eliminated!" % VnpTypes.get_team_name(team))
+
+
+func _absorb_factory(factory_id: String):
+	"""Factory consumed by The Progenitor"""
+	var state = store.get_state()
+	if state == null or not state.has("factories"):
+		return
+
+	# Create absorption effect at factory location
+	if state.factories.has(factory_id):
+		var factory_pos = state.factories[factory_id].position
+		_create_absorption_effect(factory_pos)
+
+	# Destroy the factory
+	store.dispatch({
+		"type": "FACTORY_DESTROY",
+		"factory_id": factory_id
+	})
+
+	# Add instability from factory absorption (more than ships)
+	store.dispatch({
+		"type": "CONVERGENCE_ADD_INSTABILITY",
+		"amount": 5.0
+	})
+
+	# Bigger screen shake for factory
+	shake_screen(8.0)
 
 
 func _absorb_ship(ship_id: int):
@@ -1489,19 +1631,19 @@ func _trigger_fragmentation():
 
 
 func _setup_convergence_visuals():
-	"""Setup visual elements for the convergence zone - subtle hint, drones are the real threat"""
-	# Create subtle spawn zone indicator (very thin, dashed)
+	"""Setup visual elements for the convergence zone - deadly boundary"""
+	# Create the danger zone boundary ring
 	if not convergence_visual_ring:
 		convergence_visual_ring = Line2D.new()
 		convergence_visual_ring.name = "ConvergenceRing"
-		convergence_visual_ring.width = 1.5  # Very thin - just a hint
+		convergence_visual_ring.width = 4.0  # Visible boundary
 		convergence_visual_ring.default_color = VnpTypes.PROGENITOR_ACCENT
-		convergence_visual_ring.z_index = 0  # Behind everything
+		convergence_visual_ring.z_index = 5  # Above ships so it's visible
 		add_child(convergence_visual_ring)
 
 
 func _update_convergence_visuals():
-	"""Update convergence visual elements each frame - subtle dashed line showing spawn zone"""
+	"""Update convergence visual elements each frame - the deadly boundary ring"""
 	var state = store.get_state()
 	if state == null or not state.has("convergence"):
 		return
@@ -1518,7 +1660,7 @@ func _update_convergence_visuals():
 	var center = convergence.get("center", gameplay_center)
 	var radius = convergence.get("absorption_radius", 1000.0)
 
-	# Draw very subtle dashed spawn zone indicator (NOT the threat - just where drones emerge)
+	# Draw the deadly boundary ring - ships outside this get absorbed
 	if convergence_visual_ring:
 		convergence_visual_ring.visible = true
 		convergence_visual_ring.clear_points()
@@ -1527,7 +1669,7 @@ func _update_convergence_visuals():
 		var pulse = 1.0 + sin(Time.get_ticks_msec() * 0.001) * 0.02
 		var draw_radius = radius * pulse
 
-		# Draw dashed circle (gaps show this is just an indicator, not a wall)
+		# Draw dashed circle (the shrinking boundary of the safe zone)
 		var segments = 48
 		var dash_on = true
 		for i in range(segments + 1):
@@ -1541,13 +1683,14 @@ func _update_convergence_visuals():
 				var point = center + Vector2(cos(angle), sin(angle)) * draw_radius
 				convergence_visual_ring.add_point(point)
 
-		# Very transparent - just a subtle hint
+		# Make ring clearly visible - this is a deadly boundary!
 		convergence_visual_ring.default_color = Color(
 			VnpTypes.PROGENITOR_ACCENT.r,
 			VnpTypes.PROGENITOR_ACCENT.g,
 			VnpTypes.PROGENITOR_ACCENT.b,
-			0.25  # Very subtle
+			0.6  # Clearly visible danger zone
 		)
+		convergence_visual_ring.width = 4.0  # Thicker line
 
 
 func shake_screen(intensity: float):
@@ -2568,9 +2711,8 @@ func _handle_victory(winner: int):
 	var winner_name = VnpTypes.get_team_name(winner) if winner >= 0 else "No one"
 	vnp_ui.show_victory(winner_name)
 
-	# Wait then restart
-	await get_tree().create_timer(VICTORY_DISPLAY_TIME).timeout
-	_restart_game()
+	# Game stays on victory screen - player can return to menu or restart manually
+	# No auto-restart
 
 func _restart_game():
 	showing_victory = false
@@ -2596,6 +2738,12 @@ func _restart_game():
 	harvester_build_progress.clear()
 	harvester_camp_positions.clear()
 
+	# Clear existing bases that might be left
+	for team in base_nodes:
+		if is_instance_valid(base_nodes[team]):
+			base_nodes[team].queue_free()
+	base_nodes.clear()
+
 	# Reset base weapon cooldowns and charges
 	for team in VnpTypes.Team.values():
 		base_weapon_cooldowns[team] = 0.0
@@ -2604,10 +2752,8 @@ func _restart_game():
 	# Reset state
 	store.dispatch({"type": "RESET_GAME"})
 
-	# Recreate starting factories at base positions
-	for team in base_nodes:
-		var base_pos = base_nodes[team].position
-		_create_starting_factory(team, base_pos)
+	# Recreate bases (in case they were destroyed by Progenitor)
+	_create_bases()
 
 	# Reinitialize planets
 	_create_planets()
@@ -2615,10 +2761,11 @@ func _restart_game():
 	# Respawn base turrets for early game defense
 	_spawn_base_turrets()
 
-	# Restart AI
-	ai_controller.start_all()
+	# Restart AI with new base positions
+	ai_controller.init(store, _get_base_positions())
 
 	vnp_ui.hide_victory()
+	vnp_ui.init(store, base_nodes, ai_controller, strategic_point_nodes, self)
 
 func _initialize_game_world():
 	# NOTE: This function is no longer called from _ready()
@@ -2636,7 +2783,8 @@ func _create_starfield():
 	add_child(starfield_node)
 
 	# Calculate max world extent (after all expansions) centered on gameplay_center
-	var max_scale = WORLD_SCALE + (0.3 * 10)
+	# Max scale = WORLD_SCALE (1.5) + increment (0.15) * max_phases (15) = 3.75
+	var max_scale = WORLD_SCALE + (0.15 * 15)
 	var max_half_extent = (screen_size * max_scale) / 2
 	# Starfield bounds: gameplay_center ± max_half_extent (with extra padding)
 	var star_min = gameplay_center - max_half_extent - Vector2(500, 500)
@@ -2827,14 +2975,17 @@ func _create_bases():
 	var player_base_pos = Vector2(WORLD_PADDING, world_size.y - WORLD_PADDING)
 	base_nodes[VnpTypes.Team.PLAYER] = _create_world_object("Base", player_base_pos, Color.BLUE)
 	_create_starting_factory(VnpTypes.Team.PLAYER, player_base_pos)
+	store.dispatch({"type": "BASE_SET_POSITION", "team": VnpTypes.Team.PLAYER, "position": player_base_pos})
 
 	var enemy1_base_pos = Vector2(world_size.x - WORLD_PADDING, world_size.y - WORLD_PADDING)
 	base_nodes[VnpTypes.Team.ENEMY_1] = _create_world_object("Base", enemy1_base_pos, Color.ORANGE)
 	_create_starting_factory(VnpTypes.Team.ENEMY_1, enemy1_base_pos)
+	store.dispatch({"type": "BASE_SET_POSITION", "team": VnpTypes.Team.ENEMY_1, "position": enemy1_base_pos})
 
 	var nemesis_base_pos = Vector2(world_size.x / 2, WORLD_PADDING)
 	base_nodes[VnpTypes.Team.NEMESIS] = _create_world_object("Base", nemesis_base_pos, Color.RED)
 	_create_starting_factory(VnpTypes.Team.NEMESIS, nemesis_base_pos)
+	store.dispatch({"type": "BASE_SET_POSITION", "team": VnpTypes.Team.NEMESIS, "position": nemesis_base_pos})
 
 
 func _create_starting_factory(team: int, position: Vector2):
@@ -3112,31 +3263,42 @@ func _animate_camera_zoom(new_scale: float):
 
 
 func _spawn_expansion_points(phase: int):
-	"""Spawn 2 new asteroid fields at fixed positions in expanded territory"""
-	var padding = WORLD_PADDING + 150
+	"""Spawn 4-6 new asteroid fields in the NEWLY EXPANDED territory only"""
+	var padding = WORLD_PADDING + 50
 
 	# Pre-calculate all positions BEFORE any dispatch calls to avoid state corruption
 	var points_to_spawn = []
 
-	# Use phase to determine positions - spawn around gameplay_center (fixed anchor)
-	# Phase 1: left and right sides, Phase 2: top corners, etc.
-	var base_angle = phase * 0.8 + 0.5  # Rotate slightly each phase
+	# Spawn 4-6 asteroids per expansion (random)
+	var num_points = randi_range(4, 6)
 
-	# Calculate spawn distance based on current world extent from center
-	var half_extent = world_size / 2
+	# Use phase to determine base positions - spawn around gameplay_center (fixed anchor)
+	var base_angle = phase * 0.7  # Rotate slightly each phase
 
-	for i in range(2):
-		# Opposite sides of the map, relative to gameplay_center
-		var angle = base_angle + i * PI
-		# Distance from center scales with world size
-		var max_dist = min(half_extent.x, half_extent.y) * 0.8
-		var dist = max_dist * 0.7 + randf_range(0, max_dist * 0.2)
+	# Calculate the NEW expansion ring - between old boundary and new boundary
+	# Current world_size is AFTER expansion, so calculate what the old size was
+	var current_scale = WORLD_SCALE + (0.15 * phase)  # Current scale after this expansion
+	var previous_scale = WORLD_SCALE + (0.15 * (phase - 1))  # Scale before this expansion
+
+	var current_half_extent = (screen_size * current_scale) / 2
+	var previous_half_extent = (screen_size * previous_scale) / 2
+
+	# Spawn in the ring between old and new boundaries
+	var inner_radius = min(previous_half_extent.x, previous_half_extent.y) * 0.9  # Just inside old boundary
+	var outer_radius = min(current_half_extent.x, current_half_extent.y) * 0.9   # Near new boundary
+
+	for i in range(num_points):
+		# Spread evenly around the center with some randomness
+		var angle = base_angle + (float(i) / num_points) * TAU + randf_range(-0.3, 0.3)
+
+		# Distance from center - spawn in the NEW expansion ring only
+		var dist = randf_range(inner_radius, outer_radius)
 
 		var pos = gameplay_center + Vector2(cos(angle), sin(angle)) * dist
 
 		# Clamp to camera-visible bounds (symmetric around gameplay_center)
-		var min_bound = gameplay_center - half_extent + Vector2(padding, padding)
-		var max_bound = gameplay_center + half_extent - Vector2(padding, padding)
+		var min_bound = gameplay_center - current_half_extent + Vector2(padding, padding)
+		var max_bound = gameplay_center + current_half_extent - Vector2(padding, padding)
 		pos.x = clamp(pos.x, min_bound.x, max_bound.x)
 		pos.y = clamp(pos.y, min_bound.y, max_bound.y)
 

@@ -18,6 +18,7 @@ signal crew_arrived(crew_role: String, room_type: ShipTypes.RoomType)
 signal task_completed(crew_role: String, task_type: ShipTypes.TaskType)
 signal room_damaged(room_type: ShipTypes.RoomType, severity: float)
 signal room_repaired(room_type: ShipTypes.RoomType)
+signal eva_repair_completed(waypoint: int)  # Emitted when EVA repairs exterior surface
 
 # ============================================================================
 # SHIP LAYOUT CONSTANTS
@@ -42,13 +43,11 @@ var ship_nav: ShipNavigation  # Graph-based pathfinding
 var eva_ctrl: EVAController   # EVA mechanics controller
 
 # ============================================================================
-# EVA STATE
+# EVA STATE (managed by EVAController)
 # ============================================================================
 
-var eva_active: bool = false
-var eva_crew_role: String = ""
-var eva_tether: Line2D
-var eva_airlock_position: Vector2
+# Note: EVA state is now managed by EVAController (eva_ctrl)
+# These legacy variables are kept for compatibility but not used
 
 # ============================================================================
 # INITIALIZATION
@@ -60,7 +59,6 @@ func _ready() -> void:
 	_setup_navigation_graph()
 	_setup_eva_controller()
 	_create_crew()
-	_create_eva_tether()
 	_position_crew_at_stations()
 
 func _setup_eva_controller() -> void:
@@ -75,6 +73,7 @@ func _setup_eva_controller() -> void:
 	eva_ctrl.eva_completed.connect(_on_eva_completed)
 	eva_ctrl.crew_drifted.connect(_on_crew_drifted)
 	eva_ctrl.rescue_completed.connect(_on_rescue_completed)
+	eva_ctrl.eva_repair_completed.connect(_on_eva_repair_completed)
 
 func _on_eva_started(crew_role: String, target: int) -> void:
 	print("[SHIP] EVA started: %s -> %s" % [crew_role, ShipNavigation.get_exterior_name(target)])
@@ -90,6 +89,12 @@ func _on_rescue_completed(victim_role: String) -> void:
 	print("[SHIP] %s safely rescued" % victim_role.capitalize())
 	flash_all_rooms(Color(0.3, 0.8, 0.3))  # Green success flash
 
+func _on_eva_repair_completed(waypoint: int) -> void:
+	## Forward repair signal to be connected by phase2_integrated_ui
+	print("[SHIP] EVA repair completed at %s" % ShipNavigation.get_exterior_name(waypoint))
+	flash_all_rooms(Color(0.2, 0.9, 0.4))  # Bright green for repair
+	eva_repair_completed.emit(waypoint)
+
 func _setup_navigation_graph() -> void:
 	## Initialize the waypoint-based navigation system
 	ship_nav = ShipNavigation.new()
@@ -100,33 +105,6 @@ func _setup_navigation_graph() -> void:
 		room_positions[room_type] = rooms[room_type].global_position
 
 	ship_nav.setup(layout_center, room_positions)
-
-func _process(delta: float) -> void:
-	# Update EVA tether position
-	if eva_active and eva_tether and eva_crew_role:
-		var crew_member = crew.get(eva_crew_role)
-		if crew_member:
-			eva_tether.set_point_position(1, crew_member.global_position)
-			# Add slight wave to tether for visual interest
-			var time = Time.get_ticks_msec() / 1000.0
-			var wave_offset = Vector2(0, sin(time * 3.0) * 3.0)
-			eva_tether.set_point_position(1, crew_member.global_position + wave_offset)
-
-func _create_eva_tether() -> void:
-	## Create the tether line for EVA operations
-	eva_tether = Line2D.new()
-	eva_tether.name = "EVATether"
-	eva_tether.width = 2.0
-	eva_tether.default_color = Color(0.8, 0.8, 0.2, 0.9)  # Yellow safety tether
-	eva_tether.begin_cap_mode = Line2D.LINE_CAP_ROUND
-	eva_tether.end_cap_mode = Line2D.LINE_CAP_ROUND
-	eva_tether.joint_mode = Line2D.LINE_JOINT_ROUND
-	eva_tether.visible = false
-	eva_tether.z_index = 9  # Behind crew (z_index 10) but above ship
-	add_child(eva_tether)
-
-	# Set airlock position (left side of cargo bay)
-	eva_airlock_position = layout_center + Vector2(-195, 50)  # Near cargo bay, left edge
 
 func _create_navigation_region() -> void:
 	navigation_region = NavigationRegion2D.new()
@@ -390,114 +368,6 @@ func check_eva_drift(crew_role: String) -> bool:
 
 func is_crew_on_eva(crew_role: String) -> bool:
 	return eva_ctrl.is_on_eva(crew_role)
-
-func trigger_eva_visual(crew_role: String) -> void:
-	## Visual effect for EVA - crew member goes "outside" the ship with tether
-	var member = crew.get(crew_role)
-	if not member:
-		return
-
-	eva_active = true
-	eva_crew_role = crew_role
-
-	# Store original z-index to restore later
-	var original_z = member.z_index
-
-	# ========================================
-	# PHASE 1: Crew goes to airlock (cargo bay)
-	# ========================================
-	print("[EVA] %s heading to airlock..." % crew_role.capitalize())
-	send_crew_to_room(crew_role, ShipTypes.RoomType.CARGO_BAY, true)
-	await get_tree().create_timer(1.5).timeout
-
-	# Move to specific airlock position within cargo bay
-	var airlock_tween = create_tween()
-	airlock_tween.tween_property(member, "global_position", eva_airlock_position, 0.8)
-	await airlock_tween.finished
-	await get_tree().create_timer(0.5).timeout  # Suiting up
-
-	# ========================================
-	# PHASE 2: Setup tether and exit airlock
-	# ========================================
-	print("[EVA] Exiting airlock, tether attached...")
-
-	# Initialize tether from airlock to crew position
-	eva_tether.clear_points()
-	eva_tether.add_point(eva_airlock_position)
-	eva_tether.add_point(member.global_position)
-	eva_tether.visible = true
-
-	# Move outside ship (higher z-index to appear on top of hull)
-	member.z_index = 10
-
-	# Change appearance to indicate EVA suit (brighter, blue-white tint)
-	member.sprite.modulate = Color(0.9, 0.95, 1.3)
-
-	# Exit airlock - move outside hull
-	var exit_position = Vector2(layout_center.x - 280, layout_center.y + 30)
-	var exit_tween = create_tween()
-	exit_tween.tween_property(member, "global_position", exit_position, 1.2)
-	await exit_tween.finished
-
-	# ========================================
-	# PHASE 3: Work along hull (inspection/retrieval)
-	# ========================================
-	print("[EVA] Performing EVA work along hull...")
-
-	# EVA work path - moves along the outside of the ship
-	var work_points = [
-		Vector2(layout_center.x - 300, layout_center.y - 30),   # Move up along hull
-		Vector2(layout_center.x - 330, layout_center.y - 60),   # Top inspection point
-		Vector2(layout_center.x - 350, layout_center.y),        # Far point - fully extended tether
-		Vector2(layout_center.x - 330, layout_center.y + 60),   # Bottom inspection point
-		Vector2(layout_center.x - 300, layout_center.y + 30),   # Return toward airlock side
-	]
-
-	for point in work_points:
-		var work_tween = create_tween()
-		work_tween.tween_property(member, "global_position", point, 0.8)
-		await work_tween.finished
-		await get_tree().create_timer(0.3).timeout  # Brief pause at each work point
-
-	# ========================================
-	# PHASE 4: Return through airlock
-	# ========================================
-	print("[EVA] Returning to airlock...")
-
-	# Return to exit position
-	var return_exit_tween = create_tween()
-	return_exit_tween.tween_property(member, "global_position", exit_position, 0.8)
-	await return_exit_tween.finished
-
-	# Return to airlock
-	var return_airlock_tween = create_tween()
-	return_airlock_tween.tween_property(member, "global_position", eva_airlock_position, 1.0)
-	await return_airlock_tween.finished
-
-	# Hide tether
-	eva_tether.visible = false
-	eva_active = false
-	eva_crew_role = ""
-
-	await get_tree().create_timer(0.3).timeout  # Removing suit
-
-	# ========================================
-	# PHASE 5: Return to interior
-	# ========================================
-	print("[EVA] EVA complete, %s returning to station" % crew_role.capitalize())
-
-	# Restore normal appearance and z-index
-	member.z_index = original_z
-	member.sprite.modulate = Color.WHITE
-
-	# Return to cargo bay interior position
-	var cargo_position = rooms[ShipTypes.RoomType.CARGO_BAY].get_work_position()
-	var interior_tween = create_tween()
-	interior_tween.tween_property(member, "global_position", cargo_position, 0.6)
-	await interior_tween.finished
-
-	# Flash room to indicate successful return
-	flash_room(ShipTypes.RoomType.CARGO_BAY, Color(0.3, 0.8, 0.3))
 
 func update_crew_from_state(p2_crew: Array) -> void:
 	## Sync visual crew with Phase2Store crew state

@@ -37,6 +37,12 @@ const SPEED_NAMES = ["PAUSED", "SLOW", "NORMAL", "FAST", "VERY FAST", "TURBO", "
 @onready var guidance_panel: PanelContainer = $MainContainer/GuidancePanel
 @onready var guidance_label: RichTextLabel = $MainContainer/GuidancePanel/GuidanceLabel
 
+# Strategic command buttons
+@onready var go_dark_btn: Button = $MainContainer/StrategicCommandsPanel/GoDarkBtn
+@onready var create_decoy_btn: Button = $MainContainer/StrategicCommandsPanel/CreateDecoyBtn
+@onready var max_evac_btn: Button = $MainContainer/StrategicCommandsPanel/MaxEvacBtn
+@onready var blockade_btn: Button = $MainContainer/StrategicCommandsPanel/BlockadeBtn
+
 # Map panel - visual solar system
 @onready var map_panel: PanelContainer = $MainContainer/GameArea/MapPanel
 var solar_map: FCWSolarMap
@@ -509,6 +515,12 @@ func _connect_signals() -> void:
 	new_game_btn.pressed.connect(_on_new_game)
 	menu_btn.pressed.connect(_on_main_menu)
 
+	# Strategic command buttons
+	go_dark_btn.pressed.connect(_on_go_dark_pressed)
+	create_decoy_btn.pressed.connect(_on_create_decoy_pressed)
+	max_evac_btn.pressed.connect(_on_max_evac_pressed)
+	blockade_btn.pressed.connect(_on_blockade_pressed)
+
 	# Entity route selection from solar map
 	if solar_map:
 		solar_map.entity_destination_selected.connect(_on_entity_destination_selected)
@@ -826,74 +838,376 @@ func _update_guidance() -> void:
 		guidance_label.text = text
 		return
 
-	# ========== WAR GUIDANCE ==========
-	var target = store.get_herald_target()
-	var target_defense = store.get_zone_defense(target)
-	var herald_strength = store.get_herald_strength()
-	var lives = store.get_lives_evacuated()
-	var tier = FCWTypes.get_victory_tier(lives)
-	var earth_zone = store.get_zone(FCWTypes.ZoneId.EARTH)
-	var earth_fleet = earth_zone.assigned_fleet if earth_zone else {}
+	# ========== HERALD TRACKING (Top Priority) ==========
+	text += _build_herald_tracking_text(state)
+	text += "\n"
 
-	# Calculate ships at Earth for evacuation (must match fcw_reducer.gd)
-	var earth_evac_power = 0
-	for ship_type in earth_fleet:
-		var count = earth_fleet.get(ship_type, 0)
-		var ship_power = FCWTypes.get_ship_combat_power(ship_type)
-		# Carriers are 8x more effective at evacuation
-		var multiplier = 8.0 if ship_type == FCWTypes.ShipType.CARRIER else 1.0
-		earth_evac_power += int(count * (ship_power / 10.0) * 100_000 * multiplier)
+	# ========== ZONE SIGNATURES ==========
+	text += _build_signature_list_text(state)
+	text += "\n"
 
-	# ===== STRATEGIC PRIORITY =====
-	text += "[b]STRATEGIC PRIORITY[/b]\n"
-
-	# Determine and show priority
-	var eta = store.estimate_turns_until_earth()
-	if eta <= 2:
-		text += "[color=red][b]EVACUATE NOW![/b][/color] Herald reaches Earth in ~%d weeks!\n" % eta
-		text += "Move ALL ships to Earth for evacuation.\n\n"
-	elif target_defense < herald_strength:
-		text += "[color=orange]%s will fall.[/color] " % FCWTypes.get_zone_name(target)
-		text += "Decide: reinforce to buy time, or retreat?\n\n"
-	elif target_defense < herald_strength * 1.3:
-		text += "[color=yellow]%s defense is marginal.[/color] Consider reinforcing.\n\n" % FCWTypes.get_zone_name(target)
-	else:
-		text += "[color=green]%s should hold.[/color] Focus on building fleet.\n\n" % FCWTypes.get_zone_name(target)
-
-	# ===== THE TRADEOFF =====
-	text += "[b]THE TRADEOFF[/b]\n"
-	text += "[color=cyan]DEFEND[/color] distant zones → Buys TIME for evacuation\n"
-	text += "[color=green]SHIPS AT EARTH[/color] → Evacuate ~%s civilians/week\n\n" % FCWTypes.format_population(earth_evac_power)
-
-	# ===== EVACUATION PROGRESS =====
-	text += "[b]EVACUATION PROGRESS[/b]\n"
-	var next_tier_name = ""
-	var next_tier_goal = 0
-	# Thresholds must match fcw_types.gd get_victory_tier()
-	match tier:
-		FCWTypes.VictoryTier.ANNIHILATION:
-			next_tier_name = "TRAGIC"
-			next_tier_goal = 5_000_000
-		FCWTypes.VictoryTier.TRAGIC:
-			next_tier_name = "PYRRHIC"
-			next_tier_goal = 15_000_000
-		FCWTypes.VictoryTier.PYRRHIC:
-			next_tier_name = "HEROIC"
-			next_tier_goal = 40_000_000
-		FCWTypes.VictoryTier.HEROIC:
-			next_tier_name = "LEGENDARY"
-			next_tier_goal = 80_000_000
-		FCWTypes.VictoryTier.LEGENDARY:
-			next_tier_name = "LEGENDARY+"
-			next_tier_goal = 150_000_000
-
-	var current_tier_name = FCWTypes.get_victory_tier_name(tier)
-	text += "Saved: %s [%s]\n" % [FCWTypes.format_population(lives), current_tier_name]
-	if next_tier_goal > lives:
-		var needed = next_tier_goal - lives
-		text += "Next tier [%s]: need %s more\n" % [next_tier_name, FCWTypes.format_population(needed)]
+	# ========== EVACUATION PROGRESS ==========
+	text += _build_evacuation_progress_text(state)
 
 	guidance_label.text = text
+
+func _build_herald_tracking_text(state: Dictionary) -> String:
+	## Build Herald tracking section with position, target, and ETA
+	var text = "[b]HERALD TRACKING[/b]\n"
+
+	var herald_zone = state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
+	var herald_transit = state.get("herald_transit", {})
+	var zone_signatures = state.get("zone_signatures", {})
+
+	# Current position
+	var zone_name = FCWTypes.get_zone_name(herald_zone)
+	var zone_status = state.zones.get(herald_zone, {}).get("status", FCWTypes.ZoneStatus.CONTROLLED)
+
+	if not herald_transit.is_empty():
+		# Herald is in transit
+		var to_zone = herald_transit.get("to_zone", herald_zone)
+		var turns_remaining = herald_transit.get("turns_remaining", 0)
+		var to_name = FCWTypes.get_zone_name(to_zone)
+		text += "Position: [color=orange]EN ROUTE[/color] → %s\n" % to_name
+		text += "ETA: [color=yellow]%d days[/color]\n" % (turns_remaining * 7)
+	elif zone_status == FCWTypes.ZoneStatus.UNDER_ATTACK:
+		text += "Position: [color=red]ATTACKING %s[/color]\n" % zone_name.to_upper()
+	else:
+		text += "Position: %s\n" % zone_name
+
+	# Next target prediction
+	var next_target = _predict_herald_next_target(state)
+	if next_target.zone_id >= 0:
+		var next_name = FCWTypes.get_zone_name(next_target.zone_id)
+		var next_sig = zone_signatures.get(next_target.zone_id, 0.0)
+		var sig_percent = int(next_sig * 100)
+
+		if next_target.is_skip:
+			text += "Next: [color=red]%s (sig: %d%%) - SKIP![/color]\n" % [next_name, sig_percent]
+		elif next_sig >= FCWTypes.HERALD_MIN_SIG_TO_ATTRACT:
+			text += "Next: [color=orange]%s (sig: %d%%) - DRAWN[/color]\n" % [next_name, sig_percent]
+		else:
+			text += "Next: [color=gray]%s (default path)[/color]\n" % next_name
+
+		# Show ETA to Earth
+		var eta_to_earth = _calculate_eta_to_earth(state, herald_zone)
+		if eta_to_earth > 0:
+			var eta_color = "red" if eta_to_earth <= 14 else ("orange" if eta_to_earth <= 28 else "yellow")
+			text += "Earth ETA: [color=%s]%d days[/color]\n" % [eta_color, eta_to_earth]
+
+	return text
+
+func _predict_herald_next_target(state: Dictionary) -> Dictionary:
+	## Predict where Herald will go next based on signatures
+	var herald_zone = state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
+	var zone_signatures = state.get("zone_signatures", {})
+
+	var adjacent = FCWTypes.get_zone_adjacent(herald_zone)
+	var skip_targets = FCWTypes.get_zone_skip_targets(herald_zone)
+	var default_next = FCWTypes.get_zone_default_next(herald_zone)
+
+	# Check for skip targets first (high signature required)
+	for zone_id in skip_targets:
+		var zone_data = state.zones.get(zone_id, {})
+		if zone_data.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+			continue
+		var sig = zone_signatures.get(zone_id, 0.0)
+		if sig >= FCWTypes.HERALD_SKIP_THRESHOLD:
+			return {"zone_id": zone_id, "is_skip": true}
+
+	# Find highest signature adjacent zone
+	var highest_sig = -1.0
+	var best_zone = -1
+	for zone_id in adjacent:
+		var zone_data = state.zones.get(zone_id, {})
+		if zone_data.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+			continue
+		var sig = zone_signatures.get(zone_id, 0.0)
+		if sig > highest_sig:
+			highest_sig = sig
+			best_zone = zone_id
+
+	# If no strong signal, use default
+	if highest_sig < FCWTypes.HERALD_MIN_SIG_TO_ATTRACT and default_next >= 0:
+		var zone_data = state.zones.get(default_next, {})
+		if zone_data.get("status", 0) != FCWTypes.ZoneStatus.FALLEN:
+			return {"zone_id": default_next, "is_skip": false}
+
+	return {"zone_id": best_zone, "is_skip": false}
+
+func _calculate_eta_to_earth(state: Dictionary, from_zone: int) -> int:
+	## Calculate estimated days until Herald reaches Earth from given zone
+	if from_zone == FCWTypes.ZoneId.EARTH:
+		return 0
+
+	# Simple path calculation following default route
+	var current = from_zone
+	var total_weeks = 0
+	var visited = {}
+
+	while current != FCWTypes.ZoneId.EARTH and total_weeks < 100:
+		if visited.has(current):
+			break
+		visited[current] = true
+
+		var next = FCWTypes.get_zone_default_next(current)
+		if next < 0:
+			break
+
+		total_weeks += FCWTypes.get_travel_time(current, next)
+		total_weeks += 1  # Attack time
+		current = next
+
+	return total_weeks * 7
+
+func _build_signature_list_text(state: Dictionary) -> String:
+	## Build zone signature list for Herald targeting awareness
+	var text = "[b]ZONE SIGNATURES[/b]\n"
+	var zone_signatures = state.get("zone_signatures", {})
+	var herald_zone = state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
+
+	# Get reachable zones from Herald's position
+	var reachable = FCWTypes.get_all_reachable_zones(herald_zone)
+
+	# Sort zones by signature (highest first)
+	var zone_list = []
+	for zone_id in FCWTypes.ZoneId.values():
+		var zone_data = state.zones.get(zone_id, {})
+		if zone_data.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+			continue
+		zone_list.append({"id": zone_id, "sig": zone_signatures.get(zone_id, 0.0)})
+
+	zone_list.sort_custom(func(a, b): return a.sig > b.sig)
+
+	for zone_info in zone_list:
+		var zone_id = zone_info.id
+		var sig = zone_info.sig
+		var zone_name = FCWTypes.get_zone_name(zone_id)
+
+		# Build visual bar (10 chars)
+		var bar_filled = int(sig * 10)
+		var bar_empty = 10 - bar_filled
+		var bar_str = ""
+		for _i in range(bar_filled):
+			bar_str += "█"
+		for _i in range(bar_empty):
+			bar_str += "░"
+
+		# Color based on danger level
+		var color = _get_signature_bbcode_color(sig)
+		var percent = "%2d%%" % int(sig * 100)
+
+		# Warning indicators
+		var warning = ""
+		if zone_id in reachable:
+			if sig >= FCWTypes.HERALD_SKIP_THRESHOLD:
+				warning = " [color=red]⚠ SKIP TARGET[/color]"
+			elif sig >= FCWTypes.HERALD_MIN_SIG_TO_ATTRACT:
+				warning = " [color=orange]← DRAWING[/color]"
+
+		text += "[color=%s]%s[/color] %s %s%s\n" % [color, zone_name.substr(0, 8).rpad(8), bar_str, percent, warning]
+
+	return text
+
+func _get_signature_bbcode_color(sig: float) -> String:
+	## Get BBCode color name for signature level
+	if sig >= 0.6:
+		return "red"
+	elif sig >= 0.4:
+		return "orange"
+	elif sig >= 0.2:
+		return "yellow"
+	elif sig >= 0.1:
+		return "#99cc66"  # Yellow-green
+	else:
+		return "#66aa66"  # Green
+
+func _build_evacuation_progress_text(state: Dictionary) -> String:
+	## Build evacuation progress section with tier advancement
+	var text = "[b]EVACUATION[/b]\n"
+
+	var lives = state.get("lives_evacuated", 0)
+	var tier = FCWTypes.get_victory_tier(lives)
+	var tier_name = FCWTypes.get_victory_tier_name(tier)
+
+	# Tier thresholds
+	var tier_thresholds = {
+		FCWTypes.VictoryTier.ANNIHILATION: {"next": "TRAGIC", "goal": 5_000_000},
+		FCWTypes.VictoryTier.TRAGIC: {"next": "PYRRHIC", "goal": 15_000_000},
+		FCWTypes.VictoryTier.PYRRHIC: {"next": "HEROIC", "goal": 40_000_000},
+		FCWTypes.VictoryTier.HEROIC: {"next": "LEGENDARY", "goal": 80_000_000},
+		FCWTypes.VictoryTier.LEGENDARY: {"next": "LEGENDARY+", "goal": 150_000_000},
+	}
+
+	# Get tier color
+	var tier_color = "gray"
+	match tier:
+		FCWTypes.VictoryTier.LEGENDARY: tier_color = "#cc66ff"  # Purple
+		FCWTypes.VictoryTier.HEROIC: tier_color = "#ffcc00"     # Gold
+		FCWTypes.VictoryTier.PYRRHIC: tier_color = "#cccccc"    # Silver
+		FCWTypes.VictoryTier.TRAGIC: tier_color = "#cc9966"     # Bronze
+		_: tier_color = "#666666"
+
+	text += "Saved: [color=%s]%s[/color] [[color=%s]%s[/color]]\n" % [
+		tier_color, FCWTypes.format_population(lives), tier_color, tier_name]
+
+	# Progress to next tier
+	var tier_info = tier_thresholds.get(tier, {})
+	if not tier_info.is_empty():
+		var goal = tier_info.goal
+		var next_name = tier_info.next
+		var needed = goal - lives
+		var progress = float(lives) / float(goal)
+
+		# Build progress bar (15 chars)
+		var bar_filled = int(progress * 15)
+		var bar_empty = 15 - bar_filled
+		var bar_str = ""
+		for _i in range(bar_filled):
+			bar_str += "█"
+		for _i in range(bar_empty):
+			bar_str += "░"
+
+		text += "[%s] → %s\n" % [bar_str, next_name]
+		text += "Need: %s more\n" % FCWTypes.format_population(needed)
+
+	return text
+
+# ============================================================================
+# STRATEGIC COMMANDS - Quick action buttons for common strategies
+# ============================================================================
+
+func _on_go_dark_pressed() -> void:
+	## GO DARK: Cancel all fleet movement to minimize signatures
+	## Strategy: Reduce detection by halting all burns
+	var state = store.get_state()
+	var fleets_in_transit = state.get("fleets_in_transit", [])
+
+	if fleets_in_transit.is_empty():
+		_add_log_entry("GO DARK: No fleets in transit to cancel.")
+		return
+
+	# Cancel all transits by recalling ships
+	# Note: This is simplified - in reality we'd need a proper cancel action
+	var cancelled = 0
+	for transit in fleets_in_transit:
+		# Ships in transit can't be instantly recalled, but we log the order
+		cancelled += transit.get("count", 1)
+
+	_add_log_entry("[color=cyan]GO DARK ORDER ISSUED[/color]: Fleet movement halted. Signatures will decay over time.")
+	_add_log_entry("Note: Ships currently in transit cannot be recalled mid-flight.")
+	_sync_ui()
+
+func _on_create_decoy_pressed() -> void:
+	## CREATE DECOY: Send frigates to Saturn to raise its signature
+	## Strategy: Draw Herald away from Earth/Mars by creating a false target
+	var state = store.get_state()
+	var free_frigates = store.get_free_ships(FCWTypes.ShipType.FRIGATE)
+
+	if free_frigates < 3:
+		_add_log_entry("DECOY FAILED: Need at least 3 free frigates (have %d)." % free_frigates)
+		return
+
+	# Check if Saturn is still controlled
+	var saturn_zone = state.zones.get(FCWTypes.ZoneId.SATURN, {})
+	if saturn_zone.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+		_add_log_entry("DECOY FAILED: Saturn has fallen.")
+		return
+
+	# Send 3 frigates to Saturn
+	store.dispatch_assign_fleet(FCWTypes.ZoneId.SATURN, FCWTypes.ShipType.FRIGATE, 3)
+
+	_add_log_entry("[color=orange]DECOY ORDER ISSUED[/color]: 3 Frigates burning to Saturn.")
+	_add_log_entry("This will raise Saturn's signature and may draw the Herald there.")
+	_sync_ui()
+
+func _on_max_evac_pressed() -> void:
+	## MAX EVAC: Move all available carriers to Earth for maximum evacuation
+	## Strategy: Prioritize saving lives when Herald is close
+	var state = store.get_state()
+
+	# Check if Earth is still controlled
+	var earth_zone = state.zones.get(FCWTypes.ZoneId.EARTH, {})
+	if earth_zone.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+		_add_log_entry("MAX EVAC FAILED: Earth has fallen.")
+		return
+
+	# Find carriers not at Earth
+	var moved_carriers = 0
+	for zone_id in FCWTypes.ZoneId.values():
+		if zone_id == FCWTypes.ZoneId.EARTH:
+			continue
+
+		var zone = state.zones.get(zone_id, {})
+		if zone.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+			continue
+
+		var assigned = zone.get("assigned_fleet", {})
+		var carriers = assigned.get(FCWTypes.ShipType.CARRIER, 0)
+		if carriers > 0:
+			# Recall to reserve (-1) then assign to Earth
+			store.dispatch_recall_fleet(zone_id, -1, FCWTypes.ShipType.CARRIER, carriers)
+			store.dispatch_assign_fleet(FCWTypes.ZoneId.EARTH, FCWTypes.ShipType.CARRIER, carriers)
+			moved_carriers += carriers
+
+	if moved_carriers > 0:
+		_add_log_entry("[color=green]MAX EVAC ORDER ISSUED[/color]: %d Carriers redirecting to Earth." % moved_carriers)
+		_add_log_entry("Evacuation capacity maximized. Save as many as possible.")
+	else:
+		var earth_carriers = earth_zone.get("assigned_fleet", {}).get(FCWTypes.ShipType.CARRIER, 0)
+		_add_log_entry("MAX EVAC: All carriers already at Earth (%d stationed)." % earth_carriers)
+
+	_sync_ui()
+
+func _on_blockade_pressed() -> void:
+	## BLOCKADE: Concentrate all combat ships at Mars for maximum defense
+	## Strategy: Hold Mars as long as possible to buy evacuation time
+	var state = store.get_state()
+
+	# Check if Mars is still controlled
+	var mars_zone = state.zones.get(FCWTypes.ZoneId.MARS, {})
+	if mars_zone.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+		_add_log_entry("BLOCKADE FAILED: Mars has fallen.")
+		return
+
+	# Move all combat ships (Cruisers, Dreadnoughts) to Mars
+	var moved_ships = 0
+	var ship_types_to_move = [FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.DREADNOUGHT, FCWTypes.ShipType.FRIGATE]
+
+	for zone_id in FCWTypes.ZoneId.values():
+		if zone_id == FCWTypes.ZoneId.MARS:
+			continue
+
+		var zone = state.zones.get(zone_id, {})
+		if zone.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+			continue
+
+		var assigned = zone.get("assigned_fleet", {})
+		for ship_type in ship_types_to_move:
+			var count = assigned.get(ship_type, 0)
+			if count > 0:
+				# Recall to reserve (-1) then assign to Mars
+				store.dispatch_recall_fleet(zone_id, -1, ship_type, count)
+				store.dispatch_assign_fleet(FCWTypes.ZoneId.MARS, ship_type, count)
+				moved_ships += count
+
+	if moved_ships > 0:
+		_add_log_entry("[color=red]BLOCKADE ORDER ISSUED[/color]: %d ships converging on Mars." % moved_ships)
+		_add_log_entry("Mars defense maximized. This is our Thermopylae.")
+	else:
+		var mars_defense = store.get_zone_defense(FCWTypes.ZoneId.MARS)
+		_add_log_entry("BLOCKADE: All combat ships already at Mars (DEF: %d)." % mars_defense)
+
+	_sync_ui()
+
+func _add_log_entry(message: String) -> void:
+	## Add a message to the event log
+	var state = store.get_state()
+	var turn = state.get("turn", 1)
+	# Direct log update without going through store (visual feedback only)
+	var log_text = "[color=gray]W%d:[/color] %s" % [turn, message]
+	if event_log:
+		event_log.text = log_text + "\n" + event_log.text
 
 # ============================================================================
 # ACTIONS
@@ -1081,85 +1395,125 @@ func _run_ai_turn() -> void:
 
 func _ai_early_game(state: Dictionary) -> void:
 	## EARLY PHASE: Herald at Kuiper/outer zones
-	## Strategy: Build fleet aggressively, minimize activity signature
-	var herald_strength = state.get("herald_strength", 100)
+	## STRATEGY: Build carriers (for evacuation) + create decoy at Saturn
+	## Goal: Lure Herald toward Saturn, away from default Jupiter path
+	var herald_zone = state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
 
-	# Build ships using ranked evaluation
-	_execute_ranked_build_actions(state)
+	# Build carriers first (8x evacuation multiplier!)
+	_ai_build_priority_ships(state, [FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.CRUISER])
 
-	# Minimal fleet movement to avoid detection
-	# Only reinforce if zone is about to fall
-	var herald_target = state.get("herald_attack_target", FCWTypes.ZoneId.KUIPER)
-	var target_defense = store.get_zone_defense(herald_target)
-	var defense_ratio = float(target_defense) / maxf(herald_strength, 1)
-
-	if defense_ratio < 0.5:  # Only emergency response in early game
-		_ai_emergency_response(herald_target, herald_strength - target_defense)
+	# Create decoy at Saturn to lure Herald away from Jupiter→Mars path
+	# Send a few frigates to burn visibly (high signature)
+	if herald_zone == FCWTypes.ZoneId.KUIPER:
+		var available = FCWReducer.get_available_ships(state)
+		var frigates = available.get(FCWTypes.ShipType.FRIGATE, 0)
+		if frigates >= 3:
+			# Send decoy fleet to Saturn (creates burn signature)
+			store.dispatch_assign_fleet(FCWTypes.ZoneId.SATURN, FCWTypes.ShipType.FRIGATE, 3)
+			_log_ai_action("DECOY: Sending frigates to Saturn to create detection signature")
 
 func _ai_mid_game(state: Dictionary) -> void:
-	## MID PHASE: Herald at Jupiter/Asteroid Belt
-	## Strategy: Mars blockade + start evacuation, balanced defense
-	var herald_strength = state.get("herald_strength", 100)
-	var herald_target = state.get("herald_attack_target", FCWTypes.ZoneId.JUPITER)
+	## MID PHASE: Herald at Jupiter/Saturn/Asteroid Belt
+	## STRATEGY: Maintain decoy at Saturn, keep Mars DARK, start quiet evac
+	## Goal: Herald follows decoy to Saturn while we evacuate quietly
+	var herald_zone = state.get("herald_current_zone", FCWTypes.ZoneId.JUPITER)
+	var sigs = state.get("zone_signatures", {})
+	var mars_sig = sigs.get(FCWTypes.ZoneId.MARS, 0.0)
+	var saturn_sig = sigs.get(FCWTypes.ZoneId.SATURN, 0.0)
 
-	# Continue building
-	_execute_ranked_build_actions(state)
+	# Keep building carriers
+	_ai_build_priority_ships(state, [FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.CRUISER])
 
-	# Establish Mars blockade
-	if herald_target in [FCWTypes.ZoneId.JUPITER, FCWTypes.ZoneId.ASTEROID_BELT, FCWTypes.ZoneId.SATURN]:
-		_ai_establish_blockade(FCWTypes.ZoneId.MARS)
+	# Reinforce Saturn decoy if signature is dropping
+	if saturn_sig < 0.3 and herald_zone != FCWTypes.ZoneId.SATURN:
+		var available = FCWReducer.get_available_ships(state)
+		var frigates = available.get(FCWTypes.ShipType.FRIGATE, 0)
+		if frigates >= 2:
+			store.dispatch_assign_fleet(FCWTypes.ZoneId.SATURN, FCWTypes.ShipType.FRIGATE, 2)
+			_log_ai_action("DECOY: Reinforcing Saturn signature (%.0f%% → target 30%%+)" % [saturn_sig * 100])
 
-	# Standard defense response
-	var target_defense = store.get_zone_defense(herald_target)
-	var defense_ratio = float(target_defense) / maxf(herald_strength, 1)
+	# WARNING: If Mars signature is rising, we need to go dark there
+	if mars_sig > 0.2:
+		_log_ai_action("WARNING: Mars signature at %.0f%% - reducing activity!" % [mars_sig * 100])
+		# Don't send anything to Mars - let it go dark
 
-	if defense_ratio < 0.8 and herald_target != FCWTypes.ZoneId.EARTH:
-		_ai_emergency_response(herald_target, herald_strength - target_defense)
-	elif defense_ratio < 1.2 and herald_target != FCWTypes.ZoneId.EARTH:
-		_ai_reinforce_zone(herald_target, int(herald_strength * 1.3) - target_defense)
-
-	# Start evacuation preparations
+	# Start quiet evacuation (carriers at Earth evacuate automatically)
 	_ai_evacuation_fleet()
+
+	# Only defend if Herald is at our decoy (sacrifice it to buy time)
+	if herald_zone == FCWTypes.ZoneId.SATURN:
+		_log_ai_action("SACRIFICE: Herald attacking Saturn decoy - buying time for evacuation")
 
 func _ai_late_game(state: Dictionary) -> void:
-	## LATE PHASE: Herald at Mars/inner zones
-	## Strategy: Maximize evacuation, sacrifice outer zones
+	## LATE PHASE: Herald at Mars or approaching Earth
+	## STRATEGY: Maximum evacuation, sacrifice outer zones, blockade Mars
+	## Goal: Delay Herald at Mars while transports escape
+	var herald_zone = state.get("herald_current_zone", FCWTypes.ZoneId.MARS)
 	var herald_strength = state.get("herald_strength", 100)
-	var herald_target = state.get("herald_attack_target", FCWTypes.ZoneId.MARS)
 
-	# Still build if possible (every ship matters)
-	_execute_ranked_build_actions(state)
+	# Still build carriers if possible
+	_ai_build_priority_ships(state, [FCWTypes.ShipType.CARRIER])
 
-	# Primary focus: evacuation
+	# Maximum evacuation effort
 	_ai_evacuation_fleet()
 
-	# Defense is secondary - only if Earth is directly threatened
-	if herald_target == FCWTypes.ZoneId.EARTH:
-		var earth_defense = store.get_zone_defense(FCWTypes.ZoneId.EARTH)
-		if earth_defense < herald_strength:
-			_ai_emergency_response(FCWTypes.ZoneId.EARTH, herald_strength - earth_defense)
+	# If Herald is at Mars, establish blockade to buy time
+	if herald_zone == FCWTypes.ZoneId.MARS:
+		var mars_defense = store.get_zone_defense(FCWTypes.ZoneId.MARS)
+		if mars_defense < herald_strength:
+			# Send combat ships to Mars (this will draw Herald but buys evac time)
+			_ai_establish_blockade(FCWTypes.ZoneId.MARS)
+			_log_ai_action("BLOCKADE: Reinforcing Mars to delay Herald - every day counts!")
 
-	# Redistribute from all zones to Earth
-	_ai_redistribute_fleet(herald_target)
+	# Recall all ships from fallen/outer zones to Earth
+	_ai_redistribute_fleet(herald_zone)
 
 func _ai_endgame(state: Dictionary) -> void:
 	## ENDGAME PHASE: Earth directly threatened
-	## Strategy: Pure evacuation, all ships protect transports
+	## STRATEGY: Pure evacuation, every transport counts
+	## Goal: Get as many souls out as possible before the end
 	var herald_strength = state.get("herald_strength", 100)
 
-	# No more building - focus resources on evacuation
-	# (Building takes time we don't have)
+	_log_ai_action("ENDGAME: Earth under threat - maximum evacuation priority!")
 
 	# All carriers to Earth for evacuation
 	_ai_evacuation_fleet()
 
-	# All combat ships to Earth for transport protection
+	# Bring all remaining ships to protect transports
 	var earth_defense = store.get_zone_defense(FCWTypes.ZoneId.EARTH)
-	if earth_defense < herald_strength * 1.5:
+	if earth_defense < herald_strength:
 		_ai_emergency_response(FCWTypes.ZoneId.EARTH, herald_strength - earth_defense)
 
-	# Pull from everywhere
+	# Pull everything from everywhere
 	_ai_redistribute_fleet(FCWTypes.ZoneId.EARTH)
+
+func _ai_build_priority_ships(state: Dictionary, priority_types: Array) -> void:
+	## Build ships in priority order (carriers first for evacuation!)
+	var capacity = store.get_production_capacity()
+	if capacity <= 0:
+		return
+
+	for ship_type in priority_types:
+		if capacity <= 0:
+			break
+		if FCWReducer.can_afford_ship(state, ship_type):
+			store.dispatch_build_ship(ship_type)
+			capacity -= 1
+			state = store.get_state()  # Refresh state after build
+
+	# Fill remaining capacity with whatever we can afford
+	if capacity > 0:
+		_execute_ranked_build_actions(state)
+
+func _log_ai_action(message: String) -> void:
+	## Log AI strategic decisions for player visibility
+	var state = store.get_state()
+	store._state.event_log.append(FCWTypes.create_log_entry(
+		state.turn,
+		"[AI] " + message,
+		false
+	))
+	store.state_changed.emit(store._state)
 
 func _execute_ranked_build_actions(state: Dictionary) -> void:
 	## Use action enumeration + evaluation for ship building

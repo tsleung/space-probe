@@ -648,6 +648,74 @@ BORING → CHECKING → ENGAGED → PANICKED
 
 ---
 
+## EVA Event Balance Analysis
+
+EVA events are designed so that **EVA is the dominant strategy**. Non-EVA options have severe consequences that make them clearly inferior.
+
+### ENGINE NOZZLE DEBRIS
+
+| Option | Expected Outcomes | Net Value |
+|--------|-------------------|-----------|
+| **EVA to clear debris** | 70%: +5 morale, 15%: +8 morale + drift, 15%: -15 health | **+2.5 morale avg** |
+| Remote burn (non-EVA) | 25%: -15 fuel, 45%: -20 fuel/-10 morale, 30%: -25 fuel/-15 morale/-10 health | **-20 fuel, -9 morale, -3 health avg** |
+| [ENGINEER] Precision EVA | 90%: +10 morale, 10%: drift only | **+9 morale avg** |
+
+**Dominance Margin:** EVA gives +2.5 morale vs non-EVA gives -9 morale = **11.5 morale swing**
+Plus non-EVA loses 20 fuel and 3 health on average.
+
+### ANTENNA MISALIGNMENT
+
+| Option | Expected Outcomes | Net Value |
+|--------|-------------------|-----------|
+| **EVA to realign** | 65%: +8 morale, 20%: drift, 15%: partial | **+5.2 morale avg** |
+| Backup antenna (non-EVA) | 20%: -10 morale, 40%: -20 morale, 40%: -30 morale/-5 health | **-22 morale, -2 health avg** |
+| [SCIENTIST] Calibrated EVA | 95%: +12 morale, 5%: drift | **+11.4 morale avg** |
+
+**Dominance Margin:** EVA gives +5.2 morale vs non-EVA gives -22 morale = **27.2 morale swing**
+Plus non-EVA risks communications blackout.
+
+### SOLAR PANEL DAMAGE
+
+| Option | Expected Outcomes | Net Value |
+|--------|-------------------|-----------|
+| **EVA to repair** | 60%: +5 power/+5 morale, 20%: +3 power/drift, 20%: +2 power | **+4 power, +3 morale avg** |
+| Reroute (non-EVA) | 15%: -8 power, 45%: -15 power/-10 morale, 40%: -20 power/-15 morale | **-16 power, -10.5 morale avg** |
+| [ENGINEER] Precision EVA | 85%: +8 power/+8 morale, 15%: +5 power/drift | **+7.55 power, +6.8 morale avg** |
+
+**Dominance Margin:** EVA gives +4 power vs non-EVA gives -16 power = **20 power swing**
+Plus non-EVA loses 10.5 morale on average.
+
+### EVA Risk Analysis
+
+EVA has drift risk (15% chance after exterior work):
+
+```
+Drift Scenarios:
+├── Another crew available (60% of cases)
+│   └── Fast rescue (25 px/s) - minimal time loss
+└── No rescue available (40% of cases)
+    └── Slow self-rescue (8 px/s) - extended tension
+
+Rescue Time Impact:
+- Fast rescue: ~4-6 seconds total delay
+- Self-rescue: ~12-20 seconds total delay
+- Neither causes resource loss directly
+```
+
+### EVA Balance Conclusion
+
+**EVA is mathematically dominant because:**
+
+1. **Positive expected value:** EVA options give +2.5 to +11.4 morale/power
+2. **Negative expected value for non-EVA:** Non-EVA options give -9 to -22 morale, lose fuel/power
+3. **Swing magnitude:** 11-27 point swing between EVA and non-EVA
+4. **Drift is recoverable:** 15% drift chance has no permanent cost, just time
+5. **Blue EVA options are best:** Specialist bonuses give even better outcomes
+
+**AI Preference:** AI scores EVA +50, blue EVA +60, non-EVA -40. This ensures AI always chooses EVA.
+
+---
+
 ## Balance Validation Checklist
 
 Before shipping, verify:
@@ -661,3 +729,5 @@ Before shipping, verify:
 - [ ] Heat mechanic provides 3+ hours of warning
 - [ ] No instant-death scenarios without warning
 - [ ] AI can complete journey on Normal difficulty 80% of time
+- [ ] EVA options are always dominant over non-EVA alternatives
+- [ ] EVA drift risk is recoverable without permanent loss

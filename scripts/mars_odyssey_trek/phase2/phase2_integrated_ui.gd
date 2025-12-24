@@ -26,11 +26,24 @@ func _ready() -> void:
 		controller.setup_ship_systems(ship_systems, crisis_controller, effects, ship_view)
 		print("[UI] Ship systems wired to controller")
 
+	# Connect EVA signals from store to ship_view
+	if store and ship_view:
+		store.eva_triggered.connect(_on_eva_triggered)
+		store.eva_drift_triggered.connect(_on_eva_drift_triggered)
+		store.crew_gather.connect(_on_crew_gather)
+		print("[UI] EVA and crew signals connected")
+
+	# Connect EVA repair signal to update exterior surfaces
+	if ship_view and ship_systems:
+		ship_view.eva_repair_completed.connect(_on_eva_repair_completed)
+		print("[UI] EVA repair signal connected")
+
 	# Connect speed buttons
 	if speed_controls:
 		var slow_btn = speed_controls.get_node_or_null("Slow")
 		var normal_btn = speed_controls.get_node_or_null("Normal")
 		var fast_btn = speed_controls.get_node_or_null("Fast")
+		var ludicrous_btn = speed_controls.get_node_or_null("Ludicrous")
 		var pause_btn = speed_controls.get_node_or_null("Pause")
 		var back_btn = speed_controls.get_node_or_null("Back")
 
@@ -40,6 +53,8 @@ func _ready() -> void:
 			normal_btn.pressed.connect(_on_normal)
 		if fast_btn:
 			fast_btn.pressed.connect(_on_fast)
+		if ludicrous_btn:
+			ludicrous_btn.pressed.connect(_on_ludicrous)
 		if pause_btn:
 			pause_btn.pressed.connect(_on_pause)
 		if back_btn:
@@ -63,6 +78,12 @@ func _on_fast() -> void:
 	if hud:
 		hud.update_speed_display("Fast")
 
+func _on_ludicrous() -> void:
+	if controller:
+		controller.set_speed_ludicrous()
+	if hud:
+		hud.update_speed_display("LUDICROUS")
+
 func _on_pause() -> void:
 	if controller:
 		controller.toggle_pause()
@@ -70,3 +91,53 @@ func _on_pause() -> void:
 
 func _on_back() -> void:
 	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")
+
+# ============================================================================
+# EVA EVENT HANDLERS
+# ============================================================================
+
+func _on_eva_triggered(crew_role: String, target: String) -> void:
+	## Trigger visual EVA when event resolves
+	if ship_view:
+		# Map target string to waypoint
+		var ShipNav = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_navigation.gd")
+		var waypoint = ShipNav.Waypoint.EXTERIOR_ENGINE
+		match target:
+			"engine": waypoint = ShipNav.Waypoint.EXTERIOR_ENGINE
+			"antenna": waypoint = ShipNav.Waypoint.EXTERIOR_ANTENNA
+			"solar": waypoint = ShipNav.Waypoint.EXTERIOR_SOLAR
+		ship_view.start_eva(crew_role, waypoint)
+		print("[EVA] Visual EVA started: %s -> %s" % [crew_role, target])
+
+func _on_eva_drift_triggered(crew_role: String) -> void:
+	## Trigger drift when crew member flies off during EVA
+	if ship_view and ship_view.eva_ctrl:
+		ship_view.eva_ctrl._start_drift(crew_role)
+		print("[EVA] %s drifted on tether!" % crew_role.capitalize())
+
+func _on_crew_gather(location: String) -> void:
+	## Move all crew to gather at a location (for events like movie night)
+	if not ship_view:
+		return
+
+	var ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
+	var room_type = ShipTypes.RoomType.QUARTERS  # Default
+
+	match location:
+		"quarters": room_type = ShipTypes.RoomType.QUARTERS
+		"cargo_bay", "cargo": room_type = ShipTypes.RoomType.CARGO_BAY
+		"bridge": room_type = ShipTypes.RoomType.BRIDGE
+		"engineering": room_type = ShipTypes.RoomType.ENGINEERING
+		"medical": room_type = ShipTypes.RoomType.MEDICAL
+
+	print("[CREW] All crew gathering at %s" % location)
+
+	# Send all crew to the gathering location
+	for role in ship_view.crew:
+		ship_view.send_crew_to_room(role, room_type, false)
+
+func _on_eva_repair_completed(waypoint: int) -> void:
+	## Repair the exterior surface when EVA completes
+	if ship_systems:
+		ship_systems.repair_exterior_by_waypoint(waypoint)
+		print("[UI] Exterior surface repaired via EVA")

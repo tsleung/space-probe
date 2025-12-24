@@ -444,7 +444,7 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 
 	updates["colonists"] = pop_result.colonists
 
-	# Log births
+	# Log births (natural)
 	for birth in pop_result.births:
 		new_log.append({
 			"year": new_year,
@@ -467,6 +467,71 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 			"message": "%s has come of age and joined the workforce." % adult.display_name,
 			"log_type": "milestone"
 		})
+
+	# === ARTIFICIAL BIRTHS (Colony Gestation Program) ===
+	var birth_rand_values = random_values.slice(rand_idx, rand_idx + 50)
+	rand_idx += 50
+	var artificial_birth_result = _MCSPopulation.calculate_artificial_births(
+		updates["colonists"],
+		buildings,
+		resources,
+		new_year,
+		birth_rand_values
+	)
+
+	# Add artificial births to colonists
+	if artificial_birth_result.births.size() > 0:
+		updates["colonists"] = updates["colonists"] + artificial_birth_result.births
+		# Consume medicine for births
+		var medicine_used = artificial_birth_result.medicine_consumed
+		var updated_resources = resources.duplicate(true)
+		updated_resources["medicine"] = maxf(0, updated_resources.get("medicine", 0) - medicine_used)
+		resources = updated_resources
+
+		# Log artificial births
+		for birth in artificial_birth_result.births:
+			new_log.append({
+				"year": new_year,
+				"message": "%s was born via colony gestation program!" % birth.get("display_name", "Baby"),
+				"log_type": "birth"
+			})
+
+	# === IMMIGRATION (Starport/Space Station) ===
+	var immigration_rand_values = random_values.slice(rand_idx, rand_idx + 100)
+	rand_idx += 100
+	var immigration_result = _MCSPopulation.calculate_immigration(
+		buildings,
+		resources,
+		new_year,
+		immigration_rand_values
+	)
+
+	# Add immigrants to colonists
+	if immigration_result.immigrants.size() > 0:
+		updates["colonists"] = updates["colonists"] + immigration_result.immigrants
+
+		# Log immigration batch (summarize if many)
+		var immigrant_count = immigration_result.immigrants.size()
+		if immigrant_count == 1:
+			var first_immigrant = immigration_result.immigrants[0]
+			new_log.append({
+				"year": new_year,
+				"message": "%s arrived from Earth!" % first_immigrant.get("display_name", "Colonist"),
+				"log_type": "immigration"
+			})
+		elif immigrant_count <= 5:
+			for immigrant in immigration_result.immigrants:
+				new_log.append({
+					"year": new_year,
+					"message": "%s arrived from Earth!" % immigrant.get("display_name", "Colonist"),
+					"log_type": "immigration"
+				})
+		else:
+			new_log.append({
+				"year": new_year,
+				"message": "%d colonists arrived from Earth!" % immigrant_count,
+				"log_type": "immigration"
+			})
 
 	# === ECONOMY PHASE ===
 	var balance = state.get("balance", {})

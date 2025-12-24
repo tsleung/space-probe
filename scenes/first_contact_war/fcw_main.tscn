@@ -52,6 +52,37 @@ layout_mode = 2
 bbcode_enabled = true
 text = "Welcome to First Contact War..."
 
+[node name="StrategicCommandsPanel" type="HBoxContainer" parent="MainContainer"]
+layout_mode = 2
+
+[node name="CommandsLabel" type="Label" parent="MainContainer/StrategicCommandsPanel"]
+layout_mode = 2
+text = "ORDERS:"
+
+[node name="GoDarkBtn" type="Button" parent="MainContainer/StrategicCommandsPanel"]
+layout_mode = 2
+text = "GO DARK"
+tooltip_text = "Halt all ship movement to minimize detection signatures"
+
+[node name="CreateDecoyBtn" type="Button" parent="MainContainer/StrategicCommandsPanel"]
+layout_mode = 2
+text = "CREATE DECOY"
+tooltip_text = "Send frigates to Saturn on burn to draw Herald away"
+
+[node name="MaxEvacBtn" type="Button" parent="MainContainer/StrategicCommandsPanel"]
+layout_mode = 2
+text = "MAX EVAC"
+tooltip_text = "Move all available carriers to Earth for maximum evacuation"
+
+[node name="BlockadeBtn" type="Button" parent="MainContainer/StrategicCommandsPanel"]
+layout_mode = 2
+text = "BLOCKADE"
+tooltip_text = "Concentrate fleet at Mars for maximum defense"
+
+[node name="Spacer" type="Control" parent="MainContainer/StrategicCommandsPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+
 [node name="GameArea" type="HBoxContainer" parent="MainContainer"]
 layout_mode = 2
 size_flags_vertical = 3

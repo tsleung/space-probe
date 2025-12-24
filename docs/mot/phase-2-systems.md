@@ -10,11 +10,12 @@
 3. [Tile-Based Movement System](#tile-based-movement-system)
 4. [CRISIS Mode](#crisis-mode)
 5. [Control Surfaces](#control-surfaces)
-6. [Power Balance System](#power-balance-system)
-7. [Hull Events](#hull-events)
-8. [Visual Effects](#visual-effects)
-9. [AI Behavior](#ai-behavior)
-10. [Integration Architecture](#integration-architecture)
+6. [EVA System](#eva-system)
+7. [Power Balance System](#power-balance-system)
+8. [Hull Events](#hull-events)
+9. [Visual Effects](#visual-effects)
+10. [AI Behavior](#ai-behavior)
+11. [Integration Architecture](#integration-architecture)
 
 ---
 
@@ -224,6 +225,172 @@ Key principles:
 | **Sensors** | Bridge | OFF / ON | 0 / 2/hr | Event warning: none / +1 day |
 
 Plus: **Emergency Power** (Button) - +10 power for 30s, 5min cooldown
+
+---
+
+## EVA System
+
+Extra-Vehicular Activity (EVA) allows crew to exit the ship through the airlock to repair exterior control surfaces. ~20% of events require EVA to resolve.
+
+### Design Philosophy
+
+EVA is the **high-stakes repair option**. Unlike interior repairs that are quick and safe, EVA is:
+- **Time-intensive:** Walk corridors → airlock → suit up → exit → work → return
+- **Risky:** 15% chance to drift on tether during exterior work
+- **Dramatic:** Visual spectacle of crew floating outside with tether
+
+This creates meaningful tension: Do you send someone on EVA now (risky, but fixes the problem) or wait and hope the situation doesn't worsen?
+
+### Exterior Control Surfaces
+
+Three exterior surfaces can be damaged by hull events and require EVA to repair:
+
+| Surface | Location | Damage Effect | Event Triggers |
+|---------|----------|---------------|----------------|
+| **Engine Nozzle** | Right side | Speed reduced proportionally (50% damage = 50% speed) | Asteroid impact, debris |
+| **Antenna Array** | Top | Event warning days reduced (misaligned = less warning) | Solar flare, impact |
+| **Solar Panels** | Left side | Solar power generation reduced | Solar flare, debris |
+
+### EVA Flow (4 Phases)
+
+```
+PHASE 1: INTERIOR TRANSIT
+┌────────────────────────────────────────────────────────────┐
+│  Crew walks through corridors to cargo bay                 │
+│  Uses existing waypoint pathfinding (BFS through rooms)    │
+│  Time: ~3-5 seconds depending on starting location         │
+└────────────────────────────────────────────────────────────┘
+                              ↓
+PHASE 2: AIRLOCK SEQUENCE
+┌────────────────────────────────────────────────────────────┐
+│  Crew moves to airlock position (left of cargo bay)        │
+│  "Suiting up" pause (1.5 seconds)                          │
+│  Airlock door animation opens                              │
+│  Tether attaches from airlock to crew                      │
+│  Crew z-index raised (appears above hull)                  │
+│  EVA suit visual (white-blue tint)                         │
+└────────────────────────────────────────────────────────────┘
+                              ↓
+PHASE 3: EXTERIOR WORK
+┌────────────────────────────────────────────────────────────┐
+│  Crew moves to exterior target (engine/antenna/solar)      │
+│  Movement is slower and floaty (EVA physics)               │
+│  Tether extends with wave animation                        │
+│  Work timer at target surface                              │
+│  15% chance to DRIFT on tether after work                  │
+└────────────────────────────────────────────────────────────┘
+                              ↓
+PHASE 4: RETURN (if no drift)
+┌────────────────────────────────────────────────────────────┐
+│  Crew returns to airlock                                   │
+│  Airlock repressurization                                  │
+│  "Removing suit" pause                                     │
+│  Walk back to home station                                 │
+│  EVA complete signal emitted                               │
+└────────────────────────────────────────────────────────────┘
+```
+
+### Drift/Rescue Mechanics
+
+When a crew member drifts during EVA work:
+
+```
+DRIFT TRIGGERED (15% chance after exterior work)
+                              ↓
+┌────────────────────────────────────────────────────────────┐
+│  Crew floats away from ship (25 pixels/sec)                │
+│  Drift direction: Random, biased away from ship center     │
+│  Distance: 80-150 pixels before tether catches             │
+│  Crew state changes to TETHERED                            │
+│  Orange warning flash on all rooms                         │
+└────────────────────────────────────────────────────────────┘
+                              ↓
+                    ┌─────────┴─────────┐
+                    ↓                   ↓
+         [RESCUE AVAILABLE]     [NO RESCUE AVAILABLE]
+                    ↓                   ↓
+┌───────────────────────────┐  ┌────────────────────────────┐
+│  Available crew member    │  │  Self-rescue mode          │
+│  sent on EVA to airlock   │  │  Crew pulls self back      │
+│  Fast rescue (25 px/s)    │  │  VERY slow (8 px/s)        │
+│  Both return together     │  │  Creates extended tension  │
+└───────────────────────────┘  └────────────────────────────┘
+                    ↓                   ↓
+                    └─────────┬─────────┘
+                              ↓
+┌────────────────────────────────────────────────────────────┐
+│  Crew safely back at airlock                               │
+│  Green success flash on all rooms                          │
+│  Both crew EVAs complete                                   │
+└────────────────────────────────────────────────────────────┘
+```
+
+### EVA Event Types
+
+~20% of Phase 2 events should be EVA events:
+
+| Event | Target Surface | Severity | Description |
+|-------|---------------|----------|-------------|
+| **ENGINE NOZZLE DEBRIS** | Engine | Moderate | Debris lodged in engine nozzle affecting thrust |
+| **ANTENNA MISALIGNMENT** | Antenna | Low | Antenna array knocked out of alignment |
+| **SOLAR PANEL DAMAGE** | Solar | Moderate | Micrometeorite damage to solar panels |
+
+### Exterior Surface Effects (Planned)
+
+When fully integrated, damaged exterior surfaces affect real game systems:
+
+| Surface | Effect When Damaged |
+|---------|-------------------|
+| **Engine Nozzle** | `speed_multiplier = integrity / 100` (50% damage = 50% speed) |
+| **Antenna Array** | Event warning reduced (60°+ misalignment = -1 day warning) |
+| **Solar Panels** | `solar_power = base × (1 - degradation/100)` |
+
+These create meaningful pressure to EVA: a damaged engine at 40% means you're only traveling at 40% speed. That's a compelling reason to risk an EVA.
+
+### Navigation Waypoints
+
+EVA extends the ship navigation graph with exterior waypoints:
+
+```
+INTERIOR                    AIRLOCK                    EXTERIOR
+┌─────────┐               ┌─────────┐               ┌─────────┐
+│ BRIDGE  │               │         │               │ ENGINE  │
+│QUARTERS │               │ AIRLOCK │◀──────────────│ NOZZLE  │
+│LIFE_SUP │◀──────────────│         │               │         │
+│ENGINEER │  (via         │(exit)   │               │ ANTENNA │
+│CARGO_BAY│◀─ cargo bay)  │         │◀──────────────│ ARRAY   │
+│MEDICAL  │               │         │               │         │
+│CORRIDOR │               │         │               │ SOLAR   │
+└─────────┘               └─────────┘◀──────────────│ PANELS  │
+                                                    └─────────┘
+```
+
+Path from any room to exterior: `[room waypoints] → CARGO_BAY → AIRLOCK → EXTERIOR_TARGET`
+
+### Tether Visualization
+
+```gdscript
+# Tether properties
+tether.width = 2.0
+tether.color = Color(0.9, 0.85, 0.2, 0.9)  # Yellow safety tether
+tether.z_index = 9  # Behind crew, above hull
+
+# Wave animation in _process
+var time = Time.get_ticks_msec() / 1000.0
+var wave = Vector2(sin(time * 2.0) * 2.0, cos(time * 3.0) * 2.0)
+tether.set_point_position(1, crew_position + wave)
+```
+
+### File Map (EVA System)
+
+```
+scripts/mars_odyssey_trek/phase2/ship/
+├── eva_controller.gd          # EVA orchestration, drift/rescue
+├── ship_navigation.gd         # Waypoint graph (includes exterior)
+├── ship_view.gd               # start_eva() wrapper
+├── crew_member.gd             # EVA/TETHERED states
+└── ship_types.gd              # CrewState.EVA, CrewState.TETHERED
+```
 
 ### Why Each System Matters
 
@@ -620,10 +787,22 @@ This creates:
 - [x] control_surface_visual.gd
 - [x] control_surfaces_container.gd
 - [x] Margin-for-error analysis (balance-math.md)
+- [x] EVA exterior waypoints in ship_navigation.gd
+- [x] EVA exterior control surface visuals (engine, antenna, solar)
+- [x] EVA controller with drift/rescue mechanics
+- [x] EVA crew states (EVA, TETHERED)
+- [x] EVA tether visualization with wave animation
+- [x] EVA event types (~20% of events)
+
+### In Progress
+- [ ] Unify EVA systems (delete trigger_eva_visual, use EVAController only)
+- [ ] Implement phased EVA flow (interior walk → airlock → exterior)
+- [ ] Create ExteriorSurfaceManager for game system integration
 
 ### Remaining
 - [ ] Wire Phase2Store power effects
 - [ ] Wire control surfaces to crew commands
+- [ ] Wire exterior surfaces to speed/power/warning systems
 - [ ] Balance tuning pass
 - [ ] UI for surface interaction
 - [ ] Sound effects integration

@@ -12,16 +12,19 @@ var territory_timers = {}  # For territory capture decisions
 const BUILD_DECISION_INTERVAL = 0.3  # Faster build checks
 const TERRITORY_DECISION_INTERVAL = 2.0  # Check territory every 2 seconds
 
-# Target fleet composition - balanced for equal DPS/cost efficiency
-# Updated for rebalanced ship costs (Frigate 14 dmg, Cruiser 75e+20m, etc.)
+# Target fleet composition - 3:1 offensive to defensive ratio
+# Harvesters minimal here (expansion logic handles them separately)
 const TARGET_COMPOSITION = {
-	VnpTypes.ShipType.FRIGATE: 0.22,      # 22% - equal value to Destroyer now
-	VnpTypes.ShipType.DESTROYER: 0.22,    # 22% - equal value to Frigate now
-	VnpTypes.ShipType.CRUISER: 0.20,      # 20% - now affordable at 75e+20m
-	VnpTypes.ShipType.DEFENDER: 0.12,     # 12% - anti-missile coverage
-	VnpTypes.ShipType.SHIELDER: 0.10,     # 10% - cheaper at 75e+5m
-	VnpTypes.ShipType.GRAVITON: 0.09,     # 9% - cheaper at 100e+30m
-	VnpTypes.ShipType.HARVESTER: 0.05,    # 5% - resource gathering (at least 1)
+	# Offensive (75% total) - the bulk of combat power
+	VnpTypes.ShipType.FRIGATE: 0.25,      # 25% - fast attack swarm
+	VnpTypes.ShipType.DESTROYER: 0.25,    # 25% - ranged snipers
+	VnpTypes.ShipType.CRUISER: 0.25,      # 25% - heavy artillery
+	# Defensive (24% total) - support only
+	VnpTypes.ShipType.DEFENDER: 0.08,     # 8% - anti-missile
+	VnpTypes.ShipType.SHIELDER: 0.08,     # 8% - shields
+	VnpTypes.ShipType.GRAVITON: 0.08,     # 8% - crowd control
+	# Economy (1%) - expansion logic builds more when needed
+	VnpTypes.ShipType.HARVESTER: 0.01,    # 1% - factory builders
 }
 const COMPOSITION_TOLERANCE = 0.10  # 10% tolerance before random selection kicks in
 
@@ -115,6 +118,28 @@ func _choose_ship_type(team: int, energy: int, state: Dictionary) -> int:
 	for count in fleet_counts.values():
 		total_ships += count
 
+	# === PRIORITY #1: EXPANSION - Build harvesters for unclaimed strategic points ===
+	var harvester_count = fleet_counts.get(VnpTypes.ShipType.HARVESTER, 0)
+	var unclaimed_points = _count_unclaimed_strategic_points(team, state)
+	var team_factories = _count_team_factories(team, state)
+
+	# Check if we can afford a harvester
+	var harvester_stats = VnpTypes.SHIP_STATS.get(VnpTypes.ShipType.HARVESTER, {})
+	var harvester_energy = harvester_stats.get("cost", 75)
+	var harvester_mass = harvester_stats.get("mass_cost", 0)
+	var can_afford_harvester = energy >= harvester_energy and mass >= harvester_mass
+
+	if can_afford_harvester:
+		# Always ensure at least 2 harvesters for expansion
+		if harvester_count < 2:
+			return VnpTypes.ShipType.HARVESTER
+
+		# Build more harvesters if there are unclaimed points and we don't have enough
+		# Want at least 1 harvester per 2 unclaimed points (up to a max of 5 harvesters)
+		var desired_harvesters = mini(2 + ceili(unclaimed_points / 2.0), 5)
+		if harvester_count < desired_harvesters and unclaimed_points > 0:
+			return VnpTypes.ShipType.HARVESTER
+
 	# === COMPOSITION-BASED BUILDING ===
 	# Build whatever ship type is furthest below target composition
 	var most_needed_type = -1
@@ -133,10 +158,6 @@ func _choose_ship_type(team: int, energy: int, state: Dictionary) -> int:
 		var mass_cost = ship_stats.get("mass_cost", 0)
 
 		if energy >= energy_cost and mass >= mass_cost:
-			# Special case: always ensure at least 1 harvester
-			if ship_type == VnpTypes.ShipType.HARVESTER and current_count == 0:
-				return ship_type
-
 			if deficit > biggest_deficit:
 				biggest_deficit = deficit
 				most_needed_type = ship_type
@@ -183,6 +204,34 @@ func _get_fleet_composition(team: int, state: Dictionary) -> Dictionary:
 				counts[ship_type] += 1
 
 	return counts
+
+
+func _count_unclaimed_strategic_points(team: int, state: Dictionary) -> int:
+	"""Count strategic points that are unclaimed (no factory built)"""
+	var count = 0
+	if not state.has("strategic_points"):
+		return 0
+
+	for point_id in state.strategic_points:
+		var point = state.strategic_points[point_id]
+		var owner = point.get("owner", null)
+		# Count points that are unclaimed OR owned by enemies (potential targets)
+		if owner == null:
+			count += 1
+	return count
+
+
+func _count_team_factories(team: int, state: Dictionary) -> int:
+	"""Count completed factories owned by this team"""
+	var count = 0
+	if not state.has("factories"):
+		return 0
+
+	for factory_id in state.factories:
+		var factory = state.factories[factory_id]
+		if factory.get("team", -1) == team and factory.get("complete", false):
+			count += 1
+	return count
 
 
 func _weighted_ship_selection(team: int, affordable: Array, weights: Dictionary) -> int:

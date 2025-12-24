@@ -20,6 +20,16 @@ const ELDER_MORTALITY_BASE = 0.02  # 2% per year at 61, increases
 const MAX_AGE = 95
 const PREGNANCY_MONTHS = 9
 
+# Artificial birth constants (colony-style reproduction)
+const GESTATION_CAPACITY_PER_MEDICAL_BAY = 2  # births/year per tier
+const GESTATION_CAPACITY_PER_HOSPITAL = 6     # births/year per tier
+const GESTATION_SUCCESS_RATE = 0.80           # 80% success rate
+const MEDICINE_PER_BIRTH = 5.0                # medicine consumed per birth
+
+# Immigration constants
+const IMMIGRATION_PER_STARPORT = 2            # immigrants/year per tier
+const IMMIGRATION_PER_SPACE_STATION = 5       # immigrants/year per tier
+
 # Trait inheritance chances
 const TRAIT_INHERITANCE_CHANCE = 0.3
 const TRAIT_MUTATION_CHANCE = 0.1
@@ -507,6 +517,213 @@ static func check_romance(colonists: Array, year: int, random_values: Array) -> 
 		"colonists": updated,
 		"events": events
 	}
+
+# ============================================================================
+# ARTIFICIAL BIRTHS (Colony-Style Reproduction)
+# ============================================================================
+
+## Calculate births based on Medical Bay capacity (not marriage)
+## This is the primary birth mechanism - no spouse required
+## Returns: { births: Array, events: Array, medicine_consumed: float }
+static func calculate_artificial_births(
+	colonists: Array,
+	buildings: Array,
+	resources: Dictionary,
+	year: int,
+	random_values: Array
+) -> Dictionary:
+	var births: Array = []
+	var events: Array = []
+	var random_idx = 0
+
+	# Calculate gestation capacity from medical buildings
+	var total_capacity = 0
+	for building in buildings:
+		if not building.get("is_operational", true):
+			continue
+		var tier = building.get("tier", 1)
+		var b_type = building.get("type", -1)
+		match b_type:
+			_MCSTypes.BuildingType.MEDICAL_BAY:
+				total_capacity += GESTATION_CAPACITY_PER_MEDICAL_BAY * tier
+			_MCSTypes.BuildingType.HOSPITAL:
+				total_capacity += GESTATION_CAPACITY_PER_HOSPITAL * tier
+
+	# Check medicine availability
+	var available_medicine = resources.get("medicine", 0.0)
+	var medicine_limited = int(available_medicine / MEDICINE_PER_BIRTH)
+	var max_births = mini(total_capacity, medicine_limited)
+
+	# Need at least 2 adults to provide genetic material
+	var adults: Array = []
+	for c in colonists:
+		if c.is_alive and c.life_stage == _MCSTypes.LifeStage.ADULT:
+			adults.append(c)
+	if adults.size() < 2:
+		return {"births": [], "events": [], "medicine_consumed": 0.0}
+
+	# Generate births based on capacity
+	for i in range(max_births):
+		var rand = _get_random(random_values, random_idx)
+		random_idx += 1
+
+		# Success rate check
+		if rand >= GESTATION_SUCCESS_RATE:
+			continue
+
+		# Select genetic parents randomly from adults
+		var parent1_idx = int(rand * adults.size()) % adults.size()
+		var rand2 = _get_random(random_values, random_idx)
+		random_idx += 1
+		var parent2_idx = (parent1_idx + 1 + int(rand2 * (adults.size() - 1))) % adults.size()
+
+		var parent1 = adults[parent1_idx]
+		var parent2 = adults[parent2_idx]
+
+		# Create child
+		var child = _create_artificial_child(parent1, parent2, year, rand)
+		births.append(child)
+
+		events.append({
+			"type": "birth",
+			"child_id": child.id,
+			"child_name": child.get("display_name", "%s %s" % [child.first_name, child.last_name]),
+			"year": year,
+			"artificial": true
+		})
+
+	return {
+		"births": births,
+		"events": events,
+		"medicine_consumed": births.size() * MEDICINE_PER_BIRTH
+	}
+
+## Create a child from artificial reproduction
+static func _create_artificial_child(parent1: Dictionary, parent2: Dictionary, year: int, rand: float) -> Dictionary:
+	var first_name = _generate_first_name(rand)
+	# Use parent1's last name, or generate one
+	var last_name = parent1.get("last_name", "Colony")
+
+	var child = _MCSTypes.create_colonist({
+		"first_name": first_name,
+		"last_name": last_name,
+		"display_name": "%s %s" % [first_name, last_name],
+		"age": 0,
+		"birth_year": year,
+		"generation": _calc_child_generation(parent1, parent2),
+		"life_stage": _MCSTypes.LifeStage.INFANT,
+		"health": 75.0 + rand * 15.0,
+		"morale": 80.0,
+		"fatigue": 10.0,
+		"parent_ids": [parent1.get("id", ""), parent2.get("id", "")],
+		"is_founder": false,
+		"traits": _inherit_traits(parent1, parent2, rand)
+	})
+
+	return child
+
+# ============================================================================
+# IMMIGRATION (Starport/Space Station)
+# ============================================================================
+
+## Calculate yearly immigration based on infrastructure
+## Returns: { immigrants: Array, events: Array }
+static func calculate_immigration(
+	buildings: Array,
+	resources: Dictionary,
+	year: int,
+	random_values: Array
+) -> Dictionary:
+	var immigrants: Array = []
+	var events: Array = []
+	var random_idx = 0
+
+	# Calculate immigration capacity from infrastructure
+	var capacity = 0
+	for building in buildings:
+		if not building.get("is_operational", true):
+			continue
+		var tier = building.get("tier", 1)
+		var b_type = building.get("type", -1)
+		match b_type:
+			_MCSTypes.BuildingType.STARPORT:
+				capacity += IMMIGRATION_PER_STARPORT * tier
+			_MCSTypes.BuildingType.SPACE_STATION:
+				capacity += IMMIGRATION_PER_SPACE_STATION * tier
+
+	if capacity == 0:
+		return {"immigrants": [], "events": []}
+
+	# Check if colony can support immigrants (food surplus)
+	var food = resources.get("food", 0.0)
+	if food < 100 * capacity:
+		capacity = capacity / 2  # Reduce immigration if food is low
+
+	# Generate immigrants
+	for i in range(capacity):
+		var rand = _get_random(random_values, random_idx)
+		random_idx += 1
+
+		var immigrant = _create_immigrant(year, rand)
+		immigrants.append(immigrant)
+
+		events.append({
+			"type": "immigration",
+			"colonist_id": immigrant.get("id", ""),
+			"colonist_name": immigrant.get("display_name", immigrant.get("first_name", "Unknown")),
+			"year": year
+		})
+
+	return {
+		"immigrants": immigrants,
+		"events": events
+	}
+
+## Create an immigrant from Earth
+static func _create_immigrant(year: int, rand: float) -> Dictionary:
+	var age = 20 + int(rand * 25)  # Age 20-45 (working adults)
+	var first_name = _generate_first_name(rand)
+
+	# Generate a unique last name for variety
+	var last_names = ["Armstrong", "Chen", "Patel", "Kim", "Garcia", "Mueller", "Okonkwo", "Volkov", "Tanaka", "Silva"]
+	var last_name = last_names[int(rand * last_names.size()) % last_names.size()]
+
+	return _MCSTypes.create_colonist({
+		"first_name": first_name,
+		"last_name": last_name,
+		"display_name": "%s %s" % [first_name, last_name],
+		"age": age,
+		"birth_year": year - age,
+		"generation": _MCSTypes.Generation.EARTH_BORN,
+		"life_stage": _MCSTypes.LifeStage.ADULT,
+		"health": 70 + rand * 20,
+		"morale": 60 + rand * 20,
+		"is_founder": false,
+		"traits": _generate_immigrant_traits(rand)
+	})
+
+## Generate traits for immigrants (skilled workers from Earth)
+static func _generate_immigrant_traits(rand: float) -> Array:
+	var traits: Array = []
+
+	# Immigrants are trained - often have useful traits
+	var possible_traits = [
+		_MCSTypes.ColonistTrait.METHODICAL,
+		_MCSTypes.ColonistTrait.PERFECTIONIST,
+		_MCSTypes.ColonistTrait.STEADY_HANDS,
+		_MCSTypes.ColonistTrait.OPTIMIST,
+	]
+
+	# 60% chance of one good trait
+	if rand < 0.6:
+		var idx = int(rand * possible_traits.size()) % possible_traits.size()
+		traits.append(possible_traits[idx])
+
+	# Some immigrants have Earth Longing (homesick)
+	if rand > 0.7:
+		traits.append(_MCSTypes.ColonistTrait.EARTH_LONGING)
+
+	return traits
 
 # ============================================================================
 # MORALE & EFFECTIVENESS

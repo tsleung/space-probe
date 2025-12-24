@@ -8,6 +8,7 @@ const ControlSurface = preload("res://scripts/mars_odyssey_trek/phase2/ship/cont
 const ControlSurfaceManager = preload("res://scripts/mars_odyssey_trek/phase2/ship/control_surface_manager.gd")
 const ControlSurfacesContainer = preload("res://scripts/mars_odyssey_trek/phase2/ship/control_surfaces_container.gd")
 const HullEvents = preload("res://scripts/mars_odyssey_trek/phase2/ship/hull_events.gd")
+const ExteriorSurfaceManager = preload("res://scripts/mars_odyssey_trek/phase2/ship/exterior_surface_manager.gd")
 const ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
 const Phase2Reducer = preload("res://scripts/mars_odyssey_trek/phase2/phase2_reducer.gd")
 
@@ -18,6 +19,7 @@ const Phase2Reducer = preload("res://scripts/mars_odyssey_trek/phase2/phase2_red
 signal power_critical()
 signal hull_breach_imminent()
 signal reactor_meltdown_warning()
+signal exterior_surface_critical(surface_type: String)
 
 # ============================================================================
 # CHILD NODES (Created at runtime)
@@ -26,6 +28,7 @@ signal reactor_meltdown_warning()
 var surface_manager: ControlSurfaceManager
 var surfaces_container: ControlSurfacesContainer
 var hull_events: HullEvents
+var exterior_surfaces: ExteriorSurfaceManager
 
 # References
 var store: Node  # Phase2Store
@@ -65,6 +68,10 @@ func _create_child_systems() -> void:
 	hull_events = HullEvents.new()
 	hull_events.name = "HullEvents"
 	add_child(hull_events)
+
+	exterior_surfaces = ExteriorSurfaceManager.new()
+	exterior_surfaces.name = "ExteriorSurfaceManager"
+	add_child(exterior_surfaces)
 
 func setup(phase2_store: Node, phase2_effects: Node, view: Node2D) -> void:
 	## Connect all systems together
@@ -106,6 +113,11 @@ func _connect_signals() -> void:
 
 	# Surfaces container click handling
 	surfaces_container.surface_clicked.connect(_on_surface_clicked)
+
+	# Exterior surface signals
+	exterior_surfaces.surface_damaged.connect(_on_exterior_damaged)
+	exterior_surfaces.surface_repaired.connect(_on_exterior_repaired)
+	exterior_surfaces.surface_critical.connect(_on_exterior_critical)
 
 # ============================================================================
 # PROCESS
@@ -251,6 +263,17 @@ func _on_asteroid_impact(room: int, damage: float) -> void:
 	if damage > 0.3:
 		hull_breach_imminent.emit()
 
+	# Chance to damage exterior surfaces (30% for asteroids)
+	if randf() < 0.3:
+		var surfaces = [
+			ExteriorSurfaceManager.SurfaceType.ENGINE_NOZZLE,
+			ExteriorSurfaceManager.SurfaceType.ANTENNA_ARRAY,
+			ExteriorSurfaceManager.SurfaceType.SOLAR_PANEL
+		]
+		var target = surfaces[randi() % surfaces.size()]
+		var ext_damage = damage * randf_range(15, 35)
+		exterior_surfaces.damage_surface(target, ext_damage)
+
 func _on_solar_flare(intensity: float) -> void:
 	print("[HULL] Solar flare hit! Intensity: %.1f" % intensity)
 
@@ -258,12 +281,36 @@ func _on_solar_flare(intensity: float) -> void:
 	if effects:
 		effects.trigger_solar_flare_effect()
 
+	# Solar panels especially vulnerable to solar flares (40% chance)
+	if randf() < 0.4:
+		var damage = intensity * randf_range(10, 25)
+		exterior_surfaces.damage_surface(ExteriorSurfaceManager.SurfaceType.SOLAR_PANEL, damage)
+
 func _on_micrometeorite(damage: float) -> void:
 	print("[HULL] Micrometeorite hit. Minor damage.")
 	# Small impacts - mostly handled visually
 
 func _on_debris_collision(damage: float) -> void:
 	print("[HULL] Debris collision! Damage: %.0f%%" % (damage * 100))
+
+	# Debris can damage antenna more easily (20% chance)
+	if randf() < 0.2:
+		var ext_damage = damage * randf_range(10, 20)
+		exterior_surfaces.damage_surface(ExteriorSurfaceManager.SurfaceType.ANTENNA_ARRAY, ext_damage)
+
+# ============================================================================
+# SIGNAL HANDLERS - Exterior Surfaces
+# ============================================================================
+
+func _on_exterior_damaged(surface_type: String, new_integrity: float) -> void:
+	print("[EXTERIOR] %s damaged, integrity: %.0f%%" % [surface_type.capitalize(), new_integrity * 100])
+
+func _on_exterior_repaired(surface_type: String) -> void:
+	print("[EXTERIOR] %s fully repaired!" % surface_type.capitalize())
+
+func _on_exterior_critical(surface_type: String) -> void:
+	print("[EXTERIOR] %s is CRITICAL!" % surface_type.capitalize())
+	exterior_surface_critical.emit(surface_type)
 
 # ============================================================================
 # SIGNAL HANDLERS - Surface Clicks
@@ -295,6 +342,13 @@ func get_surface_manager() -> ControlSurfaceManager:
 func get_hull_events() -> HullEvents:
 	return hull_events
 
+func get_exterior_surfaces() -> ExteriorSurfaceManager:
+	return exterior_surfaces
+
+func repair_exterior_by_waypoint(waypoint: int) -> void:
+	## Called when EVA repairs an exterior surface
+	exterior_surfaces.repair_by_waypoint(waypoint)
+
 func get_power_status() -> Dictionary:
 	return {
 		"drain": surface_manager.get_total_power_drain(),
@@ -304,13 +358,25 @@ func get_power_status() -> Dictionary:
 	}
 
 func get_ship_modifiers() -> Dictionary:
-	## Get all modifiers from control surfaces for Phase2 calculations
+	## Get all modifiers from control surfaces and exterior surfaces for Phase2 calculations
+	# Interior control surface modifiers
+	var interior_speed = surface_manager.get_speed_multiplier()
+	var interior_fuel = surface_manager.get_fuel_multiplier()
+
+	# Exterior surface modifiers
+	var exterior_speed = exterior_surfaces.get_speed_modifier()
+	var exterior_fuel = exterior_surfaces.get_fuel_waste_modifier()
+	var exterior_solar = exterior_surfaces.get_solar_power_modifier()
+	var exterior_warning = exterior_surfaces.get_event_warning_reduction()
+
 	return {
 		"damage_reduction": surface_manager.get_damage_reduction(),
-		"speed_multiplier": surface_manager.get_speed_multiplier(),
-		"fuel_multiplier": surface_manager.get_fuel_multiplier(),
+		"speed_multiplier": interior_speed * exterior_speed,  # Combined speed
+		"fuel_multiplier": interior_fuel * exterior_fuel,     # Combined fuel efficiency
 		"healing_multiplier": surface_manager.get_healing_multiplier(),
-		"o2_multiplier": surface_manager.get_o2_multiplier()
+		"o2_multiplier": surface_manager.get_o2_multiplier(),
+		"solar_power_modifier": exterior_solar,               # NEW: solar panel efficiency
+		"event_warning_reduction": exterior_warning,          # NEW: antenna misalignment
 	}
 
 func trigger_test_event(event_type: String) -> void:
@@ -352,9 +418,12 @@ func break_random_surface() -> void:
 
 func save_state() -> Dictionary:
 	return {
-		"surfaces": surface_manager.save_state()
+		"surfaces": surface_manager.save_state(),
+		"exterior": exterior_surfaces.save_state()
 	}
 
 func load_state(data: Dictionary) -> void:
 	if data.has("surfaces"):
 		surface_manager.load_state(data.surfaces)
+	if data.has("exterior"):
+		exterior_surfaces.load_state(data.exterior)

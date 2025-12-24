@@ -83,6 +83,9 @@ enum BuildingType {
 	RECREATION_CENTER, TEMPLE, GOVERNMENT_HALL, PRISON,
 	# Infrastructure
 	STORAGE, AIRLOCK, LANDING_PAD, COMMUNICATIONS,
+	# Transport/Immigration
+	STARPORT,           # Landing facility for Earth ships, enables immigration
+	SPACE_STATION,      # Orbital facility, enables mass immigration (tech unlock)
 	# Megastructures
 	MASS_DRIVER, FUSION_REACTOR, SPACE_ELEVATOR
 }
@@ -276,6 +279,22 @@ const BUILDING_TIER_STATS = {
 		3: {"research_boost": 15, "morale_boost": 6, "power": 10, "workers": 1},
 		4: {"research_boost": 25, "morale_boost": 10, "power": 10, "workers": 0},
 		5: {"research_boost": 40, "morale_boost": 15, "power": 10, "workers": 0},
+	},
+
+	# === TRANSPORT/IMMIGRATION ===
+	BuildingType.STARPORT: {
+		1: {"immigration_capacity": 2, "power": 30, "workers": 2},
+		2: {"immigration_capacity": 4, "power": 28, "workers": 2},
+		3: {"immigration_capacity": 6, "power": 25, "workers": 2},
+		4: {"immigration_capacity": 10, "power": 22, "workers": 1},
+		5: {"immigration_capacity": 15, "power": 20, "workers": 1},
+	},
+	BuildingType.SPACE_STATION: {
+		1: {"immigration_capacity": 5, "power": 50, "workers": 3},
+		2: {"immigration_capacity": 10, "power": 48, "workers": 3},
+		3: {"immigration_capacity": 18, "power": 45, "workers": 2},
+		4: {"immigration_capacity": 30, "power": 40, "workers": 2},
+		5: {"immigration_capacity": 50, "power": 35, "workers": 1},
 	},
 
 	# === SOCIAL ===
@@ -856,6 +875,8 @@ static func get_building_name(type: BuildingType) -> String:
 		BuildingType.AIRLOCK: return "Airlock"
 		BuildingType.LANDING_PAD: return "Landing Pad"
 		BuildingType.COMMUNICATIONS: return "Communications"
+		BuildingType.STARPORT: return "Starport"
+		BuildingType.SPACE_STATION: return "Space Station"
 		BuildingType.MASS_DRIVER: return "Mass Driver"
 		BuildingType.FUSION_REACTOR: return "Fusion Reactor"
 		BuildingType.SPACE_ELEVATOR: return "Space Elevator"

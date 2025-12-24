@@ -40,22 +40,21 @@ const _MCSAI = preload("res://scripts/mars_colony_sim/mcs_ai.gd")
 # Center panel - Colony View
 @onready var colony_view = $MainContent/CenterPanel/MCSViewPanel/MCSView
 
-# Right panel - Events & Log
+# Right panel - Events
 @onready var event_title: Label = $MainContent/RightPanel/EventPanel/EventTitle
 @onready var event_description: RichTextLabel = $MainContent/RightPanel/EventPanel/EventDescription
 @onready var choice_container: VBoxContainer = $MainContent/RightPanel/EventPanel/ChoiceContainer
-@onready var colony_log: RichTextLabel = $MainContent/RightPanel/LogPanel/ColonyLog
+
+# Chronicle log (bottom right)
+@onready var colony_log: RichTextLabel = $LogPanel/ColonyLog
 
 # Bottom bar
 @onready var workers_button: Button = $BottomBar/WorkersButton
-@onready var advance_button: Button = $BottomBar/AdvanceButton
-@onready var advance_5_button: Button = $BottomBar/Advance5Button
 @onready var auto_button: Button = $BottomBar/AutoButton
 @onready var ai_button: Button = $BottomBar/AIButton
 @onready var ai_personality_button: OptionButton = $BottomBar/AIPersonalityButton
 @onready var speed_slider: HSlider = $BottomBar/SpeedSlider
 @onready var speed_label: Label = $BottomBar/SpeedLabel
-@onready var save_button: Button = $BottomBar/SaveButton
 @onready var menu_button: Button = $BottomBar/MenuButton
 
 # Build dialog
@@ -152,12 +151,6 @@ func _ready():
 
 func _setup_idle_mode():
 	"""Configure UI for idle/watch mode - Universal Paperclips style"""
-	# Hide manual year advance buttons - AI handles it
-	if advance_button:
-		advance_button.visible = false
-	if advance_5_button:
-		advance_5_button.visible = false
-
 	# Hide workers button - auto-assigned
 	if workers_button:
 		workers_button.visible = false
@@ -182,10 +175,6 @@ func _connect_store_signals():
 
 func _connect_ui_signals():
 	# UI button signals - use safe connection pattern
-	if advance_button:
-		advance_button.pressed.connect(_on_advance_year)
-	if advance_5_button:
-		advance_5_button.pressed.connect(_on_advance_5_years)
 	if auto_button:
 		auto_button.toggled.connect(_on_auto_toggled)
 	if ai_button:
@@ -196,8 +185,6 @@ func _connect_ui_signals():
 		speed_slider.value_changed.connect(_on_speed_changed)
 	if workers_button:
 		workers_button.pressed.connect(_on_auto_assign_workers)
-	if save_button:
-		save_button.pressed.connect(_on_save)
 	if menu_button:
 		menu_button.pressed.connect(_on_menu)
 	if build_button:
@@ -272,11 +259,7 @@ func _process(delta: float):
 				# Log AI actions to chronicle
 				for action in ai_result.actions:
 					if "UPGRADE" in action or "SUPERSTRUCTURE" in action:
-						_colony_store.add_log_entry({
-							"year": year_after,
-							"message": action,
-							"log_type": "ai_action"
-						})
+						_add_log_entry({"year": year_after, "message": action, "log_type": "ai_action"})
 
 				# Trigger construction visual if buildings were started
 				if colony_view and ai_result.actions.size() > 0:
@@ -880,10 +863,6 @@ func _update_button_states(state: Dictionary):
 	var events = state.get("active_events", [])
 	var has_active_event = events.size() > 0
 
-	if advance_button:
-		advance_button.disabled = has_active_event
-	if advance_5_button:
-		advance_5_button.disabled = has_active_event
 	if auto_button:
 		auto_button.disabled = has_active_event
 
@@ -999,15 +978,6 @@ func _trigger_visual_for_log(entry: Dictionary):
 			# Achievement - lots of activity
 			colony_view.trigger_event_effect("construction", 5.0)
 
-func _on_advance_year():
-	if not _colony_store.is_game_over():
-		_colony_store.advance_year()
-
-func _on_advance_5_years():
-	for i in range(5):
-		if not _colony_store.is_game_over() and _colony_store.get_active_events().is_empty():
-			_colony_store.advance_year()
-
 func _on_auto_toggled(toggled: bool):
 	_auto_advance = toggled
 	# Time continues from where it left off (no reset needed)
@@ -1061,10 +1031,6 @@ func _on_speed_changed(value: float):
 func _on_auto_assign_workers():
 	_colony_store.auto_assign_workers()
 	_sync_ui()
-
-func _on_save():
-	if _colony_store.save_colony(0):
-		_add_log_entry({"year": _colony_store.get_year(), "message": "Colony saved.", "log_type": "info"})
 
 func _on_menu():
 	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")

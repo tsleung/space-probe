@@ -7,8 +7,8 @@ const MIN_SHIP_COST = 50  # Frigate cost
 
 # Expansion constants
 const INITIAL_WORLD_SCALE = 1.5
-const EXPANSION_SCALE_INCREMENT = 0.3
-const MAX_EXPANSIONS = 10
+const EXPANSION_SCALE_INCREMENT = 0.15  # Smaller increments = more gradual expansion
+const MAX_EXPANSIONS = 15  # More phases to compensate for smaller increments
 
 # Initial state of the game
 func get_initial_state():
@@ -42,6 +42,12 @@ func get_initial_state():
 		"outposts": {},  # point_id -> { team, build_progress, production_timer }
 		# Factory system - larger production facilities that can be built anywhere
 		"factories": {},  # factory_id -> { team, position, health, complete, production_timer, production_type }
+		# Base tracking - home bases for each team
+		"bases": {
+			VnpTypes.Team.PLAYER: {"alive": true, "position": Vector2.ZERO},
+			VnpTypes.Team.ENEMY_1: {"alive": true, "position": Vector2.ZERO},
+			VnpTypes.Team.NEMESIS: {"alive": true, "position": Vector2.ZERO},
+		},
 		"next_factory_id": 1,
 		"next_ship_id": 1,
 		"next_expansion_point_id": 0,
@@ -225,10 +231,16 @@ func reduce(state, action):
 			if not new_state.get("game_over", false):
 				var teams_alive = []
 				for team in new_state.teams:
+					# First check: base must be alive
+					var base_alive = _team_has_base(new_state, team)
+					if not base_alive:
+						# Base destroyed = team eliminated
+						continue
+
 					var has_ships = _team_has_ships(new_state, team)
 					var has_factories = _team_has_factories(new_state, team)
 					var can_build = new_state.teams[team].energy >= MIN_SHIP_COST
-					# Team is alive if they have ships, factories, or can build
+					# Team is alive if they have base AND (ships, factories, or can build)
 					if has_ships or has_factories or can_build:
 						teams_alive.append(team)
 
@@ -346,6 +358,19 @@ func reduce(state, action):
 						var offset = Vector2(randf_range(-100, 100), randf_range(-100, 100))
 						new_state["ships"][ship_id]["state"] = "moving"
 						new_state["ships"][ship_id]["target"] = safe_center + offset
+
+		"BASE_DESTROYED":
+			# A team's home base was destroyed (absorbed by Progenitor)
+			var team = action["team"]
+			if new_state["bases"].has(team):
+				new_state["bases"][team]["alive"] = false
+
+		"BASE_SET_POSITION":
+			# Initialize base position from vnp_main
+			var team = action["team"]
+			var position = action["position"]
+			if new_state["bases"].has(team):
+				new_state["bases"][team]["position"] = position
 
 		# === OUTPOST SYSTEM ACTIONS ===
 
@@ -496,6 +521,15 @@ func _team_has_factories(state: Dictionary, team: int) -> bool:
 		if factory.get("team", -1) == team and factory.get("complete", false):
 			return true
 	return false
+
+
+func _team_has_base(state: Dictionary, team: int) -> bool:
+	"""Check if team's home base is still alive"""
+	if not state.has("bases"):
+		return true  # Legacy state without bases tracking - assume alive
+	if not state.bases.has(team):
+		return true  # Unknown team - assume alive
+	return state.bases[team].get("alive", true)
 
 
 func _get_team_health_bonus(state: Dictionary, team: int) -> float:

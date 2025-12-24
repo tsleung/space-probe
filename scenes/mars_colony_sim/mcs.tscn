@@ -46,7 +46,7 @@ size_flags_horizontal = 3
 [node name="YearLabel" type="Label" parent="TopBar"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
-text = "Year: 1"
+text = "Year 1, Week 1"
 
 [node name="PopulationLabel" type="Label" parent="TopBar"]
 layout_mode = 2
@@ -70,7 +70,7 @@ offset_bottom = -50.0
 theme_override_constants/separation = 10
 
 [node name="LeftPanel" type="VBoxContainer" parent="MainContent"]
-custom_minimum_size = Vector2(260, 0)
+custom_minimum_size = Vector2(200, 0)
 layout_mode = 2
 theme_override_constants/separation = 5
 
@@ -120,7 +120,7 @@ offset_left = 5.0
 offset_top = 28.0
 offset_right = -5.0
 offset_bottom = -60.0
-theme_override_font_sizes/font_size = 14
+theme_override_font_sizes/font_size = 12
 auto_height = true
 
 [node name="BuildButton" type="Button" parent="MainContent/LeftPanel/BuildingPanel"]
@@ -268,13 +268,13 @@ bbcode_enabled = true
 text = "Production and consumption forecast..."
 
 [node name="RightPanel" type="VBoxContainer" parent="MainContent"]
-custom_minimum_size = Vector2(280, 0)
+custom_minimum_size = Vector2(240, 0)
 layout_mode = 2
 theme_override_constants/separation = 5
 
 [node name="EventPanel" type="Panel" parent="MainContent/RightPanel"]
-custom_minimum_size = Vector2(0, 140)
 layout_mode = 2
+size_flags_vertical = 3
 
 [node name="Label" type="Label" parent="MainContent/RightPanel/EventPanel"]
 layout_mode = 1
@@ -294,53 +294,28 @@ offset_top = 28.0
 offset_right = -5.0
 offset_bottom = 50.0
 text = "No active event"
-theme_override_font_sizes/font_size = 16
+theme_override_font_sizes/font_size = 14
 
 [node name="EventDescription" type="RichTextLabel" parent="MainContent/RightPanel/EventPanel"]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
 offset_left = 5.0
-offset_top = 40.0
+offset_top = 48.0
 offset_right = -5.0
-offset_bottom = 95.0
+offset_bottom = 120.0
 bbcode_enabled = true
-text = "Events will appear here when they occur."
+theme_override_font_sizes/normal_font_size = 13
+text = "Events will appear here as the colony develops."
 
 [node name="ChoiceContainer" type="VBoxContainer" parent="MainContent/RightPanel/EventPanel"]
 layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
 offset_left = 5.0
-offset_top = 98.0
+offset_top = 125.0
 offset_right = -5.0
-offset_bottom = 135.0
-
-[node name="LogPanel" type="Panel" parent="MainContent/RightPanel"]
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="Label" type="Label" parent="MainContent/RightPanel/LogPanel"]
-layout_mode = 1
-offset_left = 5.0
-offset_top = 3.0
-offset_right = 150.0
-offset_bottom = 25.0
-text = "Chronicle"
-theme_override_font_sizes/font_size = 16
-
-[node name="ColonyLog" type="RichTextLabel" parent="MainContent/RightPanel/LogPanel"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 5.0
-offset_top = 28.0
-offset_right = -5.0
-offset_bottom = -5.0
-bbcode_enabled = true
-scroll_following = true
-theme_override_font_sizes/normal_font_size = 14
+offset_bottom = 200.0
 
 [node name="BottomBar" type="HBoxContainer" parent="."]
 layout_mode = 1
@@ -364,16 +339,6 @@ text = "Auto Workers"
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="AdvanceButton" type="Button" parent="BottomBar"]
-custom_minimum_size = Vector2(80, 0)
-layout_mode = 2
-text = "+1 Year"
-
-[node name="Advance5Button" type="Button" parent="BottomBar"]
-custom_minimum_size = Vector2(80, 0)
-layout_mode = 2
-text = "+5 Years"
-
 [node name="AutoButton" type="Button" parent="BottomBar"]
 custom_minimum_size = Vector2(60, 0)
 layout_mode = 2
@@ -393,6 +358,7 @@ custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
 tooltip_text = "AI Governor personality"
 item_count = 4
+selected = 1
 popup/item_0/text = "Pragmatist"
 popup/item_1/text = "Visionary"
 popup/item_1/id = 1
@@ -406,22 +372,50 @@ custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
 min_value = 1.0
 max_value = 50.0
-value = 3.0
+value = 5.0
 
 [node name="SpeedLabel" type="Label" parent="BottomBar"]
 layout_mode = 2
-text = "3x"
-
-[node name="SaveButton" type="Button" parent="BottomBar"]
-visible = false
-custom_minimum_size = Vector2(60, 0)
-layout_mode = 2
-text = "Save"
+text = "50x"
 
 [node name="MenuButton" type="Button" parent="BottomBar"]
 custom_minimum_size = Vector2(60, 0)
 layout_mode = 2
 text = "Menu"
+
+[node name="LogPanel" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -260.0
+offset_top = -250.0
+offset_right = -20.0
+offset_bottom = -50.0
+
+[node name="Label" type="Label" parent="LogPanel"]
+layout_mode = 1
+offset_left = 5.0
+offset_top = 3.0
+offset_right = 150.0
+offset_bottom = 25.0
+text = "Chronicle"
+theme_override_font_sizes/font_size = 14
+
+[node name="ColonyLog" type="RichTextLabel" parent="LogPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 5.0
+offset_top = 24.0
+offset_right = -5.0
+offset_bottom = -5.0
+bbcode_enabled = true
+scroll_following = true
+theme_override_font_sizes/normal_font_size = 12
 
 [node name="BuildDialog" type="Window" parent="."]
 visible = false
