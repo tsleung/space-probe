@@ -93,6 +93,7 @@ var _is_paused: bool = false
 var _attack_phase_timer: float = 0.0
 var _is_in_attack_phase: bool = false
 var _auto_play: bool = true  # AI plays autonomously (on by default)
+var _pre_battle_speed_index: int = -1  # Speed before battle started (-1 = no battle)
 const ATTACK_PHASE_DURATION = 1.5  # Show attack animation for 1.5 seconds
 
 # NEW TIME SYSTEM - Discrete ticks with visual interpolation
@@ -401,6 +402,8 @@ func _process_week_boundary() -> void:
 			_battle_view.size = Vector2(400, 280)
 			move_child(_battle_view, get_child_count() - 1)
 			_battle_view.start_battle(zone_name, defending_ships, herald_count, will_hold)
+			# Slow down to normal speed so player can watch the battle
+			_slow_down_for_battle()
 		else:
 			_spawn_cascading_battle_view(zone_name, defending_ships, herald_count, will_hold)
 
@@ -509,6 +512,7 @@ func _connect_signals() -> void:
 	# Entity route selection from solar map
 	if solar_map:
 		solar_map.entity_destination_selected.connect(_on_entity_destination_selected)
+		solar_map.lane_clicked.connect(_on_lane_clicked)
 
 # ============================================================================
 # UI SYNC
@@ -1063,45 +1067,47 @@ func _build_evacuation_progress_text(state: Dictionary) -> String:
 # ============================================================================
 
 func _on_go_dark_pressed() -> void:
-	## GO DARK: Switch all burning ships to coasting to minimize signatures
-	## Strategy: Sacrifice speed for stealth - ships coast silently instead of burning
-	var state = store.get_state()
+	## GO DARK: Toggle Earth isolation - disable/enable all Earth evacuation lanes
+	## This is the ultimate stealth move: hide Earth from Herald by stopping all activity
+	var is_isolated = store.is_earth_isolated()
 
-	# Find all entities currently burning and switch them to coasting
-	var darkened = 0
-	var ship_names = []
-	for entity in state.get("entities", []):
-		# Skip if not burning (already dark or orbiting)
-		if entity.get("movement_state", -1) != FCWTypes.MovementState.BURNING:
-			continue
-		# Skip Herald (can't control enemy ships)
-		if entity.id == FCWTypes.HERALD_ENTITY_ID:
-			continue
-
-		# Switch to coasting - slower but stealthy
-		store.dispatch_set_entity_movement_state(entity.id, FCWTypes.MovementState.COASTING)
-		darkened += 1
-		ship_names.append(entity.get("name", entity.id))
-
-	if darkened > 0:
-		_add_log_entry("[color=cyan]GO DARK ORDER ISSUED[/color]: %d ships cutting engines." % darkened)
-		for sname in ship_names:
-			_add_log_entry("  → %s now coasting silently" % sname)
-		_add_log_entry("Ships will coast to destinations. Slower but harder to detect.")
+	if is_isolated:
+		# Currently dark - resume operations
+		store.dispatch_resume_earth_lanes()
+		go_dark_btn.text = "GO DARK"
+		_add_log_entry("[color=green]EARTH RESUMING OPERATIONS[/color]: Evacuation lanes re-enabled.")
 	else:
-		_add_log_entry("GO DARK: No ships currently burning. All signatures minimal.")
+		# Go dark - disable all Earth lanes
+		store.dispatch_go_dark_earth()
+		go_dark_btn.text = "RESUME"
+		_add_log_entry("[color=cyan]EARTH GOING DARK[/color]: All evacuation suspended.")
+		_add_log_entry("The Herald follows our activity. If we go silent, it may not find Earth...")
+
+		# Also switch any burning ships to coasting
+		var state = store.get_state()
+		var darkened = 0
+		for entity in state.get("entities", []):
+			if entity.get("movement_state", -1) != FCWTypes.MovementState.BURNING:
+				continue
+			if entity.id == FCWTypes.HERALD_ENTITY_ID:
+				continue
+			store.dispatch_set_entity_movement_state(entity.id, FCWTypes.MovementState.COASTING)
+			darkened += 1
+
+		if darkened > 0:
+			_add_log_entry("  → %d ships cutting engines to coast" % darkened)
 
 	_sync_ui()
 
+func _on_lane_clicked(lane_key: String) -> void:
+	## Handle click on an evacuation lane - toggle it on/off
+	store.dispatch_toggle_lane(lane_key)
+	_sync_ui()
+
 func _on_create_decoy_pressed() -> void:
-	## CREATE DECOY: Send frigates to Saturn to raise its signature
+	## CREATE DECOY: Send a capital ship to Saturn to raise its signature
 	## Strategy: Draw Herald away from Earth/Mars by creating a false target
 	var state = store.get_state()
-	var free_frigates = store.get_available_ships().get(FCWTypes.ShipType.FRIGATE, 0)
-
-	if free_frigates < 3:
-		_add_log_entry("DECOY FAILED: Need at least 3 free frigates (have %d)." % free_frigates)
-		return
 
 	# Check if Saturn is still controlled
 	var saturn_zone = state.zones.get(FCWTypes.ZoneId.SATURN, {})
@@ -1109,10 +1115,37 @@ func _on_create_decoy_pressed() -> void:
 		_add_log_entry("DECOY FAILED: Saturn has fallen.")
 		return
 
-	# Send 3 frigates to Saturn
-	store.dispatch_assign_fleet(FCWTypes.ZoneId.SATURN, FCWTypes.ShipType.FRIGATE, 3)
+	# Find an available capital ship (not at Saturn, orbiting)
+	# Prefer cruisers for decoy duty (expendable combat ships)
+	var decoy_ship: Dictionary = {}
+	var preferred_types = [FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.DREADNOUGHT]
 
-	_add_log_entry("[color=orange]DECOY ORDER ISSUED[/color]: 3 Frigates burning to Saturn.")
+	for entity in state.get("entities", []):
+		var ship_type = entity.get("ship_type", -1)
+		if ship_type not in preferred_types:
+			continue
+		# Skip if already at Saturn
+		if entity.get("current_zone", -1) == FCWTypes.ZoneId.SATURN:
+			continue
+		# Skip if not orbiting (already in transit)
+		if entity.get("movement_state", -1) != FCWTypes.MovementState.ORBITING:
+			continue
+
+		# Found a candidate - prefer cruisers
+		if decoy_ship.is_empty() or ship_type == FCWTypes.ShipType.CRUISER:
+			decoy_ship = entity
+			if ship_type == FCWTypes.ShipType.CRUISER:
+				break  # Cruiser is ideal, stop searching
+
+	if decoy_ship.is_empty():
+		_add_log_entry("DECOY FAILED: No available capital ships to send.")
+		return
+
+	# Send the ship to Saturn via direct route (visible burn to attract Herald)
+	store.dispatch_set_entity_destination(decoy_ship.id, FCWTypes.ZoneId.SATURN, "direct")
+
+	var ship_name = decoy_ship.get("name", decoy_ship.id)
+	_add_log_entry("[color=orange]DECOY ORDER ISSUED[/color]: %s burning to Saturn." % ship_name)
 	_add_log_entry("This will raise Saturn's signature and may draw the Herald there.")
 	_sync_ui()
 
@@ -1286,6 +1319,8 @@ func _process_week_end() -> void:
 			move_child(_battle_view, get_child_count() - 1)
 
 			_battle_view.start_battle(zone_name, defending_ships, herald_count, will_hold)
+			# Slow down to normal speed so player can watch the battle
+			_slow_down_for_battle()
 		else:
 			# Primary view busy, spawn a cascading view
 			_spawn_cascading_battle_view(zone_name, defending_ships, herald_count, will_hold)
@@ -1392,6 +1427,12 @@ func _run_ai_turn() -> void:
 	## - ENDGAME: Pure evacuation, all ships protect transports
 
 	var state = store.get_state()
+
+	# GO DARK: Complete radio silence - no AI activity at all
+	# This is the price of hiding: no reinforcements, no production, nothing
+	if state.get("earth_isolated", false):
+		return
+
 	var phase = FCWStateEvaluator.get_game_phase(state)
 
 	# Phase-adaptive strategy
@@ -1561,6 +1602,11 @@ func _execute_ranked_build_actions(state: Dictionary) -> void:
 
 func _ai_build_ships(_turn: int, herald_strength: int) -> void:
 	## Need-based ship building: analyze strategic situation and build accordingly
+
+	# GO DARK: No production activity - complete radio silence
+	if store.is_earth_isolated():
+		return
+
 	var capacity = store.get_production_capacity()
 	if capacity <= 0:
 		return
@@ -1970,6 +2016,28 @@ func _on_battle_complete() -> void:
 	if _battle_view.is_expanded():
 		_battle_view.set_expanded(false)
 		_set_battle_view_size(false)
+	# Restore pre-battle speed
+	_restore_speed_after_battle()
+
+func _slow_down_for_battle() -> void:
+	## Slow the game to normal speed when battle starts so player can watch
+	if _pre_battle_speed_index < 0 and _speed_index > 2:  # Only if not already slowed and going faster than normal
+		_pre_battle_speed_index = _speed_index
+		_speed_index = 2  # Normal speed
+		speed_slider.value = _speed_index
+		if solar_map:
+			solar_map.set_speed(TICKS_PER_SECOND[_speed_index])
+		_sync_ui()
+
+func _restore_speed_after_battle() -> void:
+	## Restore the speed from before the battle started
+	if _pre_battle_speed_index >= 0:
+		_speed_index = _pre_battle_speed_index
+		_pre_battle_speed_index = -1
+		speed_slider.value = _speed_index
+		if solar_map:
+			solar_map.set_speed(TICKS_PER_SECOND[_speed_index])
+		_sync_ui()
 
 func _on_extra_battle_complete(battle_view: FCWBattleView) -> void:
 	# Remove and free the extra battle view when its battle ends
@@ -2232,9 +2300,97 @@ func _on_game_over(victory_tier: int) -> void:
 	if solar_map:
 		solar_map.cinematic_game_over()
 
-	# Trigger defiant final transmission sequence before showing panel
+	var state = store.get_state()
+	var herald_departed = state.get("herald_departed", false)
 	var evacuated = store.get_lives_evacuated()
 	var pop_str = FCWTypes.format_population(evacuated)
+
+	if herald_departed:
+		# HERALD DEPARTURE - Special victory ending
+		await _show_departure_ending(evacuated, pop_str, victory_tier)
+	else:
+		# STANDARD ENDING - Earth falls
+		await _show_standard_ending(evacuated, pop_str, victory_tier)
+
+
+func _show_departure_ending(evacuated: int, pop_str: String, victory_tier: int) -> void:
+	## Special ending when Herald gives up and leaves after GO DARK
+
+	# First transmission - disbelief
+	if solar_map:
+		solar_map.spawn_transmission(
+			"Deep Space Net",
+			"Tracking stations confirm: Herald trajectory is outbound. It's... leaving.",
+			0
+		)
+
+	await get_tree().create_timer(3.0).timeout
+
+	# Second transmission - relief
+	if solar_map and is_inside_tree():
+		solar_map.spawn_transmission(
+			"Earth Command",
+			"All stations stand down. We did it. Twelve weeks of silence and it couldn't find us.",
+			0
+		)
+
+	await get_tree().create_timer(3.5).timeout
+
+	# Third transmission - remembrance
+	if solar_map and is_inside_tree():
+		var colonies_lost = _count_fallen_zones()
+		if colonies_lost > 0:
+			solar_map.spawn_transmission(
+				"Memorial",
+				"We mourn those we couldn't save. Their sacrifice bought our silence.",
+				0
+			)
+		else:
+			solar_map.spawn_transmission(
+				"Celebration",
+				"Earth stands. Humanity endures. The darkness passes.",
+				0
+			)
+
+	await get_tree().create_timer(3.0).timeout
+
+	if not is_inside_tree():
+		return
+
+	game_over_panel.visible = true
+
+	# Special victory message for departure
+	victory_tier_label.text = "SURVIVOR"
+	victory_desc_label.text = '"We went dark. We stayed hidden. We survived."'
+
+	# Stats for departure ending
+	var stats = ""
+	stats += "SOULS PRESERVED: %s\n" % pop_str
+	stats += "The Herald searched for twelve weeks.\n"
+	stats += "It found nothing. It left.\n\n"
+
+	var colonies_lost = _count_fallen_zones()
+	var state = store.get_state()
+	var lives_lost = state.get("lives_lost", 0) + state.get("lives_intercepted", 0)
+
+	if colonies_lost > 0 or lives_lost > 0:
+		stats += "THE PRICE OF SILENCE:\n"
+		if colonies_lost > 0:
+			stats += "  Colonies Abandoned: %d\n" % colonies_lost
+		if lives_lost > 0:
+			stats += "  Lives Lost: %s\n" % FCWTypes.format_population(lives_lost)
+		stats += "\n"
+	else:
+		stats += "All colonies intact.\n"
+		stats += "Perfect silence.\n\n"
+
+	stats += "Weeks of Darkness: %d\n" % store.get_turn()
+	stats += "\nThey came. They searched. They left."
+	final_stats_label.text = stats
+
+
+func _show_standard_ending(evacuated: int, pop_str: String, victory_tier: int) -> void:
+	## Standard ending when Earth falls
 
 	# The defiant final message - not surrender, but testament
 	if solar_map:
@@ -2301,6 +2457,18 @@ func _on_game_over(victory_tier: int) -> void:
 	stats += "Final Fleet Strength: %d\n" % store.get_total_fleet_strength()
 	stats += "\nThey will find us among the stars."
 	final_stats_label.text = stats
+
+
+func _count_fallen_zones() -> int:
+	## Count how many zones fell during GO DARK
+	var count = 0
+	var state = store.get_state()
+	var zones = state.get("zones", {})
+	for zone_id in zones:
+		var zone = zones[zone_id]
+		if zone.get("status", FCWTypes.ZoneStatus.CONTROLLED) == FCWTypes.ZoneStatus.FALLEN:
+			count += 1
+	return count
 
 func _on_new_game() -> void:
 	game_over_panel.visible = false

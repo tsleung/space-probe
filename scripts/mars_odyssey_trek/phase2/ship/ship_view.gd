@@ -547,6 +547,13 @@ func get_room_position(room_type: int) -> Vector2:
 func get_crew_member(role: String) -> CrewMember:
 	return crew.get(role)
 
+func set_crew_game_speed(multiplier: float) -> void:
+	## Set the game speed multiplier for all crew members
+	## This makes crew move proportionally faster when game speed increases
+	for role in crew:
+		var member = crew[role]
+		member.game_speed_multiplier = multiplier
+
 # ============================================================================
 # PHASE 2 STORE INTEGRATION
 # ============================================================================

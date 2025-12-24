@@ -553,9 +553,9 @@ func _get_defensive_position(fleet_center: Vector2, front_line: Vector2, weapon_
 			var spread = randf_range(-40, 40)
 			return fleet_center - front_dir * 60 + spread_dir * spread
 		"support":
-			# Support ships: Center of formation for maximum coverage
-			var spread = randf_range(-50, 50)
-			return fleet_center + spread_dir * spread
+			# Support ships: Move WITH combat ships, position near assault line
+			var spread = randf_range(-60, 60)
+			return fleet_center + front_dir * 70 + spread_dir * spread
 		"anchor":
 			# Starbases don't move
 			return fleet_center
@@ -576,8 +576,8 @@ func _get_offensive_position(current_pos: Vector2, front_line: Vector2, weapon_r
 			# Cruisers: Advance but maintain range
 			return current_pos.lerp(front_line, 0.15)
 		"support":
-			# Support: Follow the assault ships
-			return current_pos.lerp(front_line, 0.3)
+			# Support: Keep up with assault ships - move aggressively!
+			return current_pos.lerp(front_line, 0.38)
 		"anchor":
 			return current_pos  # Starbases don't move
 

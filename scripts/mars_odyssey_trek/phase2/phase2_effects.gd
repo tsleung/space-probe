@@ -595,3 +595,390 @@ func update_mars_size(progress: float) -> void:
 	if mars_node:
 		var scale = lerp(0.2, 2.0, progress * progress)
 		mars_node.scale = Vector2(scale, scale)
+
+# ============================================================================
+# TASK VISUAL EFFECTS
+# ============================================================================
+# Visual effects triggered during task execution based on task_config.visual
+
+## Active task effects tracking (for cleanup)
+var _active_task_effects: Dictionary = {}  # task_id -> Array of effect nodes
+var _active_task_tweens: Dictionary = {}   # task_id -> Array of tweens
+
+func trigger_task_visual(visual_type: String, location: Vector2, task_id: String = "") -> void:
+	## Trigger a task-specific visual effect at the given location
+	## visual_type matches task_config.visual values
+	match visual_type:
+		"crew_gather":
+			_effect_crew_gather(location, task_id)
+		"ship_rotate":
+			_effect_ship_rotate(task_id)
+		"console_work":
+			_effect_console_work(location, task_id)
+		"scan_effect":
+			_effect_scan(location, task_id)
+		"eva_suit_up":
+			_effect_eva_suit_up(location, task_id)
+		"surgery":
+			_effect_surgery(location, task_id)
+		"therapy_session":
+			_effect_therapy(location, task_id)
+		"cargo_float":
+			_effect_cargo_float(location, task_id)
+		"panel_open":
+			_effect_panel_open(location, task_id)
+		"coding":
+			_effect_coding(location, task_id)
+		"vitals_monitor":
+			_effect_vitals_monitor(location, task_id)
+		_:
+			# Default: gentle pulse at location
+			_effect_generic_work(location, task_id)
+
+func stop_task_visual(task_id: String) -> void:
+	## Stop and clean up visual effects for a completed/cancelled task
+	# First kill all tweens to prevent infinite loop errors
+	if _active_task_tweens.has(task_id):
+		for tween in _active_task_tweens[task_id]:
+			if tween and tween.is_valid():
+				tween.kill()
+		_active_task_tweens.erase(task_id)
+
+	# Then free the effect nodes
+	if _active_task_effects.has(task_id):
+		for effect in _active_task_effects[task_id]:
+			if is_instance_valid(effect):
+				effect.queue_free()
+		_active_task_effects.erase(task_id)
+
+func _register_task_effect(task_id: String, effect: Node) -> void:
+	## Track an effect node for later cleanup
+	if not _active_task_effects.has(task_id):
+		_active_task_effects[task_id] = []
+	_active_task_effects[task_id].append(effect)
+
+func _register_task_tween(task_id: String, tween: Tween) -> void:
+	## Track a tween for later cleanup
+	if not _active_task_tweens.has(task_id):
+		_active_task_tweens[task_id] = []
+	_active_task_tweens[task_id].append(tween)
+
+# --- Individual Effect Implementations ---
+
+func _effect_crew_gather(pos: Vector2, task_id: String) -> void:
+	## Crew gathering - warm ambient glow pulsing at location
+	var glow = _create_ambient_glow(pos, Color(1.0, 0.9, 0.6, 0.3), 40.0)
+	add_child(glow)
+	_register_task_effect(task_id, glow)
+
+	# Pulsing animation
+	var tween = create_tween().set_loops()
+	tween.tween_property(glow, "modulate:a", 0.6, 1.5).set_trans(Tween.TRANS_SINE)
+	tween.tween_property(glow, "modulate:a", 0.3, 1.5).set_trans(Tween.TRANS_SINE)
+	_register_task_tween(task_id, tween)
+
+func _effect_ship_rotate(task_id: String) -> void:
+	## Ship rotating for shelter - gentle whole-screen color shift
+	var overlay = ColorRect.new()
+	overlay.color = Color(0.2, 0.3, 0.5, 0.1)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var layer = CanvasLayer.new()
+	layer.layer = 2
+	add_child(layer)
+	layer.add_child(overlay)
+	_register_task_effect(task_id, layer)
+
+	# Slow color shift
+	var tween = create_tween().set_loops()
+	tween.tween_property(overlay, "color:a", 0.2, 3.0).set_trans(Tween.TRANS_SINE)
+	tween.tween_property(overlay, "color:a", 0.05, 3.0).set_trans(Tween.TRANS_SINE)
+	_register_task_tween(task_id, tween)
+
+func _effect_console_work(pos: Vector2, task_id: String) -> void:
+	## Console work - flickering screen light + occasional data particles
+	var light = _create_ambient_glow(pos, Color(0.4, 0.7, 1.0, 0.4), 25.0)
+	add_child(light)
+	_register_task_effect(task_id, light)
+
+	# Flickering effect
+	var tween = create_tween().set_loops()
+	tween.tween_property(light, "modulate:a", 0.8, 0.1)
+	tween.tween_property(light, "modulate:a", 0.4, 0.2)
+	tween.tween_property(light, "modulate:a", 0.6, 0.15)
+	tween.tween_property(light, "modulate:a", 0.3, 0.3)
+	_register_task_tween(task_id, tween)
+
+	# Spawn data particles periodically
+	_spawn_data_particles_loop(pos, task_id)
+
+func _effect_scan(pos: Vector2, task_id: String) -> void:
+	## Scanning - sweeping line effect
+	var scanner = Node2D.new()
+	scanner.position = pos
+	add_child(scanner)
+	_register_task_effect(task_id, scanner)
+
+	var scan_line = Line2D.new()
+	scan_line.width = 2.0
+	scan_line.default_color = Color(0.3, 1.0, 0.5, 0.6)
+	scan_line.points = [Vector2(-30, 0), Vector2(30, 0)]
+	scanner.add_child(scan_line)
+
+	# Sweeping rotation
+	var tween = create_tween().set_loops()
+	tween.tween_property(scanner, "rotation_degrees", 360, 2.0).set_trans(Tween.TRANS_LINEAR)
+	_register_task_tween(task_id, tween)
+
+func _effect_eva_suit_up(pos: Vector2, task_id: String) -> void:
+	## EVA preparation - airlock pressurization lights + status indicators
+	# Red warning light
+	var warning = _create_ambient_glow(pos + Vector2(0, -20), Color(1.0, 0.3, 0.2, 0.5), 15.0)
+	add_child(warning)
+	_register_task_effect(task_id, warning)
+
+	# Blinking warning
+	var tween = create_tween().set_loops()
+	tween.tween_property(warning, "modulate:a", 1.0, 0.3)
+	tween.tween_property(warning, "modulate:a", 0.2, 0.3)
+	_register_task_tween(task_id, tween)
+
+	# Occasional hiss particles (air cycling)
+	_spawn_eva_hiss_loop(pos, task_id)
+
+func _effect_surgery(pos: Vector2, task_id: String) -> void:
+	## Surgery - bright focused light + sterile blue ambient
+	# Surgical light (bright white cone)
+	var light = _create_ambient_glow(pos, Color(1.0, 1.0, 0.95, 0.6), 35.0)
+	add_child(light)
+	_register_task_effect(task_id, light)
+
+	# Blue sterile ambient
+	var ambient = _create_ambient_glow(pos + Vector2(0, 10), Color(0.5, 0.7, 1.0, 0.2), 50.0)
+	add_child(ambient)
+	_register_task_effect(task_id, ambient)
+
+	# Subtle pulse (heartbeat-like)
+	var tween = create_tween().set_loops()
+	tween.tween_property(light, "modulate:a", 0.8, 0.4)
+	tween.tween_property(light, "modulate:a", 0.5, 0.6)
+	_register_task_tween(task_id, tween)
+
+func _effect_therapy(pos: Vector2, task_id: String) -> void:
+	## Therapy/counseling - calm warm glow, soft pulsing
+	var glow = _create_ambient_glow(pos, Color(0.9, 0.7, 0.5, 0.25), 45.0)
+	add_child(glow)
+	_register_task_effect(task_id, glow)
+
+	# Very slow, calming pulse
+	var tween = create_tween().set_loops()
+	tween.tween_property(glow, "modulate:a", 0.4, 3.0).set_trans(Tween.TRANS_SINE)
+	tween.tween_property(glow, "modulate:a", 0.2, 3.0).set_trans(Tween.TRANS_SINE)
+	_register_task_tween(task_id, tween)
+
+func _effect_cargo_float(pos: Vector2, task_id: String) -> void:
+	## Cargo work - floating boxes visual
+	for i in range(3):
+		var box = ColorRect.new()
+		var size = randf_range(8, 14)
+		box.size = Vector2(size, size)
+		box.color = Color(0.5, 0.45, 0.4, 0.7)
+		box.position = pos + Vector2(randf_range(-30, 30), randf_range(-20, 20))
+		box.pivot_offset = box.size / 2
+		add_child(box)
+		_register_task_effect(task_id, box)
+
+		# Floating animation
+		var float_offset = randf_range(-15, 15)
+		var float_time = randf_range(2.0, 4.0)
+		var tween = create_tween().set_loops()
+		tween.tween_property(box, "position:y", box.position.y + float_offset, float_time).set_trans(Tween.TRANS_SINE)
+		tween.tween_property(box, "position:y", box.position.y - float_offset, float_time).set_trans(Tween.TRANS_SINE)
+		_register_task_tween(task_id, tween)
+
+		# Slow rotation
+		var rot_tween = create_tween().set_loops()
+		rot_tween.tween_property(box, "rotation_degrees", randf_range(-20, 20), float_time * 1.5)
+		rot_tween.tween_property(box, "rotation_degrees", randf_range(-20, 20), float_time * 1.5)
+		_register_task_tween(task_id, rot_tween)
+
+func _effect_panel_open(pos: Vector2, task_id: String) -> void:
+	## Panel open/repair - exposed wires, occasional sparks
+	# Wire bundle visual
+	var wires = Node2D.new()
+	wires.position = pos
+	add_child(wires)
+	_register_task_effect(task_id, wires)
+
+	for i in range(4):
+		var wire = Line2D.new()
+		wire.width = 2.0
+		var wire_color = [Color.RED, Color.BLUE, Color.YELLOW, Color.GREEN][i]
+		wire.default_color = wire_color
+		wire.points = [
+			Vector2(0, i * 4 - 6),
+			Vector2(randf_range(10, 20), i * 4 - 6 + randf_range(-3, 3))
+		]
+		wires.add_child(wire)
+
+	# Occasional sparks
+	_spawn_repair_sparks_loop(pos, task_id)
+
+func _effect_coding(pos: Vector2, task_id: String) -> void:
+	## Coding/programming - matrix-style falling characters
+	var code_container = Node2D.new()
+	code_container.position = pos
+	add_child(code_container)
+	_register_task_effect(task_id, code_container)
+
+	# Green terminal glow
+	var glow = _create_ambient_glow(pos, Color(0.2, 0.8, 0.3, 0.3), 30.0)
+	add_child(glow)
+	_register_task_effect(task_id, glow)
+
+	# Spawn falling code characters periodically
+	_spawn_code_rain_loop(pos, task_id)
+
+func _effect_vitals_monitor(pos: Vector2, task_id: String) -> void:
+	## Vitals monitoring - heartbeat line + beeping indicator
+	var monitor = Node2D.new()
+	monitor.position = pos
+	add_child(monitor)
+	_register_task_effect(task_id, monitor)
+
+	# Green screen glow
+	var glow = _create_ambient_glow(pos, Color(0.3, 0.9, 0.4, 0.3), 25.0)
+	add_child(glow)
+	_register_task_effect(task_id, glow)
+
+	# Beeping indicator light
+	var indicator = ColorRect.new()
+	indicator.size = Vector2(6, 6)
+	indicator.position = pos + Vector2(20, -15)
+	indicator.color = Color(0.3, 1.0, 0.4, 0.8)
+	add_child(indicator)
+	_register_task_effect(task_id, indicator)
+
+	# Beep animation
+	var tween = create_tween().set_loops()
+	tween.tween_property(indicator, "modulate:a", 1.0, 0.1)
+	tween.tween_property(indicator, "modulate:a", 0.3, 0.9)
+	_register_task_tween(task_id, tween)
+
+func _effect_generic_work(pos: Vector2, task_id: String) -> void:
+	## Generic work indicator - simple pulsing circle
+	var glow = _create_ambient_glow(pos, Color(0.6, 0.6, 0.8, 0.3), 30.0)
+	add_child(glow)
+	_register_task_effect(task_id, glow)
+
+	var tween = create_tween().set_loops()
+	tween.tween_property(glow, "modulate:a", 0.5, 1.0).set_trans(Tween.TRANS_SINE)
+	tween.tween_property(glow, "modulate:a", 0.2, 1.0).set_trans(Tween.TRANS_SINE)
+	_register_task_tween(task_id, tween)
+
+# --- Effect Helpers ---
+
+func _create_ambient_glow(pos: Vector2, color: Color, radius: float) -> Node2D:
+	## Create a circular ambient glow effect
+	var glow = Node2D.new()
+	glow.position = pos
+
+	var glow_radius = radius
+	var glow_color = color
+
+	glow.draw.connect(func():
+		# Draw gradient circle (multiple rings fading outward)
+		for i in range(5):
+			var ring_radius = glow_radius * (1.0 - float(i) * 0.15)
+			var ring_color = glow_color
+			ring_color.a = glow_color.a * (1.0 - float(i) * 0.2)
+			glow.draw_circle(Vector2.ZERO, ring_radius, ring_color)
+	)
+	glow.queue_redraw()
+
+	return glow
+
+func _spawn_data_particles_loop(pos: Vector2, task_id: String) -> void:
+	## Spawn rising data particles periodically (for console work)
+	if not _active_task_effects.has(task_id):
+		return
+
+	# Spawn a few particles
+	for i in range(2):
+		var particle = ColorRect.new()
+		particle.size = Vector2(2, 4)
+		particle.color = Color(0.4, 0.8, 1.0, 0.8)
+		particle.position = pos + Vector2(randf_range(-15, 15), 0)
+		add_child(particle)
+
+		var tween = create_tween()
+		tween.tween_property(particle, "position:y", particle.position.y - 30, 0.8)
+		tween.parallel().tween_property(particle, "modulate:a", 0.0, 0.8)
+		tween.tween_callback(particle.queue_free)
+
+	# Schedule next spawn
+	await get_tree().create_timer(0.5).timeout
+	if _active_task_effects.has(task_id):
+		_spawn_data_particles_loop(pos, task_id)
+
+func _spawn_eva_hiss_loop(pos: Vector2, task_id: String) -> void:
+	## Spawn air cycling particles (for EVA prep)
+	if not _active_task_effects.has(task_id):
+		return
+
+	# Spawn steam particles
+	for i in range(3):
+		var particle = ColorRect.new()
+		particle.size = Vector2(3, 3)
+		particle.color = Color(0.9, 0.95, 1.0, 0.5)
+		particle.position = pos + Vector2(randf_range(-10, 10), 5)
+		add_child(particle)
+
+		var tween = create_tween()
+		tween.tween_property(particle, "position", particle.position + Vector2(randf_range(-20, 20), -25), 0.6)
+		tween.parallel().tween_property(particle, "modulate:a", 0.0, 0.6)
+		tween.tween_callback(particle.queue_free)
+
+	# Schedule next spawn
+	await get_tree().create_timer(1.5).timeout
+	if _active_task_effects.has(task_id):
+		_spawn_eva_hiss_loop(pos, task_id)
+
+func _spawn_repair_sparks_loop(pos: Vector2, task_id: String) -> void:
+	## Spawn occasional repair sparks (for panel work)
+	if not _active_task_effects.has(task_id):
+		return
+
+	# 30% chance to spark this cycle
+	if randf() < 0.3:
+		spawn_sparks(pos + Vector2(randf_range(-5, 15), randf_range(-5, 5)), 3)
+
+	# Schedule next check
+	await get_tree().create_timer(0.8).timeout
+	if _active_task_effects.has(task_id):
+		_spawn_repair_sparks_loop(pos, task_id)
+
+func _spawn_code_rain_loop(pos: Vector2, task_id: String) -> void:
+	## Spawn falling code characters (for coding effect)
+	if not _active_task_effects.has(task_id):
+		return
+
+	var chars = "01{}[]<>=/;:."
+	for i in range(2):
+		var label = Label.new()
+		label.text = chars[randi() % chars.length()]
+		label.position = pos + Vector2(randf_range(-20, 20), -15)
+		label.add_theme_color_override("font_color", Color(0.3, 0.9, 0.4, 0.8))
+		label.add_theme_font_size_override("font_size", 10)
+		add_child(label)
+
+		var tween = create_tween()
+		tween.tween_property(label, "position:y", label.position.y + 30, 0.6)
+		tween.parallel().tween_property(label, "modulate:a", 0.0, 0.6)
+		tween.tween_callback(label.queue_free)
+
+	# Schedule next spawn
+	await get_tree().create_timer(0.3).timeout
+	if _active_task_effects.has(task_id):
+		_spawn_code_rain_loop(pos, task_id)

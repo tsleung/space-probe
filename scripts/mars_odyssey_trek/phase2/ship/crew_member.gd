@@ -36,6 +36,10 @@ var task_duration: float = 0.0
 
 var is_emergency: bool = false
 
+# Game speed multiplier (set externally based on game speed setting)
+# 1.0 = normal, higher = faster movement to match faster game time
+var game_speed_multiplier: float = 1.0
+
 # Idle wandering state
 var idle_timer: float = 0.0
 var idle_wander_delay: float = 5.0  # Seconds between wandering
@@ -339,7 +343,7 @@ func _physics_process(delta: float) -> void:
 	if tile_mode_enabled:
 		_process_tile_mode(delta)
 	else:
-		# Legacy continuous movement
+		# Smooth continuous movement (default mode)
 		match current_state:
 			ShipTypes.CrewState.IDLE:
 				_process_idle(delta)
@@ -391,7 +395,7 @@ func _process_waypoint_movement_eva(delta: float) -> void:
 
 	# Slower EVA movement with slight drift
 	var direction = global_position.direction_to(target)
-	var eva_speed = ShipTypes.CREW_WALK_SPEED * 0.6  # 60% normal speed
+	var eva_speed = ShipTypes.CREW_WALK_SPEED * 0.6 * game_speed_multiplier  # 60% normal speed
 	var drift = Vector2(sin(Time.get_ticks_msec() * 0.002) * 0.1, cos(Time.get_ticks_msec() * 0.003) * 0.1)
 	global_position += (direction + drift).normalized() * eva_speed * delta
 
@@ -495,7 +499,7 @@ func _process_wandering(delta: float) -> void:
 		return
 
 	var direction = global_position.direction_to(wander_target)
-	var wander_speed = ShipTypes.CREW_WALK_SPEED * 0.4  # Slow casual walk
+	var wander_speed = ShipTypes.CREW_WALK_SPEED * 0.4 * game_speed_multiplier  # Slow casual walk
 	global_position += direction * wander_speed * delta
 
 func _process_moving(delta: float) -> void:
@@ -511,7 +515,8 @@ func _process_moving(delta: float) -> void:
 
 	var next_pos = nav_agent.get_next_path_position()
 	var direction = global_position.direction_to(next_pos)
-	var speed = ShipTypes.CREW_RUN_SPEED if is_emergency else ShipTypes.CREW_WALK_SPEED
+	var base_speed = ShipTypes.CREW_RUN_SPEED if is_emergency else ShipTypes.CREW_WALK_SPEED
+	var speed = base_speed * game_speed_multiplier
 
 	velocity = direction * speed
 	move_and_slide()
@@ -534,7 +539,8 @@ func _process_waypoint_movement(delta: float) -> void:
 
 	# Move toward current waypoint
 	var direction = global_position.direction_to(target)
-	var speed = ShipTypes.CREW_RUN_SPEED if is_emergency else ShipTypes.CREW_WALK_SPEED
+	var base_speed = ShipTypes.CREW_RUN_SPEED if is_emergency else ShipTypes.CREW_WALK_SPEED
+	var speed = base_speed * game_speed_multiplier
 	global_position += direction * speed * delta
 
 func _arrive_at_waypoint_destination() -> void:
@@ -782,18 +788,6 @@ func set_state(new_state: ShipTypes.CrewState) -> void:
 
 	current_state = new_state
 	state_changed.emit(new_state)
-
-func move_to_room(room_type: ShipTypes.RoomType, room_position: Vector2, emergency: bool = false) -> void:
-	## Legacy direct movement (may go through walls)
-	target_room = room_type
-	target_position = room_position
-	is_emergency = emergency
-	waypoint_path.clear()
-	waypoint_index = 0
-
-	nav_agent.target_position = room_position
-	_show_path_indicator()  # Show animated path dots
-	set_state(ShipTypes.CrewState.EMERGENCY if emergency else ShipTypes.CrewState.MOVING)
 
 func move_along_path(room_type: ShipTypes.RoomType, path: Array[Vector2], room_node: Node, emergency: bool = false) -> void:
 	## Move through a series of waypoints (corridors) to reach destination

@@ -716,11 +716,13 @@ static func _reduce_advance_week(state: Dictionary, action: Dictionary) -> Dicti
 			log_entry["week"] = new_week  # Add week to log entry
 			new_log.append(log_entry)
 
-	# === CONSTRUCTION PROGRESS (1/52 per week = ~1 year to build) ===
+	# === CONSTRUCTION PROGRESS (respects building's construction_years) ===
 	for i in range(buildings.size()):
 		var building = buildings[i]
 		if building.get("construction_progress", 1.0) < 1.0:
-			var new_progress = minf(1.0, building.construction_progress + (1.0 / 52.0))
+			var construction_years = building.get("construction_years", 1)
+			var weeks_total = construction_years * 52
+			var new_progress = minf(1.0, building.construction_progress + (1.0 / weeks_total))
 			buildings[i] = building.duplicate()
 			buildings[i]["construction_progress"] = new_progress
 
@@ -1635,14 +1637,15 @@ static func _apply_emergency_supplies(resources: Dictionary, buildings: Array, y
 		return result
 
 	# Emergency supply thresholds and amounts (scaled by starport tier)
-	var tier_multiplier = 1.0 + (starport_tier - 1) * 0.25  # T1=1.0, T2=1.25, T3=1.5, T4=1.75, T5=2.0
+	# 5X SUPPLY BOOST - Orbital freighters bring serious cargo!
+	var tier_multiplier = 1.0 + (starport_tier - 1) * 0.5  # T1=1.0, T2=1.5, T3=2.0, T4=2.5, T5=3.0
 	var emergency_thresholds = {
-		"food": {"threshold": 100, "supply": 500 * tier_multiplier},
-		"water": {"threshold": 50, "supply": 200 * tier_multiplier},
-		"oxygen": {"threshold": 25, "supply": 100 * tier_multiplier},
-		"building_materials": {"threshold": 50, "supply": 150 * tier_multiplier},
-		"machine_parts": {"threshold": 20, "supply": 50 * tier_multiplier},
-		"medicine": {"threshold": 10, "supply": 30 * tier_multiplier}
+		"food": {"threshold": 200, "supply": 2500 * tier_multiplier},       # Was 500
+		"water": {"threshold": 100, "supply": 1000 * tier_multiplier},      # Was 200
+		"oxygen": {"threshold": 50, "supply": 500 * tier_multiplier},       # Was 100
+		"building_materials": {"threshold": 100, "supply": 750 * tier_multiplier},  # Was 150
+		"machine_parts": {"threshold": 50, "supply": 250 * tier_multiplier},  # Was 50
+		"medicine": {"threshold": 20, "supply": 150 * tier_multiplier}      # Was 30
 	}
 
 	var supplies_delivered: Array = []

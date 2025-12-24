@@ -133,6 +133,62 @@ signature = clamp(signature, 0.0, 1.0)  # Final clamp
 
 ---
 
+## 2025-12-24: GO DARK Complete Invisibility Design
+
+**Context**: GO DARK mechanic needed to truly protect Earth from Herald detection, not just reduce its signature. The detection dilemma required Earth to be completely invisible when isolated, creating the central tragic choice.
+
+**Options Considered**:
+1. Reduced signature - GO DARK lowers Earth signature by 90% but not to zero
+2. Complete invisibility - GO DARK sets Earth signature to 0, Herald cannot detect or target it
+3. Probabilistic detection - GO DARK gives Herald a small chance to find Earth anyway
+
+**Decision**: Complete invisibility (Option 2).
+
+**Implementation**:
+```gdscript
+# In fcw_herald_ai.gd:update_zone_signatures()
+if zone_id == FCWTypes.ZoneId.EARTH and earth_isolated:
+    sigs[zone_id] = 0.0
+    continue  # Skip all signature calculations
+
+# In fcw_herald_ai.gd:choose_next_target()
+if zone_id == FCWTypes.ZoneId.EARTH and earth_isolated:
+    continue  # Herald cannot target Earth
+
+# Even default path cannot lead to isolated Earth:
+if default_next == FCWTypes.ZoneId.EARTH and earth_isolated:
+    best_target = -1  # Herald is lost - nowhere to go
+
+# In fcw_reducer.gd:_reduce_go_dark_earth()
+new_state.earth_isolated = true
+sigs[FCWTypes.ZoneId.EARTH] = 0.0  # Immediate signature suppression
+```
+
+**Why Complete Invisibility**:
+
+1. **Thematic Consistency**: "If you don't fly to/from Earth, Herald doesn't know it's there" - this requires zero signature, not reduced signature
+
+2. **Threshold Math Works**: Population baselines total ~0.19 (Earth 0.08, Mars 0.0005, etc.). Herald's minimum attraction threshold is 0.1 per zone, but total system activity threshold is 0.2. If Earth goes to 0.0, the remaining baseline is ~0.11. While individual zones may be above 0.1, the total system activity check (< 0.2) means Herald holds position when humanity goes mostly dark. This means:
+   - GO DARK + minimal outer activity = Herald cannot find Earth (Earth signature is 0.0, Herald excludes it from targeting)
+   - Total system activity < 0.2 = Herald holds position (nowhere to go)
+
+3. **Herald Cannot Default to Earth**: The Herald's fallback behavior (following the default inward path when confused) explicitly checks for `earth_isolated`. If Earth is isolated, Herald has no valid target and stays put. This prevents Herald from stumbling onto Earth by accident.
+
+4. **Tragic Choice Matters**: For GO DARK to be a meaningful choice, it must work. If it only reduces signature, players would never use it (risk vs reward doesn't make sense). Complete invisibility creates the dilemma:
+   - **Use GO DARK**: Save Earth's 8 billion, abandon everyone else (TRAGIC tier: 5-15M evacuated)
+   - **Don't use GO DARK**: Try to save everyone, risk Herald finding Earth (HEROIC tier: 40-80M if skilled)
+
+**Consequences**:
+- GO DARK is now a viable endgame strategy for preserving Earth's core population
+- Creates emergent player realization: "Wait, if I go completely dark..."
+- Reinforces the detection dilemma as the core mechanic
+- Herald AI remains observation-limited (doesn't cheat with omniscient planet knowledge)
+- Players must choose: save many (risky) or save Earth (guaranteed but costly)
+
+**Edge Case**: If Herald is already at Mars when GO DARK activates, Herald stays at Mars (no valid targets). Earth survives as long as system activity stays below threshold.
+
+---
+
 ## Template for New Entries
 
 ```markdown

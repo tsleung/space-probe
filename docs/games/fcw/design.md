@@ -340,9 +340,67 @@ Click a ship in the roster to select it, then click a zone to send it there.
 
 **Herald Behavior:**
 1. **Peace Period (Turns 1-3):** No attacks, players prepare
-2. **Target Selection:** Always attack weakest adjacent zone
+2. **Target Selection:** Follows detection signatures (see Detection System below)
 3. **Travel Time:** Herald takes 2-7 weeks to reach target (no teleporting)
 4. **Combat:** Only attacks after arriving at destination
+
+### Detection & Signature System
+
+**Zone Signatures (0.0-1.0):**
+
+Zone signatures represent Herald's detection probability for each zone:
+
+```
+Signature = Population Baseline + Weekly Activity
+
+Population Baseline (capped at 0.15):
+  Earth (8B) = ~0.08
+  Mars (50M) = ~0.0005
+  Jupiter (2M) = ~0.0002
+  Saturn (1M) = ~0.0001
+  Others = ~0.00005-0.0001
+
+Weekly Activity:
+  + Stationed ships × 0.01
+  + Ships built × 0.05
+  + Ships transited × 0.02
+  + Active burns × 0.1
+  + Combat events × 0.15
+  + Evacuations (per million) × 0.001
+```
+
+**Herald Target Selection:**
+
+Herald chooses next zone based on signatures:
+1. Evaluates adjacent zones (and skip targets if signature > 0.4)
+2. Requires minimum 0.1 signature to attract attention
+3. Prefers inward movement (toward Sun) with 0.15 bias
+4. If total system activity < 0.2, Herald holds position (humanity has gone dark)
+5. **GO DARK Exception:** Earth becomes completely invisible when `earth_isolated = true`
+
+**GO DARK Mechanic:**
+
+When GO DARK is activated:
+- `earth_isolated` flag set to `true`
+- Earth's signature immediately drops to 0.0 (radio silence)
+- No population baseline, no activity contribution
+- Herald cannot target Earth, even from adjacent zones (Mars)
+- Herald's default path logic explicitly skips Earth when isolated
+- All evacuation to/from Earth suspended
+- Transports on Earth lanes reverse course (coast back)
+
+This creates the central tragic dilemma:
+- **GO DARK works:** Herald may never find Earth if you go completely silent
+- **Cost is brutal:** Abandon outer colonies, zero evacuation
+- **No guarantees:** Activity *anywhere* in the system can still alert Herald
+- **Threshold matters:** Total system activity < 0.2 = Herald stays put
+
+**Signature Decay:**
+
+Signatures decay each week:
+- Multiply by 0.6 (40% decay per week)
+- Earth maintains minimum 0.05 baseline (UNLESS isolated, then 0.0)
+- Going dark WORKS - signatures fade if you stop activity
 
 ### Combat Resolution
 

@@ -47,7 +47,8 @@ func _ready() -> void:
 		store.eva_triggered.connect(_on_eva_triggered)
 		store.eva_drift_triggered.connect(_on_eva_drift_triggered)
 		store.crew_gather.connect(_on_crew_gather)
-		print("[UI] EVA and crew signals connected")
+		store.speed_changed.connect(_on_speed_changed)
+		print("[UI] EVA, crew, and speed signals connected")
 
 	# Connect EVA repair signal to update exterior surfaces
 	if ship_view and ship_systems:
@@ -107,6 +108,26 @@ func _on_pause() -> void:
 
 func _on_back() -> void:
 	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")
+
+func _on_speed_changed(speed: int) -> void:
+	## Update crew movement speed when game speed changes
+	if not ship_view:
+		return
+
+	# Calculate speed multiplier relative to NORMAL speed
+	# NORMAL = 0.2 seconds per hour (baseline multiplier = 1.0)
+	var seconds_per_hour = Phase2Types.SECONDS_PER_HOUR.get(speed, 0.2)
+	var multiplier: float = 1.0
+
+	if speed == Phase2Types.Speed.PAUSED:
+		# Paused: don't move at all (will resume at previous speed)
+		multiplier = 0.0
+	elif seconds_per_hour > 0:
+		# Calculate relative to normal speed, capped at 8x to avoid ludicrous visual speed
+		var normal_seconds = Phase2Types.SECONDS_PER_HOUR.get(Phase2Types.Speed.NORMAL, 0.2)
+		multiplier = minf(normal_seconds / seconds_per_hour, 8.0)
+
+	ship_view.set_crew_game_speed(multiplier)
 
 # ============================================================================
 # DEBUG INPUT
@@ -194,6 +215,9 @@ func _setup_task_system() -> void:
 
 	# Connect task_penalty_applied signal to dispatch action to store
 	task_manager.task_penalty_applied.connect(_on_task_penalty_applied)
+
+	# Connect task_completed signal to stop visual effects
+	task_manager.task_completed.connect(_on_task_completed_for_effects)
 
 	# Create task panel UI (positioned at right side of screen)
 	task_panel = TaskPanel.new()
@@ -287,13 +311,24 @@ func _on_task_penalty_applied(penalty: Dictionary) -> void:
 		store.dispatch(action)
 		print("[TASK] Penalty dispatched to store: %s" % penalty)
 
+func _on_task_completed_for_effects(task_id: String, _success: bool) -> void:
+	## Stop visual effects when task completes (success or failure)
+	if effects:
+		effects.stop_task_visual(task_id)
+		print("[TASK] Visual effects stopped for task: %s" % task_id)
+
 func _on_event_resolved_with_choice(event: Dictionary, choice_index: int, chosen_option: Dictionary) -> void:
 	## Phase 4: Create task from chosen option's task_config if present
 	## This replaces auto-task creation with choice-specific task creation
 
-	var task_config = chosen_option.get("task_config", {})
-	if task_config.is_empty():
-		# No task_config - either use legacy auto-task or skip
+	# Check if task_config exists and is not null
+	if not chosen_option.has("task_config"):
+		# No task_config key - legacy event, skip (auto-task may apply)
+		return
+
+	var task_config = chosen_option.get("task_config")
+	if task_config == null or (task_config is Dictionary and task_config.is_empty()):
+		# Explicit null or empty = no task for this choice
 		return
 
 	if not task_manager:
@@ -304,14 +339,18 @@ func _on_event_resolved_with_choice(event: Dictionary, choice_index: int, chosen
 	var event_title = event.get("title", "Task")
 	var task_name = task_config.get("name", event_title)
 
-	# Get task location and position
-	var location = task_config.get("location", -1)
+	# Get task location and position (convert string location to RoomType)
+	var location_str = task_config.get("location", "")
+	var location = _location_string_to_room_type(location_str)
 	var position = _get_task_position_for_room(location)
 
-	# Create the task
+	# Create the task (convert string type to enum)
+	var type_str = task_config.get("type", "custom")
+	var task_type = _task_type_string_to_enum(type_str) if type_str is String else type_str
+
 	var full_config = {
 		"name": task_name,
-		"type": task_config.get("type", TaskManager.TaskType.CUSTOM),
+		"type": task_type,
 		"hours": task_config.get("hours", 2),
 		"crew": task_config.get("crew", []),
 		"position": position,
@@ -322,7 +361,50 @@ func _on_event_resolved_with_choice(event: Dictionary, choice_index: int, chosen
 	print("[TASK] Choice-specific task created: %s (id: %s) from option %d" % [task_name, task_id, choice_index])
 
 	# Assign crew to room if we have ship_view
-	_assign_crew_to_task_location(task_config, location)
+	_assign_crew_to_task_location(task_config, location, task_type)
+
+	# Trigger visual effect for the task type
+	var visual_type = task_config.get("visual", "")
+	if visual_type and effects:
+		effects.trigger_task_visual(visual_type, position, task_id)
+		print("[TASK] Visual effect '%s' triggered at position %s" % [visual_type, position])
+
+func _location_string_to_room_type(location_str: String) -> int:
+	## Convert location string from task_config to RoomType enum
+	var ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
+	match location_str.to_lower():
+		"bridge": return ShipTypes.RoomType.BRIDGE
+		"engineering": return ShipTypes.RoomType.ENGINEERING
+		"medical": return ShipTypes.RoomType.MEDICAL
+		"life_support": return ShipTypes.RoomType.LIFE_SUPPORT
+		"quarters": return ShipTypes.RoomType.QUARTERS
+		"cargo_bay": return ShipTypes.RoomType.CARGO_BAY
+		"hydroponics": return ShipTypes.RoomType.HYDROPONICS
+		"airlock": return ShipTypes.RoomType.ENGINEERING  # EVA prep happens near engineering
+		_: return ShipTypes.RoomType.ENGINEERING  # Default fallback
+
+func _task_type_string_to_enum(type_str: String) -> int:
+	## Convert task type string from task_config to TaskManager.TaskType enum
+	match type_str.to_lower():
+		"repair": return TaskManager.TaskType.REPAIR
+		"medical": return TaskManager.TaskType.MEDICAL
+		"eva": return TaskManager.TaskType.EVA
+		"maintenance": return TaskManager.TaskType.MAINTENANCE
+		"research": return TaskManager.TaskType.RESEARCH
+		"crisis": return TaskManager.TaskType.CRISIS
+		"custom": return TaskManager.TaskType.CUSTOM
+		_: return TaskManager.TaskType.CUSTOM  # Default fallback
+
+func _convert_to_ship_task_type(task_manager_type: int) -> int:
+	## Convert TaskManager.TaskType to ShipTypes.TaskType for visual crew work
+	var ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
+	match task_manager_type:
+		TaskManager.TaskType.REPAIR: return ShipTypes.TaskType.REPAIR
+		TaskManager.TaskType.MEDICAL: return ShipTypes.TaskType.TREAT_PATIENT
+		TaskManager.TaskType.EVA: return ShipTypes.TaskType.EVA_REPAIR
+		TaskManager.TaskType.MAINTENANCE: return ShipTypes.TaskType.REPAIR
+		TaskManager.TaskType.CRISIS: return ShipTypes.TaskType.SEAL_BREACH
+		_: return ShipTypes.TaskType.MONITOR  # Default: monitoring work
 
 func _get_task_position_for_room(room_type: int) -> Vector2:
 	## Get spinner position for a room type
@@ -353,7 +435,7 @@ func _get_task_position_for_room(room_type: int) -> Vector2:
 		_:
 			return Vector2(100, 100)
 
-func _assign_crew_to_task_location(task_config: Dictionary, location: int) -> void:
+func _assign_crew_to_task_location(task_config: Dictionary, location: int, task_type: int) -> void:
 	## Send appropriate crew to the task location
 	if not ship_view or location < 0:
 		return
@@ -365,8 +447,11 @@ func _assign_crew_to_task_location(task_config: Dictionary, location: int) -> vo
 	# Get first required crew role and send them to the room
 	var primary_role = crew_roles[0] if crew_roles.size() > 0 else ""
 	if primary_role and ship_view.has_method("send_crew_to_room_with_task"):
-		ship_view.send_crew_to_room_with_task(primary_role, location)
-		print("[TASK] Assigned %s to room %d for task" % [primary_role, location])
+		# Convert TaskManager.TaskType to ShipTypes.TaskType
+		var ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
+		var ship_task_type = _convert_to_ship_task_type(task_type)
+		ship_view.send_crew_to_room_with_task(primary_role, location, ship_task_type)
+		print("[TASK] Assigned %s to room %d for task type %d" % [primary_role, location, ship_task_type])
 
 var _pending_solar_flare: bool = false  # Track if solar flare is incoming
 

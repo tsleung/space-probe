@@ -11,6 +11,7 @@ signal zone_clicked(zone_id: int)
 signal zone_hovered(zone_id: int)
 signal entity_clicked(entity_id: String)
 signal entity_destination_selected(entity_id: String, destination_zone: int, route_type: String)
+signal lane_clicked(lane_key: String)
 
 # ============================================================================
 # ZOOM LEVELS - Multi-level view like Star Wars Rebellion
@@ -314,6 +315,12 @@ var _route_options_zone: int = -1  # Destination zone for route options
 var _route_options: Array = []  # Cached route options for display
 const ENTITY_CLICK_RADIUS = 25.0  # Pixels - click detection radius for entities (larger for ships near planets)
 
+# Evacuation lane interaction
+var _hovered_lane: String = ""  # Lane key under mouse
+var _lane_hover_timer: float = 0.0  # Time spent hovering (for tooltip delay)
+const LANE_TOOLTIP_DELAY = 0.3  # Show tooltip after hovering for 0.3s
+const LANE_HIT_TOLERANCE = 12.0  # Pixels from curve to count as "hovering"
+
 # Stacked entity cycling (for selecting ships at same location)
 var _entities_at_click: Array = []  # All entities at last click position
 var _entity_cycle_index: int = 0  # Current index in cycle
@@ -429,6 +436,10 @@ func _process(delta: float) -> void:
 
 	# Update zoom transitions (always runs for UI responsiveness)
 	_update_zoom(delta)
+
+	# Update lane hover timer (UI interaction, runs even when paused)
+	if _hovered_lane != "":
+		_lane_hover_timer += delta
 
 	# === PAUSED: Skip all time-dependent updates ===
 	# This includes _global_time which drives visual animations
@@ -587,6 +598,9 @@ func _draw_system_view(rect: Rect2) -> void:
 
 	# Draw traffic patterns that Herald has learned
 	_draw_traffic_patterns(offset)
+
+	# Draw evacuation lanes (clickable routes that can be toggled)
+	_draw_evacuation_lanes(offset)
 
 	# Draw entity trajectories (before entities)
 	_draw_entity_trajectories(offset)
@@ -3229,7 +3243,14 @@ func _gui_input(event: InputEvent) -> void:
 		var mouse_pos = event.position
 		var offset = _screen_shake
 
-		# Check for entity hover first
+		# Check for lane hover (evacuation routes)
+		var new_hovered_lane = _get_lane_at_position(mouse_pos, offset)
+		if new_hovered_lane != _hovered_lane:
+			_hovered_lane = new_hovered_lane
+			_lane_hover_timer = 0.0  # Reset tooltip timer
+			queue_redraw()
+
+		# Check for entity hover
 		var new_hovered_entity = _get_entity_at_position(mouse_pos, offset)
 		if new_hovered_entity != _hovered_entity_id:
 			_hovered_entity_id = new_hovered_entity
@@ -3273,6 +3294,12 @@ func _gui_input(event: InputEvent) -> void:
 						queue_redraw()
 					else:
 						_select_entity(entity_id)
+				return
+
+			# Check for lane click (toggle evacuation route)
+			var clicked_lane = _get_lane_at_position(mouse_pos, offset)
+			if clicked_lane != "":
+				lane_clicked.emit(clicked_lane)
 				return
 
 			# If in route selection mode, left-click ONLY selects destinations (zones)
@@ -5434,8 +5461,15 @@ func _get_signature_label(sig: float) -> String:
 func _draw_herald_attention_arrow(offset: Vector2) -> void:
 	## Draw arrow from Herald to its highest-priority target zone
 	## Shows player WHERE Herald is looking and WHY
+	## NOTE: When GO DARK is active and Herald has no target, no arrow is drawn
+
+	# Don't draw if Herald has departed
+	if _state.get("herald_departed", false):
+		return
+
 	var herald_current_zone = _state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
 	var zone_signatures = _state.get("zone_signatures", {})
+	var earth_isolated = _state.get("earth_isolated", false)
 
 	# Find zones Herald can reach from current position
 	var reachable = FCWTypes.get_all_reachable_zones(herald_current_zone)
@@ -5443,9 +5477,13 @@ func _draw_herald_attention_arrow(offset: Vector2) -> void:
 		return
 
 	# Find highest signature zone that's reachable and not fallen
+	# When GO DARK is active, also exclude Earth
 	var highest_sig = -1.0
 	var target_zone = -1
 	for zone_id in reachable:
+		# Skip Earth if isolated (GO DARK active)
+		if zone_id == FCWTypes.ZoneId.EARTH and earth_isolated:
+			continue
 		var zone_data = _zones.get(zone_id, {})
 		if zone_data.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
 			continue
@@ -5454,10 +5492,23 @@ func _draw_herald_attention_arrow(offset: Vector2) -> void:
 			highest_sig = sig
 			target_zone = zone_id
 
+	# Check total system activity - if below threshold, Herald has no target
+	var total_activity = 0.0
+	for zone_id in zone_signatures:
+		total_activity += zone_signatures.get(zone_id, 0.0)
+
+	# If total activity is below threshold, Herald is lost - no arrow to draw
+	if total_activity < FCWTypes.HERALD_MIN_SIG_TO_ATTRACT * 2:
+		return
+
 	# Also consider default inward path if no strong signal
+	# BUT only if there's enough total activity AND target isn't isolated Earth
 	if highest_sig < FCWTypes.HERALD_MIN_SIG_TO_ATTRACT:
 		var default_next = FCWTypes.get_zone_default_next(herald_current_zone)
 		if default_next >= 0:
+			# Skip if default target is Earth and Earth is isolated
+			if default_next == FCWTypes.ZoneId.EARTH and earth_isolated:
+				return  # Herald is lost - no arrow
 			var zone_data = _zones.get(default_next, {})
 			if zone_data.get("status", 0) != FCWTypes.ZoneStatus.FALLEN:
 				target_zone = default_next
@@ -5525,3 +5576,156 @@ func _draw_herald_attention_arrow(offset: Vector2) -> void:
 			tracking_text = "LOCKED"
 		draw_string(font, mid_pos + label_offset + Vector2(-25, 4),
 			tracking_text, HORIZONTAL_ALIGNMENT_CENTER, 60, 9, arrow_color)
+
+# ============================================================================
+# EVACUATION LANE DRAWING AND INTERACTION
+# ============================================================================
+
+## Draw all evacuation lanes with enabled/disabled visual states
+func _draw_evacuation_lanes(offset: Vector2) -> void:
+	var lane_states = _state.get("lane_states", {})
+
+	for lane_key in FCWTypes.EVACUATION_LANES:
+		var lane = FCWTypes.EVACUATION_LANES[lane_key]
+		var from_pos = _get_zone_pixel_pos(lane.from) + offset
+		var to_pos = _get_zone_pixel_pos(lane.to) + offset
+		var is_enabled = lane_states.get(lane_key, true)
+		var is_hovered = lane_key == _hovered_lane
+
+		# Calculate bezier control point (curve away from sun)
+		var control_point = _calc_lane_control_point(from_pos, to_pos)
+
+		if is_enabled:
+			# Enabled: pulsing blue with solid animated line
+			var pulse = sin(_global_time * 2.0) * 0.15 + 0.85
+			var base_alpha = 0.25 * pulse
+			var color = Color(0.3, 0.6, 0.9, base_alpha)
+			var line_width = 1.5
+
+			if is_hovered:
+				color = Color(0.5, 0.8, 1.0, 0.5)
+				line_width = 2.5
+
+			_draw_animated_bezier(from_pos, control_point, to_pos, color, line_width)
+		else:
+			# Disabled: dimmed dashed gray (static, no animation)
+			var color = Color(0.4, 0.4, 0.4, 0.2)
+			var line_width = 1.0
+
+			if is_hovered:
+				color = Color(0.5, 0.5, 0.5, 0.4)
+				line_width = 2.0
+
+			_draw_dashed_bezier_static(from_pos, control_point, to_pos, color, line_width)
+
+		# Draw toggle tooltip if hovered long enough
+		if is_hovered and _lane_hover_timer > LANE_TOOLTIP_DELAY:
+			_draw_lane_tooltip(lane_key, is_enabled, control_point)
+
+## Calculate control point for lane bezier curve (arc away from sun)
+func _calc_lane_control_point(from_pos: Vector2, to_pos: Vector2) -> Vector2:
+	var midpoint = from_pos.lerp(to_pos, 0.5)
+	var distance = from_pos.distance_to(to_pos)
+
+	# Sun is roughly at Earth's position (center-right of map)
+	var sun_pos = _get_zone_pixel_pos(FCWTypes.ZoneId.EARTH)
+	var away_from_sun = (midpoint - sun_pos).normalized()
+
+	# Arc away from sun (like transfer orbits)
+	return midpoint + away_from_sun * distance * 0.15
+
+## Draw static dashed bezier curve (for disabled lanes - no animation)
+func _draw_dashed_bezier_static(p0: Vector2, p1: Vector2, p2: Vector2, color: Color, width: float) -> void:
+	var segments = 24
+	var dash_length = 8.0
+	var gap_length = 8.0
+
+	# Generate curve points
+	var points: Array[Vector2] = []
+	for i in range(segments + 1):
+		var t = float(i) / segments
+		var t1 = 1.0 - t
+		var point = t1 * t1 * p0 + 2 * t1 * t * p1 + t * t * p2
+		points.append(point)
+
+	# Calculate arc lengths
+	var arc_lengths: Array[float] = [0.0]
+	for i in range(1, points.size()):
+		arc_lengths.append(arc_lengths[i - 1] + points[i - 1].distance_to(points[i]))
+	var total_length = arc_lengths[arc_lengths.size() - 1]
+
+	# Draw dashes (no animation offset for disabled lanes)
+	var current_dist = 0.0
+	var drawing = true
+
+	while current_dist < total_length:
+		var segment_end = current_dist + (dash_length if drawing else gap_length)
+
+		if drawing and current_dist < total_length:
+			var start_dist = current_dist
+			var end_dist = minf(total_length, segment_end)
+			if start_dist < end_dist:
+				var start_point = _get_point_at_arc_length(points, arc_lengths, start_dist)
+				var end_point = _get_point_at_arc_length(points, arc_lengths, end_dist)
+				draw_line(start_point, end_point, color, width)
+
+		current_dist = segment_end
+		drawing = not drawing
+
+## Draw tooltip showing ENABLE/DISABLE for hovered lane
+func _draw_lane_tooltip(lane_key: String, is_enabled: bool, pos: Vector2) -> void:
+	var font = ThemeDB.fallback_font
+	var text = "DISABLE" if is_enabled else "ENABLE"
+	var bg_color = Color(0.15, 0.15, 0.2, 0.9)
+	var text_color = Color.WHITE if is_enabled else Color(0.5, 1.0, 0.5)
+
+	# Get lane name for display
+	var lane = FCWTypes.EVACUATION_LANES.get(lane_key, {})
+	var lane_name = lane.get("name", lane_key)
+
+	# Draw tooltip background
+	var text_size = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+	var name_size = font.get_string_size(lane_name, HORIZONTAL_ALIGNMENT_CENTER, -1, 10)
+	var box_width = maxf(text_size.x, name_size.x) + 16
+	var box_height = text_size.y + name_size.y + 12
+
+	var rect = Rect2(pos - Vector2(box_width / 2, box_height + 5), Vector2(box_width, box_height))
+	draw_rect(rect, bg_color)
+	draw_rect(rect, Color.WHITE.darkened(0.6), false, 1.0)
+
+	# Draw lane name (smaller, gray)
+	draw_string(font, pos - Vector2(name_size.x / 2, box_height - 4),
+		lane_name, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(0.7, 0.7, 0.7))
+
+	# Draw action text (larger, colored)
+	draw_string(font, pos - Vector2(text_size.x / 2, 10),
+		text, HORIZONTAL_ALIGNMENT_CENTER, -1, 12, text_color)
+
+## Get the lane key at a given screen position (hit detection)
+func _get_lane_at_position(pos: Vector2, offset: Vector2) -> String:
+	for lane_key in FCWTypes.EVACUATION_LANES:
+		var lane = FCWTypes.EVACUATION_LANES[lane_key]
+		var from_pos = _get_zone_pixel_pos(lane.from) + offset
+		var to_pos = _get_zone_pixel_pos(lane.to) + offset
+		var control_point = _calc_lane_control_point(from_pos, to_pos)
+
+		if _point_near_bezier(pos, from_pos, control_point, to_pos, LANE_HIT_TOLERANCE):
+			return lane_key
+
+	return ""
+
+## Check if a point is within tolerance of a bezier curve
+func _point_near_bezier(point: Vector2, p0: Vector2, p1: Vector2, p2: Vector2, tolerance: float) -> bool:
+	# Sample the curve at multiple points and find minimum distance
+	const SAMPLES = 20
+	var min_dist = INF
+
+	for i in range(SAMPLES + 1):
+		var t = float(i) / SAMPLES
+		var t1 = 1.0 - t
+		var curve_point = t1 * t1 * p0 + 2 * t1 * t * p1 + t * t * p2
+		var dist = point.distance_to(curve_point)
+		min_dist = minf(min_dist, dist)
+
+	# Scale tolerance by zoom level
+	return min_dist <= tolerance * _map_zoom

@@ -182,6 +182,21 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 	var resource_trends = analyze_resource_trends(state)
 	var deficit_boosts = calc_deficit_priority_boosts(resource_trends, current_year)
 
+	# === DEFICIT-DRIVEN BUILDING INJECTION ===
+	# CRITICAL: Ensure buildings that address deficits are ALWAYS in the priority list
+	# Without this, the deficit_boosts mechanism can't work!
+	var deficit_priorities: Array = []
+	for resource_name in resource_trends:
+		var trend = resource_trends[resource_name]
+		if trend.urgency > 0:  # Any deficit
+			var producers = _get_producers_for_resource(resource_name)
+			for building_type in producers:
+				# Add with base priority 70 - deficit_boosts will increase this
+				deficit_priorities.append({
+					"type": building_type,
+					"priority": 70  # Base priority for deficit response
+				})
+
 	# Calculate current capacities
 	var housing_balance = _MCSEconomy.calc_housing_balance(buildings, colonists)
 	var power_balance = _MCSEconomy.calc_power_balance(buildings, colonists)
@@ -217,29 +232,37 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 			"priority": 88
 		})
 
-	# Food production - only after year 2, and less aggressive early
+	# Food production - CRITICAL survival check
+	# Consumption is 50 food/colonist/year (from balance.json)
 	var food = resources.get("food", 0.0)
-	var food_consumption = pop_count * 600.0  # Per year
-	var food_buffer = 1.2 if current_year <= 5 else (1.5 if current_year <= 15 else 2.0)
-	if food < food_consumption * food_buffer and current_year >= 2:
+	var food_consumption_per_year = pop_count * 50.0  # Actual consumption rate
+	var food_years_supply = food / maxf(food_consumption_per_year, 1.0)
+	# Build more food production if less than 2 years supply
+	if food_years_supply < 2.0 and current_year >= 2:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.AGRIDOME,
-			"priority": 85
+			"priority": 88  # Higher base priority for survival
 		})
 	# Hydroponics for efficiency (later game - requires T3 specialization)
-	if pop_count > 40 and food < food_consumption * 2.5 and current_year > 20:
+	if pop_count > 40 and food_years_supply < 3.0 and current_year > 15:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.HYDROPONICS,
-			"priority": 82
+			"priority": 85
 		})
 
-	# Water/Oxygen extraction - only after year 3
+	# Water/Oxygen extraction - CRITICAL survival check
+	# Consumption is 20 water/colonist/year, 5 oxygen/colonist/year (from balance.json)
 	var water = resources.get("water", 0.0)
-	var water_threshold = pop_count * (100 if current_year <= 5 else 200)
-	if water < water_threshold and current_year >= 3:
+	var water_consumption_per_year = pop_count * 20.0
+	var water_years_supply = water / maxf(water_consumption_per_year, 1.0)
+	var oxygen = resources.get("oxygen", 0.0)
+	var oxygen_consumption_per_year = pop_count * 5.0
+	var oxygen_years_supply = oxygen / maxf(oxygen_consumption_per_year, 1.0)
+	# Build extractors if less than 2 years supply of water OR oxygen
+	if (water_years_supply < 2.0 or oxygen_years_supply < 2.0) and current_year >= 2:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.EXTRACTOR,
-			"priority": 80
+			"priority": 87  # High priority for survival
 		})
 
 	# Fabricator EARLY - critical for building_materials + machine_parts production!
@@ -327,22 +350,46 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 				"priority": 78  # High - enables efficient passenger/cargo transfers
 			})
 
-	# ORBITAL (Space Station) - mass immigration (requires Skyhook for efficient access)
+	# ORBITAL (Space Station) - UNIQUE: Produces machine_parts IN SPACE + mass immigration!
+	# This is the only way to manufacture parts off-planet - critical for late game
+	# Also provides immigration capacity (8-60 per tier) and enables space elevator
 	var has_orbital = false
 	for b in buildings:
 		if b.type == _MCSTypes.BuildingType.ORBITAL:
 			has_orbital = true
 			break
-	if not has_orbital and has_skyhook and current_year >= 25 and pop_count >= 80:
+	if not has_orbital and has_skyhook and current_year >= 25:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.ORBITAL,
-			"priority": 76
+			"priority": 78  # Higher priority - unique machine parts production!
 		})
-	# Fallback: Build orbital without skyhook if very late game and desperate for immigration
-	elif not has_orbital and has_starport and current_year >= 35 and pop_count >= 100:
+	# Fallback: Build orbital without skyhook if late game (needed for space elevator)
+	elif not has_orbital and has_starport and current_year >= 30:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.ORBITAL,
-			"priority": 70
+			"priority": 72
+		})
+
+	# SPACE_ELEVATOR - THE ultimate transport infrastructure!
+	# The crowning achievement of Martian engineering - requires full orbital infrastructure
+	# Physics: Needs orbital station for construction platform + skyhook for material transfer
+	var has_space_elevator = false
+	for b in buildings:
+		if b.type == _MCSTypes.BuildingType.SPACE_ELEVATOR:
+			has_space_elevator = true
+			break
+	# Build space elevator only with FULL orbital infrastructure (both skyhook AND orbital)
+	# This ensures the progression: Starport -> Mass Driver -> Skyhook -> Orbital -> Elevator
+	if not has_space_elevator and has_orbital and has_skyhook and current_year >= 35:
+		priorities.append({
+			"type": _MCSTypes.BuildingType.SPACE_ELEVATOR,
+			"priority": 88  # High but not higher than survival needs
+		})
+	# Fallback: Build with just orbital if very late game (year 45+)
+	elif not has_space_elevator and has_orbital and current_year >= 45:
+		priorities.append({
+			"type": _MCSTypes.BuildingType.SPACE_ELEVATOR,
+			"priority": 82
 		})
 
 	# Medical facilities - HIGH priority for birth capacity!
@@ -474,6 +521,18 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 				"type": variety_types[int(random_value * variety_types.size()) % variety_types.size()],
 				"priority": 45 + random_value * 20
 			})
+
+	# === MERGE DEFICIT-DRIVEN PRIORITIES ===
+	# Add buildings that address deficits (ensures they're in the list for boosting)
+	for dp in deficit_priorities:
+		# Check if this building type is already in priorities
+		var already_present = false
+		for existing in priorities:
+			if existing.type == dp.type:
+				already_present = true
+				break
+		if not already_present:
+			priorities.append(dp)
 
 	# === APPLY DEFICIT PRIORITY BOOSTS ===
 	# Buildings that address resource deficits get priority boost
@@ -1035,9 +1094,10 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 	else:
 		base_builds = 4 + rng.randi() % 4  # Years 60+: 4-7 buildings (mega-colony)
 
-	# In crisis mode, limit construction to 1-2 essential buildings
+	# In crisis mode, BUILD MORE essential production buildings!
+	# Don't starve while waiting - ramp up construction
 	if crisis_mode:
-		base_builds = mini(base_builds, 2)
+		base_builds = maxi(base_builds, 4)  # At least 4 buildings in crisis
 
 	var buildings_this_year = 0
 	var max_buildings = base_builds

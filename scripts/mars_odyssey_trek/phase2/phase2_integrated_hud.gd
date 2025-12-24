@@ -526,10 +526,15 @@ func _on_event_triggered(event: Dictionary) -> void:
 	var state = store.get_state() if store else {}
 	var crew = state.get("crew", [])
 
-	# Add option buttons with blue option styling
+	# Add option buttons with blue option styling and task preview
 	var options = event.get("options", [])
 	for i in range(options.size()):
 		var option = options[i]
+
+		# Create option container (button + task preview)
+		var option_container = VBoxContainer.new()
+		option_container.add_theme_constant_override("separation", 2)
+
 		var button = Button.new()
 		var label = option.get("label", "Option %d" % (i + 1))
 		var description = option.get("description", "")
@@ -556,7 +561,15 @@ func _on_event_triggered(event: Dictionary) -> void:
 
 		if meets_prereqs:
 			button.pressed.connect(_on_option_selected.bind(i))
-		event_options.add_child(button)
+		option_container.add_child(button)
+
+		# Add task preview if task_config exists
+		var task_config = option.get("task_config")
+		if task_config != null and task_config is Dictionary and not task_config.is_empty():
+			var task_preview = _create_task_preview(task_config)
+			option_container.add_child(task_preview)
+
+		event_options.add_child(option_container)
 
 	event_panel.visible = true
 
@@ -590,6 +603,86 @@ func _check_option_prerequisites(option: Dictionary, state: Dictionary, crew: Ar
 		pass
 
 	return true
+
+func _create_task_preview(task_config: Dictionary) -> HBoxContainer:
+	## Create a compact task preview showing: hours, location, crew
+	var preview = HBoxContainer.new()
+	preview.add_theme_constant_override("separation", 8)
+
+	# Container margin to indent it slightly
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	preview.add_child(margin)
+
+	# Task info in a smaller, greyed style
+	var info_container = HBoxContainer.new()
+	info_container.add_theme_constant_override("separation", 6)
+	margin.add_child(info_container)
+
+	# Hours indicator
+	var hours = task_config.get("hours", 0)
+	if hours > 0:
+		var hours_label = Label.new()
+		hours_label.text = "⏱ %dh" % hours
+		hours_label.add_theme_font_size_override("font_size", 10)
+		hours_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.7))
+		info_container.add_child(hours_label)
+
+	# Location indicator
+	var location = task_config.get("location", "")
+	if location != "":
+		var location_label = Label.new()
+		var location_display = _get_location_display_name(location)
+		location_label.text = "📍 %s" % location_display
+		location_label.add_theme_font_size_override("font_size", 10)
+		location_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.7))
+		info_container.add_child(location_label)
+
+	# Crew indicator
+	var crew = task_config.get("crew", [])
+	if crew.size() > 0:
+		var crew_label = Label.new()
+		var crew_names = []
+		for role in crew:
+			crew_names.append(_get_crew_display_name(role))
+		crew_label.text = "👤 %s" % ", ".join(crew_names)
+		crew_label.add_theme_font_size_override("font_size", 10)
+		crew_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.7))
+		info_container.add_child(crew_label)
+
+	# EVA indicator if present
+	var eva_target = task_config.get("eva_target", "")
+	if eva_target != "":
+		var eva_label = Label.new()
+		eva_label.text = "🚀 EVA"
+		eva_label.add_theme_font_size_override("font_size", 10)
+		eva_label.add_theme_color_override("font_color", Color(1.0, 0.6, 0.4))
+		info_container.add_child(eva_label)
+
+	return preview
+
+func _get_location_display_name(location: String) -> String:
+	## Convert location string to display-friendly name
+	match location:
+		"bridge": return "Bridge"
+		"engineering": return "Engineering"
+		"medical": return "Medical"
+		"life_support": return "Life Support"
+		"quarters": return "Quarters"
+		"cargo_bay": return "Cargo"
+		"hydroponics": return "Hydroponics"
+		"airlock": return "Airlock"
+		_: return location.capitalize()
+
+func _get_crew_display_name(role: String) -> String:
+	## Convert crew role to display-friendly name
+	match role:
+		"commander": return "Chen"
+		"engineer": return "Mitchell"
+		"scientist": return "Tanaka"
+		"medic": return "Okafor"
+		"medical": return "Okafor"
+		_: return role.capitalize()
 
 func _on_event_resolved(choice_index: int) -> void:
 	event_panel.visible = false

@@ -1195,8 +1195,8 @@ func _process_dormant_phase(timing: Dictionary):
 	var expansion_phase = state.expansion.phase
 	var total_ships = state.ships.size()
 
-	# Trigger after 7 expansions and 50 ships - gives time to build up (adjusted for smaller expansions)
-	if expansion_phase >= 7 and total_ships >= 50:
+	# Trigger after 4 expansions and 50 ships - earlier Progenitor arrival
+	if expansion_phase >= 4 and total_ships >= 50:
 		_transition_to_whispers()
 
 
@@ -2413,6 +2413,9 @@ func _update_factory_visuals(state: Dictionary):
 
 	for factory_id in to_remove:
 		if is_instance_valid(factory_nodes[factory_id]):
+			# Spawn explosion at factory position
+			var factory_pos = factory_nodes[factory_id].position
+			_spawn_factory_explosion(factory_pos)
 			factory_nodes[factory_id].queue_free()
 		factory_nodes.erase(factory_id)
 
@@ -2828,6 +2831,96 @@ func _spawn_death_explosion(pos: Vector2, size: int, team: int):
 	# For massive explosions, add secondary effects
 	if size == VnpTypes.ShipSize.MASSIVE:
 		_spawn_massive_destruction(pos, team)
+
+
+func _spawn_factory_explosion(pos: Vector2):
+	"""Dramatic explosion when a factory is destroyed"""
+	# Skip effects if in skip mode
+	if skip_effects_frames > 0:
+		return
+	if explosion_count_this_frame >= MAX_EXPLOSIONS_PER_FRAME:
+		return
+	explosion_count_this_frame += 1
+
+	var scale_mult = 2.5  # Factories are big structures
+
+	# === FLASH ===
+	var flash = Polygon2D.new()
+	var flash_size = 40 * scale_mult
+	var flash_points = []
+	for i in range(9):
+		var angle = i * (TAU / 8)
+		flash_points.append(Vector2(cos(angle), sin(angle)) * flash_size)
+	flash.polygon = PackedVector2Array(flash_points)
+	flash.color = Color(1.0, 0.9, 0.7, 1.0)  # Orange-white
+	flash.global_position = pos
+	add_child(flash)
+
+	var flash_tween = create_tween()
+	flash_tween.tween_property(flash, "scale", Vector2(3.0, 3.0), 0.12).from(Vector2(0.3, 0.3))
+	flash_tween.parallel().tween_property(flash, "modulate:a", 0.0, 0.15)
+	flash_tween.tween_callback(func(): flash.queue_free())
+
+	# === SHOCKWAVE RING ===
+	var ring = Line2D.new()
+	ring.global_position = pos
+	ring.width = 6.0
+	ring.default_color = Color(1.0, 0.6, 0.2, 0.9)  # Orange
+	var ring_points = []
+	for i in range(33):
+		var angle = i * (TAU / 32)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 20)
+	ring.points = PackedVector2Array(ring_points)
+	add_child(ring)
+
+	var ring_tween = create_tween()
+	ring_tween.set_parallel(true)
+	ring_tween.tween_property(ring, "scale", Vector2.ONE * 8.0, 0.4).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	ring_tween.tween_property(ring, "modulate:a", 0.0, 0.4)
+	ring_tween.tween_callback(func(): ring.queue_free())
+
+	# === DEBRIS SPARKS ===
+	for i in range(12):
+		var spark = Line2D.new()
+		spark.global_position = pos
+		spark.width = 3.0 + randf() * 2.0
+		spark.default_color = Color(1.0, 0.7, 0.3, 0.9)
+
+		var angle = randf() * TAU
+		var length = randf_range(15, 30)
+		spark.add_point(Vector2.ZERO)
+		spark.add_point(Vector2(cos(angle), sin(angle)) * length)
+		add_child(spark)
+
+		var end_pos = pos + Vector2(cos(angle), sin(angle)) * randf_range(80, 150)
+		var spark_tween = create_tween()
+		spark_tween.set_parallel(true)
+		spark_tween.tween_property(spark, "global_position", end_pos, randf_range(0.3, 0.5))
+		spark_tween.tween_property(spark, "modulate:a", 0.0, randf_range(0.35, 0.5))
+		spark_tween.tween_callback(func(): spark.queue_free())
+
+	# === SMOKE ===
+	var smoke = Polygon2D.new()
+	var smoke_points = []
+	for i in range(9):
+		var angle = i * (TAU / 8)
+		var r = 30 * randf_range(0.6, 1.0)
+		smoke_points.append(Vector2(cos(angle), sin(angle)) * r)
+	smoke.polygon = PackedVector2Array(smoke_points)
+	smoke.color = Color(0.2, 0.2, 0.25, 0.6)
+	smoke.global_position = pos
+	add_child(smoke)
+
+	var smoke_tween = create_tween()
+	smoke_tween.tween_property(smoke, "scale", Vector2(5.0, 5.0), 0.8).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	smoke_tween.parallel().tween_property(smoke, "modulate:a", 0.0, 1.0)
+	smoke_tween.tween_callback(func(): smoke.queue_free())
+
+	shake_screen(40.0)  # Big shake for factory destruction
+
+	if sound_manager:
+		sound_manager.play_explosion(VnpTypes.ShipSize.LARGE)
+
 
 func _spawn_massive_destruction(pos: Vector2, team: int):
 	# Epic destruction sequence for Star Base death

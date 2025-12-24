@@ -58,7 +58,12 @@ var last_synced_position: Vector2 = Vector2.ZERO
 # Target caching - don't search every frame
 var cached_target_id: int = -1
 var target_cache_timer: float = 0.0
-const TARGET_CACHE_DURATION: float = 0.3  # Re-evaluate targets every 300ms
+const TARGET_CACHE_DURATION: float = 0.5  # Re-evaluate targets every 500ms (was 300ms)
+
+# AI staggering - not every ship thinks every frame
+var ai_frame_offset: int = 0  # Set in init based on ship ID
+const AI_STAGGER_FRAMES: int = 3  # Only run full AI every 3rd frame
+static var global_frame_count: int = 0
 
 # Strafing for small ships
 var strafe_angle: float = 0.0
@@ -84,6 +89,9 @@ func init(vnp_store, initial_data, controller = null, snd_manager = null, main_r
 	self.ship_stats = VnpTypes.SHIP_STATS[ship_data.type]
 	self.ai_controller = controller
 	self.sound_manager = snd_manager
+
+	# Set AI frame offset based on ship ID for staggered updates
+	self.ai_frame_offset = ship_data.id % AI_STAGGER_FRAMES
 
 	self.position = ship_data.position
 	add_to_group("ships")  # For projectile collision detection

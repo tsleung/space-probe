@@ -88,16 +88,24 @@ static func _calc_coast_route(from_pos: Vector2, to_pos: Vector2, thrust: float,
 	var distance = from_pos.distance_to(to_pos)
 
 	# Coast route: short burn to cruise velocity, long coast, short burn to stop
-	# Assume cruise at 0.5 AU/week (much slower than continuous burn)
-	var cruise_velocity = 0.5
-	var burn_time = cruise_velocity / thrust if thrust > 0 else 1.0
-	var coast_time = (distance - burn_time * cruise_velocity) / cruise_velocity
+	# Cruise velocity is slower than constant burn (Hohmann-like efficiency)
+	var cruise_velocity = 0.3  # AU/week - slower cruise for stealth
 
-	route.travel_time = burn_time * 2 + maxf(coast_time, 0)
+	# Burn time is capped - ships do a quick burst then coast
+	# Even with low thrust, they don't burn for weeks
+	var theoretical_burn = cruise_velocity / thrust if thrust > 0 else 1.0
+	var burn_time = minf(theoretical_burn, 0.5)  # Cap at 0.5 weeks (3.5 days) per burn
+
+	# Actual achieved cruise velocity based on capped burn
+	var actual_cruise = minf(cruise_velocity, burn_time * thrust)
+
+	var coast_time = distance / actual_cruise if actual_cruise > 0 else distance / 0.1
+
+	route.travel_time = burn_time * 2 + coast_time
 	route.departure_burn = true
 	route.arrival_burn = true
 
-	# Detection windows: only at departure and arrival burns
+	# Detection windows: only at departure and arrival burns (brief!)
 	route.detection_windows = [
 		{
 			"position": from_pos,

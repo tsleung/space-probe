@@ -1,5 +1,101 @@
 # MCS (Mars Colony Sim): Development Changelog
 
+## December 24, 2024 - Visual Spectacle & AI Balance Fixes
+
+### Critical Bug Fixes
+
+#### AI Reserve Calculation (`mcs_ai.gd:878-887`)
+- **BUG**: Reserve calculation `pop * 3` could exceed stockpile, blocking ALL construction
+- **FIX**: Capped reserves at 60% of current stockpile with `mini()`
+- **RESULT**: Expensive buildings (STARPORT, etc.) can now be built
+
+#### AI Consumption Calculation (`mcs_ai.gd:235-266`)
+- **BUG**: Used `pop * 600` (AGRIDOME output) instead of `pop * 50` (actual consumption)
+- **FIX**: Now uses correct consumption rates from balance.json (50 food, 20 water, 5 oxygen)
+- **RESULT**: AI now correctly identifies food/water/oxygen shortages
+
+#### AI Crisis Mode Building (`mcs_ai.gd:1073-1076`)
+- **BUG**: `mini(base_builds, 2)` LIMITED construction during crisis!
+- **FIX**: Changed to `maxi(base_builds, 4)` - builds MORE in crisis
+- **RESULT**: Colony builds production buildings aggressively when starving
+
+#### Deficit-Driven Building Injection (`mcs_ai.gd:185-198, 493-503`)
+- **NEW**: When ANY resource has deficit (urgency > 0), production buildings are auto-added to priorities
+- **RESULT**: AI will always consider AGRIDOME when food is low, EXTRACTOR when water/oxygen low
+
+#### Construction Time Bug (`mcs_reducer.gd:719-725`)
+- **BUG**: Weekly construction used hardcoded `1.0 / 52.0` - all buildings took exactly 1 year
+- **FIX**: Now uses `building.construction_years` for proper timing
+- **RESULT**: Megastructures now take their intended construction time:
+  | Building | Construction Time |
+  |----------|-------------------|
+  | Basic buildings | 1 year |
+  | STARPORT | 2 years |
+  | ORBITAL/CATCHER/SKYHOOK | 3 years |
+  | MASS_DRIVER | 4 years |
+  | FUSION_PLANT | 5 years |
+  | SPACE_ELEVATOR | 6 years |
+
+### Emergency Supply Ships (`mcs_reducer.gd:1637-1647`)
+- **5X SUPPLY BOOST**: Orbital freighters now bring serious cargo
+- Tier multiplier improved: T1=1.0x → T5=3.0x (was 2.0x)
+- Supply amounts:
+  | Resource | Old | New |
+  |----------|-----|-----|
+  | Food | 500 | 2500 |
+  | Water | 200 | 1000 |
+  | Oxygen | 100 | 500 |
+  | Building Materials | 150 | 750 |
+  | Machine Parts | 50 | 250 |
+  | Medicine | 30 | 150 |
+
+### Transport Infrastructure Progression
+
+#### Space Elevator Priority (`mcs_ai.gd:371-391`)
+- **REQUIRES**: Both Skyhook AND Orbital Station (not OR)
+- **UNLOCK**: Year 35 (was 25, balance.json says 40)
+- **PRIORITY**: 88 with full prereqs, 82 fallback at year 45
+
+#### Orbital Station Priority (`mcs_ai.gd:353-370`)
+- **UNIQUE VALUE**: Only building that produces machine_parts IN SPACE
+- **PRIORITY**: Increased to 78 (from 76)
+- **FALLBACK**: Year 30 without skyhook (was 35)
+
+### Full Progression Chain (with unique values)
+```
+STARPORT (Y3)      → Basic immigration (3-18/tier)
+MASS_DRIVER (Y10)  → One-way cargo export (120-800)
+SKYHOOK (Y20)      → Immigration BONUS +15-40% (multiplier!)
+ORBITAL (Y25)      → Machine parts production (30-180) + immigration
+SPACE_ELEVATOR (Y35) → Ultimate capacity (requires both skyhook + orbital)
+```
+
+### Sky Animation Overhaul
+
+#### Orbital Elements Now Traverse Sky (not circle!)
+- All elements move left-to-right like real satellite passes
+- Each has different speed/altitude to avoid sync
+
+#### BOLD Visuals
+| Element | Old Size | New Size |
+|---------|----------|----------|
+| Satellites | 2px | 4-7px with solar panel wings |
+| Orbital Station | 12-30px | 30-70px |
+| Orbital Ships | 1x | 1.5x |
+| Asteroid Catcher | 10-26px | 18-50px |
+| Skyhook Tether | 55-115px | 85-185px with glow |
+| Starport Ships | 8-18px | 14-30px with bigger flames |
+
+#### Transit System Ground Boundary (`mcs_view.gd:1450-1452`)
+- Changed from `size.y * 0.5` to `size.y * 0.55`
+- Ensures transit stays clearly in ground area
+
+### Greenhouse Plants Fix (`mcs_view.gd:4207-4225`)
+- **BUG**: `randf_range()` caused flickering (new random each frame)
+- **FIX**: Deterministic positions using loop index
+
+---
+
 ## December 24, 2024 - AI Intelligence & Transport Systems
 
 ### Smart AI Resource Management

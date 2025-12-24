@@ -197,6 +197,19 @@ func dispatch_launch_weapon(entity_id: String, target_entity_id: String, weapon_
 	## powered=false: ballistic/stealthy, powered=true: visible/tracking
 	dispatch(FCWReducer.action_launch_weapon(entity_id, target_entity_id, weapon_power, powered))
 
+# Evacuation lane dispatchers
+func dispatch_toggle_lane(lane_key: String) -> void:
+	## Toggle a single evacuation lane on/off
+	dispatch(FCWReducer.action_toggle_lane(lane_key))
+
+func dispatch_go_dark_earth() -> void:
+	## Disable all lanes to/from Earth (isolate Earth from Herald detection)
+	dispatch(FCWReducer.action_go_dark_earth())
+
+func dispatch_resume_earth_lanes() -> void:
+	## Re-enable all lanes to/from Earth
+	dispatch(FCWReducer.action_resume_earth_lanes())
+
 # ============================================================================
 # SIGNAL EMISSION
 # ============================================================================
@@ -455,3 +468,16 @@ func get_all_zone_positions() -> Dictionary:
 
 func get_herald_intel() -> Dictionary:
 	return _state.get("herald_intel", {}).duplicate(true)
+
+# Evacuation lane getters
+func get_lane_states() -> Dictionary:
+	## Get all lane states (lane_key -> bool)
+	return _state.get("lane_states", {}).duplicate()
+
+func is_lane_enabled(lane_key: String) -> bool:
+	## Check if a specific lane is enabled
+	return _state.get("lane_states", {}).get(lane_key, true)
+
+func is_earth_isolated() -> bool:
+	## Check if Earth is in GO DARK mode (all Earth lanes disabled)
+	return _state.get("earth_isolated", false)

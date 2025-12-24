@@ -507,6 +507,10 @@ static func process_weekly_herald_turn(state: Dictionary) -> Dictionary:
 	var turn = new_state.turn
 	var messages: Array = []
 
+	# Check if Herald has already departed
+	if new_state.get("herald_departed", false):
+		return new_state
+
 	# Step 1: Update signatures from this week's activity
 	new_state = update_zone_signatures(new_state)
 
@@ -519,10 +523,35 @@ static func process_weekly_herald_turn(state: Dictionary) -> Dictionary:
 	# Step 3: Choose next target based on signatures
 	var next_target = choose_next_target(new_state, current_zone)
 
-	# Step 4: Begin transit to next target (if different from current)
+	# Step 4: Begin transit to next target OR track holding position
 	if next_target >= 0 and next_target != current_zone:
+		# Herald found a target - reset hold counter and move
+		new_state.herald_hold_weeks = 0
 		new_state = _begin_transit(new_state, current_zone, next_target)
 		messages.append_array(_get_movement_messages(new_state, current_zone, next_target))
+	else:
+		# Herald holding position - no target found
+		new_state.herald_hold_weeks = new_state.get("herald_hold_weeks", 0) + 1
+		var hold_weeks = new_state.herald_hold_weeks
+
+		# Check for Herald departure (gives up after 12 weeks)
+		if hold_weeks >= 12:
+			new_state.herald_departed = true
+			new_state.game_over = true
+			# Calculate victory based on survivors (Earth + colonies + evacuated)
+			var survivors = _calculate_survivors(new_state)
+			new_state.lives_evacuated = survivors  # Use evacuated counter for display
+			new_state.victory_tier = FCWTypes.get_victory_tier(survivors)
+			messages.append_array(_get_departure_messages())
+		elif hold_weeks == 1:
+			messages.append("━━━ HERALD STATUS ━━━")
+			messages.append("DEEP SPACE NETWORK: \"No movement detected. Herald holding position.\"")
+		elif hold_weeks == 4:
+			messages.append("━━━ HERALD STATUS ━━━")
+			messages.append("INTELLIGENCE: \"Herald has held position for one month. It seems... confused.\"")
+		elif hold_weeks == 8:
+			messages.append("━━━ HERALD STATUS ━━━")
+			messages.append("COMMAND: \"Two months of silence. Is it leaving? Stay dark. Stay hidden.\"")
 
 	# Step 5: Decay signatures for next week
 	new_state = decay_zone_signatures(new_state)
@@ -536,16 +565,52 @@ static func process_weekly_herald_turn(state: Dictionary) -> Dictionary:
 
 	return new_state
 
+
+static func _get_departure_messages() -> Array:
+	## Get dramatic messages for when Herald gives up and leaves
+	var messages: Array = []
+	messages.append("━━━ PRIORITY TRANSMISSION ━━━")
+	messages.append("DEEP SPACE NETWORK: \"The Herald... it's turning away. It's LEAVING!\"")
+	messages.append("EARTH COMMAND: \"Confirm that reading. Is this real?\"")
+	messages.append("OBSERVATORY: \"Confirmed. Herald trajectory now heading OUT of the solar system.\"")
+	messages.append("UNITED NATIONS: \"...We did it. We went dark and it couldn't find us.\"")
+	messages.append("GLOBAL BROADCAST: \"To all who sacrificed... your silence saved us.\"")
+	messages.append("━━━ THE HERALD HAS DEPARTED ━━━")
+	return messages
+
+
+static func _calculate_survivors(state: Dictionary) -> int:
+	## Calculate total survivors when Herald departs
+	## Includes: Earth population + surviving colony populations + already evacuated
+	var survivors = state.get("lives_evacuated", 0)
+
+	# Add population from non-fallen zones
+	var zones = state.get("zones", {})
+	for zone_id in zones:
+		var zone = zones[zone_id]
+		if zone.get("status", FCWTypes.ZoneStatus.CONTROLLED) != FCWTypes.ZoneStatus.FALLEN:
+			survivors += zone.get("population", 0)
+
+	return survivors
+
 static func update_zone_signatures(state: Dictionary) -> Dictionary:
 	## Calculate and update zone signatures based on weekly activity
 	## Signatures are 0.0-1.0 representing detection likelihood
 	## Population sets minimum baseline; activity adds on top
+	## CRITICAL: When earth_isolated is true (GO DARK), Earth's signature is 0
 	var new_state = state.duplicate(true)
 	var sigs = new_state.zone_signatures.duplicate()
 	var activity = new_state.weekly_activity
+	var earth_isolated = new_state.get("earth_isolated", false)
 
 	for zone_id in FCWTypes.ZoneId.values():
 		var zone = new_state.zones.get(zone_id, {})
+
+		# GO DARK: Earth becomes completely invisible - no signature at all
+		# This is the core detection dilemma: hide Earth = abandon everyone
+		if zone_id == FCWTypes.ZoneId.EARTH and earth_isolated:
+			sigs[zone_id] = 0.0
+			continue
 
 		# Calculate population baseline (minimum signature for inhabited zones)
 		# Earth (8B) = 0.08, Mars (10M) = 0.0001
@@ -597,12 +662,17 @@ static func decay_zone_signatures(state: Dictionary) -> Dictionary:
 	## Decay all zone signatures (going dark works!)
 	var new_state = state.duplicate(true)
 	var sigs = new_state.zone_signatures.duplicate()
+	var earth_isolated = new_state.get("earth_isolated", false)
 
 	for zone_id in sigs:
 		sigs[zone_id] = sigs[zone_id] * FCWTypes.HERALD_SIG_DECAY
-		# Earth maintains minimum baseline (civilization is visible)
+		# Earth maintains minimum baseline UNLESS GO DARK is active
+		# When isolated, Earth is completely invisible (radio silence)
 		if zone_id == FCWTypes.ZoneId.EARTH:
-			sigs[zone_id] = maxf(sigs[zone_id], 0.05)
+			if earth_isolated:
+				sigs[zone_id] = 0.0
+			else:
+				sigs[zone_id] = maxf(sigs[zone_id], 0.05)
 
 	new_state.zone_signatures = sigs
 	return new_state
@@ -610,7 +680,13 @@ static func decay_zone_signatures(state: Dictionary) -> Dictionary:
 static func choose_next_target(state: Dictionary, current_zone: int) -> int:
 	## Choose Herald's next target based on zone signatures
 	## Returns zone_id of best target, or -1 if should hold position
+	##
+	## CRITICAL: The Herald is observation-limited. If humanity goes dark,
+	## the Herald should NOT automatically find Earth. It follows activity.
+	## When earth_isolated is true, Earth is COMPLETELY invisible - Herald
+	## cannot detect or target it even from adjacent zones.
 	var sigs = state.zone_signatures
+	var earth_isolated = state.get("earth_isolated", false)
 	var best_target = -1
 	var best_score = 0.0
 
@@ -619,20 +695,34 @@ static func choose_next_target(state: Dictionary, current_zone: int) -> int:
 	var skippable = FCWTypes.get_zone_skip_targets(current_zone)
 	var current_orbit = FCWTypes.get_zone_orbit_order(current_zone)
 
-	# Evaluate adjacent zones
+	# First, check if there's ANY significant activity in the ENTIRE system
+	# If humanity has gone completely dark, Herald has nothing to follow
+	var total_system_activity = 0.0
+	for zone_id in sigs:
+		total_system_activity += sigs.get(zone_id, 0.0)
+
+	# If total activity is below threshold, Herald stays put (GO DARK works!)
+	# The Herald is a primitive hunter - no activity = no prey to follow
+	if total_system_activity < FCWTypes.HERALD_MIN_SIG_TO_ATTRACT * 2:
+		return -1  # Hold position - nothing to chase
+
+	# Evaluate adjacent zones - only consider zones with actual signatures
 	for zone_id in adjacent:
+		# GO DARK: Earth is completely invisible - Herald cannot see it
+		if zone_id == FCWTypes.ZoneId.EARTH and earth_isolated:
+			continue
+
 		var sig = sigs.get(zone_id, 0.0)
 		if sig < FCWTypes.HERALD_MIN_SIG_TO_ATTRACT:
-			# Still consider for inward bias
-			sig = 0.0
+			continue  # Not enough signal to attract - skip entirely
 
 		var target_orbit = FCWTypes.get_zone_orbit_order(zone_id)
 		var orbit_diff = current_orbit - target_orbit
 
-		# Inward bias: prefer moving toward Sun
+		# Inward bias: prefer moving toward Sun IF there's activity there
 		var inward_bonus = 1.0 + (orbit_diff * FCWTypes.HERALD_INWARD_BIAS) if orbit_diff > 0 else 1.0
 
-		var score = sig * inward_bonus + (0.05 if orbit_diff > 0 else 0.0)  # Small inward nudge
+		var score = sig * inward_bonus
 
 		if score > best_score:
 			best_score = score
@@ -640,6 +730,10 @@ static func choose_next_target(state: Dictionary, current_zone: int) -> int:
 
 	# Evaluate skip zones (require higher threshold)
 	for zone_id in skippable:
+		# GO DARK: Earth is completely invisible - Herald cannot see it
+		if zone_id == FCWTypes.ZoneId.EARTH and earth_isolated:
+			continue
+
 		var sig = sigs.get(zone_id, 0.0)
 		if sig < FCWTypes.HERALD_SKIP_THRESHOLD:
 			continue  # Not enough signature to skip
@@ -655,19 +749,32 @@ static func choose_next_target(state: Dictionary, current_zone: int) -> int:
 			best_score = score
 			best_target = zone_id
 
-	# If no strong signal, follow default inward path
-	if best_target < 0:
-		best_target = FCWTypes.get_zone_default_next(current_zone)
+	# If no zone has enough activity to attract, but there IS some activity
+	# in the system, follow the default inward path (hunting behavior)
+	# This only triggers if total_system_activity >= threshold but no single
+	# zone is attractive enough - rare edge case
+	if best_target < 0 and total_system_activity >= FCWTypes.HERALD_MIN_SIG_TO_ATTRACT * 3:
+		var default_next = FCWTypes.get_zone_default_next(current_zone)
+		# GO DARK: Even the default path cannot lead to isolated Earth
+		if default_next == FCWTypes.ZoneId.EARTH and earth_isolated:
+			best_target = -1  # Herald is lost - nowhere to go
+		else:
+			best_target = default_next
 
 	return best_target
 
 static func _attack_zone(state: Dictionary, zone_id: int) -> Dictionary:
-	## Herald attacks a zone - marks it as fallen
+	## Herald attacks a zone - marks it as fallen and tracks lives lost
 	var new_state = state.duplicate(true)
 	var zones = new_state.zones.duplicate(true)
 	var zone = zones.get(zone_id, {}).duplicate(true)
 
+	# Track population lost when zone falls
+	var population_lost = zone.get("population", 0)
+	new_state.lives_lost = new_state.get("lives_lost", 0) + population_lost
+
 	zone.status = FCWTypes.ZoneStatus.FALLEN
+	zone.population = 0  # Everyone in the zone is lost
 	zones[zone_id] = zone
 	new_state.zones = zones
 

@@ -582,6 +582,54 @@ Each shape has dedicated drawing function with:
 
 ---
 
+## Sky vs Ground Visual Elements (IMPORTANT)
+
+**All visual elements MUST be clearly categorized as SKY or GROUND to prevent rendering bugs.**
+
+### SKY ELEMENTS (Above Horizon - Screen Y < 50%)
+These elements float in the atmosphere or orbit:
+
+| Element | Function | Trigger |
+|---------|----------|---------|
+| **Phobos/Deimos** | Moons orbiting | Always |
+| **Stars** | Background twinkle | Always (hidden in storms) |
+| **Satellites** | Small orbiting dots | Colony tier 2+ |
+| **Orbital Ships** | Freighters, liners orbiting | STARPORT built |
+| **Landing Ships** | Shuttles descending/ascending | STARPORT built |
+| **Orbital Station** | Large rotating station | ORBITAL building |
+| **Asteroid Catcher** | Net catching rocks | CATCHER building |
+| **Skyhook** | Rotating tether | SKYHOOK building |
+| **Starport Ships** | Ships with engine flames | STARPORT building |
+| **Mass Driver Projectile** | Launched cargo | MASS_DRIVER building |
+| **Orbital Ring** | Ring around planet | Transcendence tier |
+| **Aurora** | Green/blue curtains | Rare atmospheric event |
+| **Meteors** | Shooting stars | Periodic |
+
+### GROUND ELEMENTS (Below Horizon - Screen Y > 50%)
+These elements are on or near the Martian surface:
+
+| Element | Function | Trigger |
+|---------|----------|---------|
+| **Buildings** | Colony structures | Construction |
+| **Colonists** | Walking people | Population |
+| **Drones/Robots** | Cleaning, working | Always |
+| **Transit System** | Monorail between buildings | 20+ buildings, ground-only |
+| **Rim Lighting** | Sun-edge highlights | On buildings |
+| **Dome Glow** | Interior warmth | On dome buildings |
+| **Greenhouse Plants** | Visible inside glass | Greenhouse buildings |
+| **Dust Particles** | Mars dust | Surface level |
+| **Energy Network** | Power beams | Power buildings |
+| **Force Field** | Hex dome | Tier 4+ |
+| **City Spotlights** | Vertical light beams | Tall buildings |
+
+### Implementation Rules
+1. **SKY elements** use screen-space coordinates relative to `size.y * 0.15` (sky center)
+2. **GROUND elements** must pass `screen_pos.y >= size.y * 0.5` check before drawing
+3. **Transit system** has explicit ground boundary check to prevent sky rendering
+4. **Landing ships** are allowed to transition through boundary (landing/takeoff animation)
+
+---
+
 ## Atmospheric & Orbital Effects (Implemented Dec 2025)
 
 ### Sky System

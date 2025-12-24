@@ -12,8 +12,8 @@ const Phase2Types = preload("res://scripts/mars_odyssey_trek/phase2/phase2_types
 # ============================================================================
 
 enum ActionType {
-	ADVANCE_HOUR,     # New: advance by one hour
-	ADVANCE_DAY,      # Legacy: still supported for compatibility
+	ADVANCE_HOUR,     # Advance by one hour (primary time action)
+	ADVANCE_DAY,      # Advance by 24 hours (convenience for tests/debug)
 	SET_SPEED,
 	SET_AUTO_ADVANCE,
 	TRIGGER_EVENT,
@@ -45,7 +45,7 @@ static func action_advance_hour(random_values: Array) -> Dictionary:
 	return {"type": ActionType.ADVANCE_HOUR, "random_values": random_values}
 
 static func action_advance_day(random_values: Array) -> Dictionary:
-	## Legacy: Advance time by 1 day (now advances 24 hours internally)
+	## Advance time by 24 hours (convenience wrapper for tests/debugging)
 	return {"type": ActionType.ADVANCE_DAY, "random_values": random_values}
 
 static func action_set_speed(speed: int) -> Dictionary:
@@ -129,7 +129,7 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 		ActionType.ADVANCE_HOUR:
 			return _reduce_advance_hour(state, action.random_values)
 		ActionType.ADVANCE_DAY:
-			# Legacy: advance 24 hours
+			# Convenience: advance 24 hours (calls ADVANCE_HOUR 24 times)
 			var result = state
 			for i in range(Phase2Types.HOURS_PER_DAY):
 				result = _reduce_advance_hour(result, action.random_values)
@@ -230,37 +230,6 @@ static func _reduce_advance_hour(state: Dictionary, random_values: Array) -> Dic
 
 	# 8. Recompute resource totals
 	new_state.resources = Phase2Types.compute_resource_totals(new_state)
-
-	return new_state
-
-static func _process_repair_progress(state: Dictionary) -> Dictionary:
-	## Legacy: Check and advance repair progress (daily)
-	var repair = state.repair
-	if not repair.in_progress:
-		return state
-
-	var new_state = state.duplicate(true)
-	new_state.repair = repair.duplicate()
-	new_state.repair.days_remaining -= 1
-
-	if new_state.repair.days_remaining <= 0:
-		# Repair complete!
-		new_state.repair.in_progress = false
-
-		# Find and restore the container
-		var containers = new_state.storage_containers.duplicate()
-		for i in range(containers.size()):
-			if containers[i].id == repair.target_container_id:
-				var container = containers[i].duplicate()
-				container.accessible = true
-				container.status = Phase2Types.ContainerStatus.NOMINAL
-				containers[i] = container
-				new_state = _add_log_entry(new_state, "Repair complete! %s is now accessible." % container.name)
-				break
-		new_state.storage_containers = containers
-		new_state.repair.target_container_id = ""
-	else:
-		new_state = _add_log_entry(new_state, "Repair in progress... %d days remaining." % new_state.repair.days_remaining)
 
 	return new_state
 

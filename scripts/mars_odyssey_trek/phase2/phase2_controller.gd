@@ -668,8 +668,8 @@ func _get_resource_projection_penalty(option: Dictionary, context: Dictionary) -
 
 	# Estimate how long this option's task would take
 	var task_hours = 3  # Default
-	var task_config = option.get("task_config", {})
-	if not task_config.is_empty():
+	var task_config = option.get("task_config")
+	if task_config != null and task_config is Dictionary and not task_config.is_empty():
 		task_hours = task_config.get("hours", 3)
 	else:
 		# Estimate from label

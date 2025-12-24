@@ -105,6 +105,47 @@ const ZONE_CONNECTIONS = {
 	ZoneId.EARTH: [ZoneId.MARS]
 }
 
+# Evacuation lanes - predefined routes that can be toggled on/off
+# These are the paths transports can take. Disabling a lane:
+# - Reverses transports already on it (switch to coasting, return to origin)
+# - Blocks new transport launches on that route
+const EVACUATION_LANES = {
+	"earth_mars": {"from": ZoneId.EARTH, "to": ZoneId.MARS, "name": "Earth → Mars"},
+	"mars_earth": {"from": ZoneId.MARS, "to": ZoneId.EARTH, "name": "Mars → Earth"},
+	"mars_jupiter": {"from": ZoneId.MARS, "to": ZoneId.JUPITER, "name": "Mars → Jupiter"},
+	"mars_asteroid": {"from": ZoneId.MARS, "to": ZoneId.ASTEROID_BELT, "name": "Mars → Belt"},
+	"mars_saturn": {"from": ZoneId.MARS, "to": ZoneId.SATURN, "name": "Mars → Saturn"},
+	"jupiter_kuiper": {"from": ZoneId.JUPITER, "to": ZoneId.KUIPER, "name": "Jupiter → Kuiper"},
+	"asteroid_kuiper": {"from": ZoneId.ASTEROID_BELT, "to": ZoneId.KUIPER, "name": "Belt → Kuiper"},
+	"saturn_kuiper": {"from": ZoneId.SATURN, "to": ZoneId.KUIPER, "name": "Saturn → Kuiper"},
+}
+
+# Helper: Get lane key for a given from/to zone pair
+static func get_lane_key(from_zone: int, to_zone: int) -> String:
+	for key in EVACUATION_LANES:
+		var lane = EVACUATION_LANES[key]
+		if lane.from == from_zone and lane.to == to_zone:
+			return key
+	return ""
+
+# Helper: Get all lanes involving a specific zone (either as origin or destination)
+static func get_lanes_for_zone(zone_id: int) -> Array:
+	var lanes = []
+	for key in EVACUATION_LANES:
+		var lane = EVACUATION_LANES[key]
+		if lane.from == zone_id or lane.to == zone_id:
+			lanes.append(key)
+	return lanes
+
+# Helper: Get all lanes FROM Earth (for GO DARK)
+static func get_earth_lanes() -> Array:
+	var lanes = []
+	for key in EVACUATION_LANES:
+		var lane = EVACUATION_LANES[key]
+		if lane.from == ZoneId.EARTH or lane.to == ZoneId.EARTH:
+			lanes.append(key)
+	return lanes
+
 # Zone travel times (in weeks/turns) - represents realistic space travel
 # Earth <-> Mars: 2 weeks (relatively close)
 # Mars <-> Outer planets: 3 weeks
@@ -687,6 +728,8 @@ static func create_initial_state() -> Dictionary:
 		"herald_current_zone": ZoneId.KUIPER,  # Where Herald physically is
 		"herald_transit": {},  # {from_zone, to_zone, turns_remaining, total_turns} when traveling
 		"herald_strength": 50,
+		"herald_hold_weeks": 0,  # Weeks Herald has held position (no movement)
+		"herald_departed": false,  # True when Herald gives up and leaves
 
 		# Detection system (new)
 		"herald_intel": {
@@ -706,6 +749,20 @@ static func create_initial_state() -> Dictionary:
 			ZoneId.MARS: 0.0,
 			ZoneId.EARTH: 0.1,  # Earth always has baseline (civilization)
 		},
+
+		# Evacuation lane states - which routes are active
+		# Disabling a lane reverses transports on it and blocks new launches
+		"lane_states": {
+			"earth_mars": true,
+			"mars_earth": true,
+			"mars_jupiter": true,
+			"mars_asteroid": true,
+			"mars_saturn": true,
+			"jupiter_kuiper": true,
+			"asteroid_kuiper": true,
+			"saturn_kuiper": true,
+		},
+		"earth_isolated": false,  # GO DARK state - all Earth lanes disabled
 
 		# Weekly activity tracking (resets each week, contributes to signatures)
 		"weekly_activity": {

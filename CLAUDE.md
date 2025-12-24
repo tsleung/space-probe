@@ -165,7 +165,7 @@ godot --path . scenes/ui/main_menu.tscn
 godot --path . scenes/von_neumann_probe/vnp_main.tscn     # VNP
 godot --path . scenes/first_contact_war/fcw_main.tscn    # FCW
 godot --path . scenes/mars_odyssey_trek/phase1_main.tscn # MOT Phase 1
-godot --path . scenes/mars_odyssey_trek/phase2_main.tscn # MOT Phase 2
+godot --path . scenes/mars_odyssey_trek/phase2_integrated.tscn # MOT Phase 2
 ```
 
 ## Testing

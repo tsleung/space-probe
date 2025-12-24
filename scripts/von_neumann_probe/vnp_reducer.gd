@@ -472,7 +472,7 @@ func reduce(state, action):
 				"production_type": action.get("production_type", config["default_production"]),
 			}
 
-		"FACTORY_DAMAGE":
+		"FACTORY_DAMAGE", "DAMAGE_FACTORY":
 			# Damage a factory
 			var factory_id = action["factory_id"]
 			var damage = action["damage"]

@@ -26,7 +26,11 @@ enum ActionType {
 	SET_ENTITY_DESTINATION,
 	SET_ENTITY_MOVEMENT_STATE,
 	SPLIT_ENTITY,
-	LAUNCH_WEAPON  # Fire torpedo/missile from entity
+	LAUNCH_WEAPON,  # Fire torpedo/missile from entity
+	# Evacuation lane actions
+	TOGGLE_LANE,       # Toggle a single evacuation lane on/off
+	GO_DARK_EARTH,     # Disable all lanes to/from Earth (isolate Earth)
+	RESUME_EARTH_LANES # Re-enable all Earth lanes
 }
 
 # ============================================================================
@@ -82,6 +86,19 @@ static func action_launch_weapon(entity_id: String, target_entity_id: String, we
 		"powered": powered
 	}
 
+# Evacuation lane action creators
+static func action_toggle_lane(lane_key: String) -> Dictionary:
+	## Toggle a single evacuation lane on/off
+	return {"type": ActionType.TOGGLE_LANE, "lane_key": lane_key}
+
+static func action_go_dark_earth() -> Dictionary:
+	## Disable all lanes to/from Earth - isolate Earth from Herald detection
+	return {"type": ActionType.GO_DARK_EARTH}
+
+static func action_resume_earth_lanes() -> Dictionary:
+	## Re-enable all lanes to/from Earth
+	return {"type": ActionType.RESUME_EARTH_LANES}
+
 # ============================================================================
 # MAIN REDUCER
 # ============================================================================
@@ -113,6 +130,12 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_split_entity(state, action.entity_id, action.split_count, action.new_destination)
 		ActionType.LAUNCH_WEAPON:
 			return _reduce_launch_weapon(state, action.entity_id, action.target_entity_id, action.weapon_power, action.powered)
+		ActionType.TOGGLE_LANE:
+			return _reduce_toggle_lane(state, action.lane_key)
+		ActionType.GO_DARK_EARTH:
+			return _reduce_go_dark_earth(state)
+		ActionType.RESUME_EARTH_LANES:
+			return _reduce_resume_earth_lanes(state)
 		_:
 			return state
 
@@ -824,6 +847,10 @@ static func _process_evacuation(state: Dictionary) -> Dictionary:
 	## Transports now use the unified entity system and are visualized on the solar map
 	var new_state = state.duplicate(true)
 	var game_time = new_state.get("game_time", 0.0)
+
+	# GO DARK: No evacuation allowed - radio silence means no transports
+	if new_state.get("earth_isolated", false):
+		return new_state
 
 	# Ships assigned to Earth automatically help with evacuation
 	# Each ship evacuates people based on its size (combat power / 10 * 100K)
@@ -2009,4 +2036,196 @@ static func _process_weapons(state: Dictionary, random_value: float) -> Dictiona
 			updated.append(entity)
 
 	new_state.entities = updated
+	return new_state
+
+# ============================================================================
+# EVACUATION LANE REDUCERS
+# ============================================================================
+
+static func _reduce_toggle_lane(state: Dictionary, lane_key: String) -> Dictionary:
+	## Toggle a single evacuation lane on/off
+	## If disabling: reverse transports on that lane (coasting back to origin)
+	var new_state = state.duplicate(true)
+	var lanes = new_state.get("lane_states", {}).duplicate()
+
+	# Toggle the lane
+	var was_enabled = lanes.get(lane_key, true)
+	lanes[lane_key] = not was_enabled
+	new_state.lane_states = lanes
+
+	# If we just disabled the lane, reverse transports on it
+	if was_enabled:
+		new_state = _reverse_transports_on_lane(new_state, lane_key)
+		var lane_name = FCWTypes.EVACUATION_LANES.get(lane_key, {}).get("name", lane_key)
+		new_state.event_log.append(FCWTypes.create_log_entry(
+			new_state.turn,
+			"LANE DISABLED: %s - transports returning" % lane_name,
+			true
+		))
+	else:
+		var lane_name = FCWTypes.EVACUATION_LANES.get(lane_key, {}).get("name", lane_key)
+		new_state.event_log.append(FCWTypes.create_log_entry(
+			new_state.turn,
+			"LANE ENABLED: %s - evacuation route active" % lane_name,
+			false
+		))
+
+	return new_state
+
+static func _reduce_go_dark_earth(state: Dictionary) -> Dictionary:
+	## Disable all lanes to/from Earth - total isolation
+	## This is the ultimate stealth move: Herald may not find Earth, but evacuation stops
+	## CRITICAL: Also reverses ALL transports system-wide (coast back to origin, no burns)
+	var new_state = state.duplicate(true)
+	var lanes = new_state.get("lane_states", {}).duplicate()
+
+	# Disable ALL lanes (total silence, not just Earth lanes)
+	for lane_key in lanes.keys():
+		lanes[lane_key] = false
+	new_state.lane_states = lanes
+	new_state.earth_isolated = true
+
+	# Reverse ALL transports system-wide (coast back to origin)
+	new_state = _reverse_all_transports(new_state)
+
+	# CRITICAL: Immediately set Earth's signature to 0 (radio silence)
+	# Without this, Herald might still detect Earth until next weekly update
+	var sigs = new_state.get("zone_signatures", {}).duplicate()
+	sigs[FCWTypes.ZoneId.EARTH] = 0.0
+	new_state.zone_signatures = sigs
+
+	new_state.event_log.append(FCWTypes.create_log_entry(
+		new_state.turn,
+		"EARTH GOING DARK: All evacuation suspended. The Herald may not find us...",
+		true
+	))
+
+	return new_state
+
+static func _reduce_resume_earth_lanes(state: Dictionary) -> Dictionary:
+	## Re-enable ALL lanes (GO DARK disabled all of them)
+	var new_state = state.duplicate(true)
+	var lanes = new_state.get("lane_states", {}).duplicate()
+
+	# Re-enable ALL lanes (GO DARK disabled all of them)
+	for lane_key in lanes.keys():
+		lanes[lane_key] = true
+
+	new_state.lane_states = lanes
+	new_state.earth_isolated = false
+
+	new_state.event_log.append(FCWTypes.create_log_entry(
+		new_state.turn,
+		"RESUMING OPERATIONS: All evacuation lanes re-enabled",
+		false
+	))
+
+	return new_state
+
+static func _reverse_transports_on_lane(state: Dictionary, lane_key: String) -> Dictionary:
+	## Find transports on a given lane and reverse them (coast back to origin)
+	var new_state = state.duplicate(true)
+	var lane = FCWTypes.EVACUATION_LANES.get(lane_key, {})
+	if lane.is_empty():
+		return new_state
+
+	var lane_from = lane.from
+	var lane_to = lane.to
+	var entities = new_state.get("entities", []).duplicate(true)
+	var game_time = new_state.get("game_time", 0.0)
+	var reversed_count = 0
+
+	for i in range(entities.size()):
+		var entity = entities[i]
+
+		# Only affect transports that are moving (not destroyed, not orbiting)
+		if entity.get("entity_type") != FCWTypes.EntityType.TRANSPORT:
+			continue
+		if entity.get("movement_state") == FCWTypes.MovementState.DESTROYED:
+			continue
+		if entity.get("movement_state") == FCWTypes.MovementState.ORBITING:
+			continue
+
+		# Check if this transport is on the disabled lane
+		var origin = entity.get("origin", -1)
+		var dest = entity.get("destination", -1)
+
+		if origin == lane_from and dest == lane_to:
+			# Reverse this transport: coast back to origin
+			var reversed = entity.duplicate()
+			reversed.movement_state = FCWTypes.MovementState.COASTING
+			reversed.destination = origin  # Go back to where it came from
+			reversed.origin = dest         # Swap origin/destination
+
+			# Calculate return velocity (slow coast)
+			var return_pos = FCWTypes.get_zone_position(origin, game_time)
+			var current_pos = reversed.position
+			var direction = (return_pos - current_pos).normalized()
+			reversed.velocity = direction * 0.1  # Slow coast speed
+			reversed.signature = FCWTypes.COAST_SIGNATURE
+
+			entities[i] = reversed
+			reversed_count += 1
+
+	new_state.entities = entities
+
+	if reversed_count > 0:
+		new_state.event_log.append(FCWTypes.create_log_entry(
+			new_state.turn,
+			"%d transports reversing course (coasting)" % reversed_count,
+			false
+		))
+
+	return new_state
+
+static func _reverse_all_transports(state: Dictionary) -> Dictionary:
+	## Reverse ALL transports system-wide - they coast back to origin
+	## Used for GO DARK: complete radio silence means all movement stops
+	var new_state = state.duplicate(true)
+	var entities = new_state.get("entities", []).duplicate(true)
+	var game_time = new_state.get("game_time", 0.0)
+	var reversed_count = 0
+
+	for i in range(entities.size()):
+		var entity = entities[i]
+
+		# Only affect transports that are actively moving (burning or coasting toward destination)
+		if entity.get("entity_type") != FCWTypes.EntityType.TRANSPORT:
+			continue
+		if entity.get("movement_state") == FCWTypes.MovementState.DESTROYED:
+			continue
+		if entity.get("movement_state") == FCWTypes.MovementState.ORBITING:
+			continue
+
+		# Must have a valid destination (not already returning or idle)
+		var origin = entity.get("origin", -1)
+		var dest = entity.get("destination", -1)
+		if dest == -1 or dest == origin:
+			continue
+
+		# Reverse: coast back to origin (no burns = low signature)
+		var reversed = entity.duplicate()
+		reversed.movement_state = FCWTypes.MovementState.COASTING
+		reversed.destination = origin  # Go back to where it came from
+		reversed.origin = dest         # Swap origin/destination
+
+		# Calculate return velocity (slow coast)
+		var return_pos = FCWTypes.get_zone_position(origin, game_time)
+		var current_pos = reversed.position
+		var direction = (return_pos - current_pos).normalized()
+		reversed.velocity = direction * 0.1  # Slow coast speed
+		reversed.signature = FCWTypes.COAST_SIGNATURE
+
+		entities[i] = reversed
+		reversed_count += 1
+
+	new_state.entities = entities
+
+	if reversed_count > 0:
+		new_state.event_log.append(FCWTypes.create_log_entry(
+			new_state.turn,
+			"GO DARK: %d transports reversing course (coasting, no burns)" % reversed_count,
+			true
+		))
+
 	return new_state

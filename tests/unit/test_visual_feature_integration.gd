@@ -419,3 +419,49 @@ func test_orbital_buildings_unlock_sky_visuals():
 	# Also verify STARPORT is in the buildings list (view iterates this)
 	var starport_count = state.buildings.filter(func(b): return b.type == MCSTypes.BuildingType.STARPORT).size()
 	assert_gt(starport_count, 0, "STARPORT should be in buildings array for view to find")
+
+func test_ai_builds_food_when_in_deficit():
+	# Test that AI prioritizes AGRIDOME when food is in deficit
+	_store.start_new_colony(24)
+
+	# Add initial buildings but create a food deficit scenario
+	# Many colonists + few agridomes = food deficit
+	_store.start_construction(MCSTypes.BuildingType.HABITAT)
+	_store.start_construction(MCSTypes.BuildingType.HABITAT)
+	_store.start_construction(MCSTypes.BuildingType.HABITAT)
+	_store.start_construction(MCSTypes.BuildingType.POWER_STATION)
+	_store.start_construction(MCSTypes.BuildingType.POWER_STATION)
+
+	# Run a year to complete construction
+	for _week in range(52):
+		_store.advance_week()
+
+	# Now force a food deficit by adding more colonists than production can handle
+	var state = _store.get_state()
+	# Set food low to trigger deficit urgency
+	state.resources["food"] = 200  # Low food
+
+	print("\n=== FOOD DEFICIT TEST ===")
+
+	# Count agridomes before AI turns
+	var initial_agridomes = state.buildings.filter(func(b): return b.type == MCSTypes.BuildingType.AGRIDOME).size()
+	print("Initial AGRIDOMES: %d" % initial_agridomes)
+	print("Initial food: %d" % state.resources.get("food", 0))
+
+	# Run AI for 5 years - it should build agridomes to address food deficit
+	var agridome_built = false
+	for year in range(1, 6):
+		MCSAI.run_ai_turn(_store, MCSAI.Personality.PRAGMATIST, _rng)
+		_store.advance_year()
+
+		state = _store.get_state()
+		var current_agridomes = state.buildings.filter(func(b): return b.type == MCSTypes.BuildingType.AGRIDOME).size()
+
+		if current_agridomes > initial_agridomes:
+			agridome_built = true
+			print("Year %d: AGRIDOME built! Total: %d" % [year, current_agridomes])
+			break
+
+		print("Year %d: No new agridome (total: %d)" % [year, current_agridomes])
+
+	assert_true(agridome_built, "AI should build AGRIDOME when food is in deficit")

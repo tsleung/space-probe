@@ -83,6 +83,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Shelter in cargo hold",
 					"description": "Safest option - crew hides in shielded cargo area.",
+					"task_config": {
+						"name": "Shelter Protocol",
+						"type": "crisis",
+						"hours": 2,
+						"location": "cargo_bay",
+						"crew": ["commander"],
+						"visual": "crew_gather"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.85, [
 							Phase2Types.create_effect("morale", -5, "all"),
@@ -97,6 +105,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Rotate ship to use hull as shield",
 					"description": "Risky maneuver but preserves morale.",
+					"task_config": {
+						"name": "Hull Rotation Maneuver",
+						"type": "crisis",
+						"hours": 1,
+						"location": "bridge",
+						"crew": ["commander"],
+						"visual": "ship_rotate"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.6, [
 							Phase2Types.create_effect("fuel", -3, "all"),
@@ -114,6 +130,14 @@ func _setup_event_pool() -> void:
 					"description": "Engineer can optimize shields for solar particles.",
 					"is_blue_option": true,
 					"requires_crew": "engineer",
+					"task_config": {
+						"name": "Shield Harmonics Calibration",
+						"type": "repair",
+						"hours": 3,
+						"location": "engineering",
+						"crew": ["engineer"],
+						"visual": "console_work"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.9, [
 							Phase2Types.create_effect("power", -5, "all"),
@@ -138,6 +162,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Full hull inspection",
 					"description": "Thorough but time-consuming.",
+					"task_config": {
+						"name": "Hull Integrity Scan",
+						"type": "maintenance",
+						"hours": 4,
+						"location": "engineering",
+						"crew": ["engineer", "scientist"],
+						"visual": "scan_effect"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.8, [
 							Phase2Types.create_effect("fatigue", 10, "all"),
@@ -152,6 +184,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Quick visual check",
 					"description": "Fast but might miss something.",
+					"task_config": {
+						"name": "Visual Hull Check",
+						"type": "maintenance",
+						"hours": 1,
+						"location": "cargo_bay",
+						"crew": ["commander"],
+						"visual": "flashlight_sweep"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.7, [
 							Phase2Types.create_effect("log", 0, "Quick check shows no visible damage.")
@@ -167,6 +207,15 @@ func _setup_event_pool() -> void:
 					"description": "Mitchell can do a proper external inspection and repair.",
 					"is_blue_option": true,
 					"requires_crew": "engineer",
+					"task_config": {
+						"name": "EVA Hull Repair",
+						"type": "eva",
+						"hours": 6,
+						"location": "cargo_bay",
+						"crew": ["engineer"],
+						"visual": "eva_suit_up",
+						"eva_target": "hull_bottom"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.85, [
 							Phase2Types.create_effect("fatigue", 25, "engineer"),
@@ -194,6 +243,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Mediate personally",
 					"description": "Commander steps in to resolve the conflict.",
+					"task_config": {
+						"name": "Crew Mediation",
+						"type": "custom",
+						"hours": 2,
+						"location": "quarters",
+						"crew": ["commander"],
+						"visual": "crew_talk"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.6, [
 							Phase2Types.create_effect("morale", 5, "all"),
@@ -208,6 +265,7 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Let them work it out",
 					"description": "Adults should handle their own problems.",
+					"task_config": null,
 					"outcomes": [
 						Phase2Types.create_outcome(0.4, [
 							Phase2Types.create_effect("morale", 3, "all"),
@@ -224,6 +282,14 @@ func _setup_event_pool() -> void:
 					"description": "Dr. Johnson can use therapeutic techniques.",
 					"is_blue_option": true,
 					"requires_crew": "medical",
+					"task_config": {
+						"name": "Psych Counseling Session",
+						"type": "medical",
+						"hours": 3,
+						"location": "medical",
+						"crew": ["medical"],
+						"visual": "therapy_session"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.8, [
 							Phase2Types.create_effect("morale", 10, "all"),
@@ -246,6 +312,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Conservative treatment",
 					"description": "Monitor and treat symptoms. Hope it passes.",
+					"task_config": {
+						"name": "Monitor Symptoms",
+						"type": "medical",
+						"hours": 4,
+						"location": "medical",
+						"crew": ["medical"],
+						"visual": "vitals_monitor"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.5, [
 							Phase2Types.create_effect("health", -10, "random"),
@@ -262,6 +336,14 @@ func _setup_event_pool() -> void:
 					"description": "Use medical supplies for thorough treatment.",
 					"requires_resource": "medical",
 					"requires_min": 1,
+					"task_config": {
+						"name": "Administer Treatment",
+						"type": "medical",
+						"hours": 3,
+						"location": "medical",
+						"crew": ["medical"],
+						"visual": "medical_procedure"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.8, [
 							Phase2Types.create_effect("health", -5, "random"),
@@ -278,6 +360,14 @@ func _setup_event_pool() -> void:
 					"description": "Dr. Johnson can perform surgery if necessary.",
 					"is_blue_option": true,
 					"requires_crew": "medical",
+					"task_config": {
+						"name": "Emergency Surgery",
+						"type": "medical",
+						"hours": 6,
+						"location": "medical",
+						"crew": ["medical"],
+						"visual": "surgery"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.9, [
 							Phase2Types.create_effect("health", -15, "random"),
@@ -306,6 +396,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Share immediately with everyone",
 					"description": "Good news should be shared.",
+					"task_config": {
+						"name": "Group Viewing",
+						"type": "custom",
+						"hours": 1,
+						"location": "quarters",
+						"crew": [],
+						"visual": "crew_gather"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.85, [
 							Phase2Types.create_effect("morale", 12, "all"),
@@ -321,6 +419,7 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Private viewing for recipient",
 					"description": "Let them enjoy it privately first.",
+					"task_config": null,
 					"outcomes": [
 						Phase2Types.create_outcome(1.0, [
 							Phase2Types.create_effect("morale", 15, "random"),
@@ -339,6 +438,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Boost transmitter power",
 					"description": "Uses power but maintains contact.",
+					"task_config": {
+						"name": "Comm Power Boost",
+						"type": "repair",
+						"hours": 2,
+						"location": "bridge",
+						"crew": ["commander"],
+						"visual": "console_work"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.7, [
 							Phase2Types.create_effect("power", -8, "all"),
@@ -354,6 +461,7 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Wait for interference to pass",
 					"description": "Accept temporary silence.",
+					"task_config": null,
 					"outcomes": [
 						Phase2Types.create_outcome(0.6, [
 							Phase2Types.create_effect("log", 0, "Interference cleared after a few hours. No urgent messages.")
@@ -369,6 +477,14 @@ func _setup_event_pool() -> void:
 					"description": "Dr. Tanaka can try an experimental comm technique.",
 					"is_blue_option": true,
 					"requires_crew": "scientist",
+					"task_config": {
+						"name": "Frequency Algorithm",
+						"type": "research",
+						"hours": 3,
+						"location": "bridge",
+						"crew": ["scientist"],
+						"visual": "coding"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.85, [
 							Phase2Types.create_effect("morale", 10, "all"),
@@ -395,6 +511,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Carefully secure everything",
 					"description": "Takes time but prevents damage.",
+					"task_config": {
+						"name": "Cargo Securing",
+						"type": "maintenance",
+						"hours": 3,
+						"location": "cargo_bay",
+						"crew": ["engineer"],
+						"visual": "cargo_float"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.9, [
 							Phase2Types.create_effect("fatigue", 10, "all"),
@@ -409,6 +533,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Quick grab and stow",
 					"description": "Fast but might miss or damage items.",
+					"task_config": {
+						"name": "Quick Cargo Grab",
+						"type": "maintenance",
+						"hours": 1,
+						"location": "cargo_bay",
+						"crew": ["commander"],
+						"visual": "cargo_float"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.5, [
 							Phase2Types.create_effect("log", 0, "Quick work! Got most of it.")
@@ -430,6 +562,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Run diagnostics",
 					"description": "Systematic troubleshooting.",
+					"task_config": {
+						"name": "System Diagnostics",
+						"type": "repair",
+						"hours": 3,
+						"location": "engineering",
+						"crew": ["engineer"],
+						"visual": "console_work"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.7, [
 							Phase2Types.create_effect("fatigue", 10, "engineer"),
@@ -443,6 +583,7 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Ignore it for now",
 					"description": "Probably nothing.",
+					"task_config": null,
 					"outcomes": [
 						Phase2Types.create_outcome(0.6, [
 							Phase2Types.create_effect("log", 0, "Readings stabilized on their own.")
@@ -458,6 +599,14 @@ func _setup_event_pool() -> void:
 					"description": "Mitchell does a thorough system check.",
 					"is_blue_option": true,
 					"requires_crew": "engineer",
+					"task_config": {
+						"name": "Full Systems Check",
+						"type": "maintenance",
+						"hours": 5,
+						"location": "engineering",
+						"crew": ["engineer"],
+						"visual": "panel_open"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.95, [
 							Phase2Types.create_effect("fatigue", 20, "engineer"),
@@ -484,6 +633,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Special meal from reserves",
 					"description": "Use extra rations for a feast.",
+					"task_config": {
+						"name": "Prepare Celebration Feast",
+						"type": "custom",
+						"hours": 2,
+						"location": "quarters",
+						"crew": ["medic"],
+						"visual": "crew_gather"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.9, [
 							Phase2Types.create_effect("food", -8, "all"),
@@ -501,6 +658,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Movie night instead",
 					"description": "Entertainment without using supplies.",
+					"task_config": {
+						"name": "Movie Night Setup",
+						"type": "custom",
+						"hours": 1,
+						"location": "quarters",
+						"crew": ["commander"],
+						"visual": "crew_gather"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(1.0, [
 							Phase2Types.create_effect("morale", 8, "all"),
@@ -512,6 +677,7 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Keep working",
 					"description": "Mission focus. No time for celebrations.",
+					"task_config": null,
 					"outcomes": [
 						Phase2Types.create_outcome(0.3, [
 							Phase2Types.create_effect("log", 0, "Crew appreciates the dedication to mission.")
@@ -538,6 +704,15 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "EVA to clear debris",
 					"description": "Spacewalk to manually remove the debris.",
+					"task_config": {
+						"name": "Engine Debris EVA",
+						"type": "eva",
+						"hours": 3,
+						"location": "airlock",
+						"crew": ["engineer"],
+						"visual": "eva_suit_up",
+						"eva_target": "engine"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.7, [
 							Phase2Types.create_effect("fatigue", 25, "engineer"),
@@ -560,6 +735,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Remote burn to dislodge",
 					"description": "RISKY: Engine pulse might damage the nozzle further.",
+					"task_config": {
+						"name": "Remote Engine Burn",
+						"type": "crisis",
+						"hours": 1,
+						"location": "engineering",
+						"crew": ["engineer"],
+						"visual": "console_work"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.25, [
 							Phase2Types.create_effect("fuel", -15, "all"),
@@ -583,6 +766,15 @@ func _setup_event_pool() -> void:
 					"description": "Mitchell's expertise minimizes risk.",
 					"is_blue_option": true,
 					"requires_crew": "engineer",
+					"task_config": {
+						"name": "Precision Engine EVA",
+						"type": "eva",
+						"hours": 2,
+						"location": "airlock",
+						"crew": ["engineer"],
+						"visual": "eva_suit_up",
+						"eva_target": "engine"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.9, [
 							Phase2Types.create_effect("fatigue", 20, "engineer"),
@@ -609,6 +801,15 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "EVA to realign antenna",
 					"description": "Manual adjustment from outside the hull.",
+					"task_config": {
+						"name": "Antenna Realignment EVA",
+						"type": "eva",
+						"hours": 3,
+						"location": "airlock",
+						"crew": ["scientist"],
+						"visual": "eva_suit_up",
+						"eva_target": "antenna"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.65, [
 							Phase2Types.create_effect("fatigue", 25, "all"),
@@ -629,6 +830,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Use backup antenna",
 					"description": "RISKY: Backup is low-power. May lose Earth contact entirely.",
+					"task_config": {
+						"name": "Activate Backup Antenna",
+						"type": "maintenance",
+						"hours": 1,
+						"location": "bridge",
+						"crew": ["commander"],
+						"visual": "console_work"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.20, [
 							Phase2Types.create_effect("morale", -10, "all"),
@@ -650,6 +859,15 @@ func _setup_event_pool() -> void:
 					"description": "Tanaka brings precision instruments for exact alignment.",
 					"is_blue_option": true,
 					"requires_crew": "scientist",
+					"task_config": {
+						"name": "Precision Antenna Calibration",
+						"type": "eva",
+						"hours": 2,
+						"location": "airlock",
+						"crew": ["scientist"],
+						"visual": "eva_suit_up",
+						"eva_target": "antenna"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.95, [
 							Phase2Types.create_effect("fatigue", 20, "scientist"),
@@ -676,6 +894,15 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "EVA to repair panel",
 					"description": "Spacewalk to patch and rewire the damaged cells.",
+					"task_config": {
+						"name": "Solar Panel Repair EVA",
+						"type": "eva",
+						"hours": 4,
+						"location": "airlock",
+						"crew": ["engineer"],
+						"visual": "eva_suit_up",
+						"eva_target": "solar"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.6, [
 							Phase2Types.create_effect("fatigue", 30, "engineer"),
@@ -699,6 +926,14 @@ func _setup_event_pool() -> void:
 				Phase2Types.create_event_option({
 					"label": "Reroute around damage",
 					"description": "RISKY: Rerouting may overload remaining panels.",
+					"task_config": {
+						"name": "Power Rerouting",
+						"type": "maintenance",
+						"hours": 2,
+						"location": "engineering",
+						"crew": ["engineer"],
+						"visual": "panel_open"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.15, [
 							Phase2Types.create_effect("power", -8, "all"),
@@ -721,6 +956,15 @@ func _setup_event_pool() -> void:
 					"description": "Mitchell can do a thorough repair job.",
 					"is_blue_option": true,
 					"requires_crew": "engineer",
+					"task_config": {
+						"name": "Precision Solar Repair",
+						"type": "eva",
+						"hours": 3,
+						"location": "airlock",
+						"crew": ["engineer"],
+						"visual": "eva_suit_up",
+						"eva_target": "solar"
+					},
 					"outcomes": [
 						Phase2Types.create_outcome(0.85, [
 							Phase2Types.create_effect("fatigue", 25, "engineer"),
@@ -761,17 +1005,42 @@ func _setup_special_events() -> void:
 			Phase2Types.create_event_option({
 				"label": "All hands emergency repair",
 				"effect": "crisis_repair",
-				"description": "Everyone drops everything. High fatigue, high success chance."
+				"description": "Everyone drops everything. High fatigue, high success chance.",
+				"task_config": {
+					"name": "Emergency Cascade Repair",
+					"type": "crisis",
+					"hours": 6,
+					"location": "life_support",
+					"crew": ["engineer", "medic", "scientist", "commander"],
+					"visual": "panel_open"
+				}
 			}),
 			Phase2Types.create_event_option({
 				"label": "Prioritize oxygen systems",
 				"effect": "crisis_oxygen",
-				"description": "Focus on breathing - water can wait."
+				"description": "Focus on breathing - water can wait.",
+				"task_config": {
+					"name": "Oxygen System Priority Repair",
+					"type": "crisis",
+					"hours": 4,
+					"location": "life_support",
+					"crew": ["engineer", "medic"],
+					"visual": "panel_open"
+				}
 			}),
 			Phase2Types.create_event_option({
 				"label": "EVA to external repair",
 				"effect": "crisis_eva",
-				"description": "Risky but might fix both at once."
+				"description": "Risky but might fix both at once.",
+				"task_config": {
+					"name": "External Crisis EVA",
+					"type": "eva",
+					"hours": 5,
+					"location": "airlock",
+					"crew": ["engineer"],
+					"visual": "eva_suit_up",
+					"eva_target": "life_support"
+				}
 			})
 		]
 	})
@@ -785,13 +1054,22 @@ func _setup_special_events() -> void:
 				"label": "Celebrate the milestone",
 				"effect": "morale_boost",
 				"effect_value": 15,
-				"description": "A moment worth remembering."
+				"description": "A moment worth remembering.",
+				"task_config": {
+					"name": "Mars Sighting Celebration",
+					"type": "custom",
+					"hours": 1,
+					"location": "bridge",
+					"crew": ["commander"],
+					"visual": "crew_gather"
+				}
 			}),
 			Phase2Types.create_event_option({
 				"label": "Stay focused on the mission",
 				"effect": "morale_boost",
 				"effect_value": 5,
-				"description": "Acknowledge it, but keep working."
+				"description": "Acknowledge it, but keep working.",
+				"task_config": null
 			})
 		]
 	})
@@ -804,12 +1082,28 @@ func _setup_special_events() -> void:
 			Phase2Types.create_event_option({
 				"label": "Run final system checks",
 				"effect": "thorough_check",
-				"description": "Make sure everything is ready."
+				"description": "Make sure everything is ready.",
+				"task_config": {
+					"name": "Pre-Arrival Systems Check",
+					"type": "maintenance",
+					"hours": 4,
+					"location": "engineering",
+					"crew": ["engineer", "scientist"],
+					"visual": "console_work"
+				}
 			}),
 			Phase2Types.create_event_option({
 				"label": "Rest before arrival",
 				"effect": "rest_treatment",
-				"description": "Crew will need energy for landing."
+				"description": "Crew will need energy for landing.",
+				"task_config": {
+					"name": "Pre-Landing Rest Period",
+					"type": "custom",
+					"hours": 8,
+					"location": "quarters",
+					"crew": ["medic"],
+					"visual": "vitals_monitor"
+				}
 			})
 		]
 	})

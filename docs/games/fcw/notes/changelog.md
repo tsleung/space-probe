@@ -4,6 +4,15 @@ Append-only log of changes to the FCW game.
 
 ---
 
+## 2025-12-24 (Third Session)
+- Fixed: GO DARK mechanic now fully functional with detection system:
+  - Earth signature suppression: `earth_isolated = true` sets Earth signature to 0.0 (complete radio silence)
+  - Herald targeting exclusion: Herald cannot target Earth when isolated, even from adjacent zones
+  - Default path override: Herald's fallback path logic skips Earth when `earth_isolated = true`
+  - Strategic implication: GO DARK truly protects Earth but requires abandoning all outer colonies
+  - Files changed: `fcw_herald_ai.gd` (lines 543-706: signature calculation, target selection), `fcw_reducer.gd` (lines 2071-2121: GO DARK action)
+- Updated: Documentation for detection/signature system in `design.md`
+
 ## 2025-12-24 (Second Session)
 - Added: Map zoom with mouse wheel/trackpad - zoom toward cursor position, zoom out returns to default (1.0-4.0x range)
 - Changed: Battle duration doubled from 1.0 to 2.0 seconds per phase for smaller fleet sizes

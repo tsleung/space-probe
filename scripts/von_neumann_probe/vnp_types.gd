@@ -158,7 +158,7 @@ const BASE_WEAPONS = {
 	Team.NEMESIS: BaseWeapon.VOID_TEAR,     # Reality rift
 }
 
-const BASE_WEAPON_COOLDOWN = 15.0  # seconds
+const BASE_WEAPON_COOLDOWN = 7.5  # seconds (halved for faster charging)
 const BASE_WEAPON_DAMAGE = 100
 
 static func get_weapon_color(team: int, weapon: int) -> Color:
