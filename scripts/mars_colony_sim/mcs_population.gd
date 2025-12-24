@@ -543,10 +543,12 @@ static func calculate_artificial_births(
 			continue
 		var tier = building.get("tier", 1)
 		var b_type = building.get("type", -1)
-		match b_type:
-			_MCSTypes.BuildingType.MEDICAL_BAY:
+		# MEDICAL building handles all medical needs (was MEDICAL_BAY + HOSPITAL)
+		if b_type == _MCSTypes.BuildingType.MEDICAL:
+			# Lower tiers = MEDICAL_BAY equivalent, higher tiers = HOSPITAL equivalent
+			if tier <= 2:
 				total_capacity += GESTATION_CAPACITY_PER_MEDICAL_BAY * tier
-			_MCSTypes.BuildingType.HOSPITAL:
+			else:
 				total_capacity += GESTATION_CAPACITY_PER_HOSPITAL * tier
 
 	# Check medicine availability
@@ -645,11 +647,10 @@ static func calculate_immigration(
 			continue
 		var tier = building.get("tier", 1)
 		var b_type = building.get("type", -1)
-		match b_type:
-			_MCSTypes.BuildingType.STARPORT:
-				capacity += IMMIGRATION_PER_STARPORT * tier
-			_MCSTypes.BuildingType.SPACE_STATION:
-				capacity += IMMIGRATION_PER_SPACE_STATION * tier
+		if b_type == _MCSTypes.BuildingType.STARPORT:
+			capacity += IMMIGRATION_PER_STARPORT * tier
+		elif b_type == _MCSTypes.BuildingType.ORBITAL:
+			capacity += IMMIGRATION_PER_SPACE_STATION * tier
 
 	if capacity == 0:
 		return {"immigrants": [], "events": []}

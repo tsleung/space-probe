@@ -440,19 +440,19 @@ func _setup_pdc_kill_zone():
 func _animate_pdc_sweep():
 	# Continuous radar sweep rotation
 	var sweep_tween = create_tween()
-	sweep_tween.set_loops(0)  # 0 = infinite
+	sweep_tween.set_loops(999)  # High number to avoid infinite loop detection
 	sweep_tween.tween_property(pdc_sweep_line, "rotation", TAU, 2.0)
 	sweep_tween.tween_callback(func(): pdc_sweep_line.rotation = 0)
 
 	# Slow crosshair rotation (opposite direction)
 	var cross_tween = create_tween()
-	cross_tween.set_loops(0)  # 0 = infinite
+	cross_tween.set_loops(999)  # High number to avoid infinite loop detection
 	cross_tween.tween_property(pdc_crosshairs, "rotation", -TAU, 8.0)
 	cross_tween.tween_callback(func(): pdc_crosshairs.rotation = 0)
 
 	# Pulsing rings
 	var pulse_tween = create_tween()
-	pulse_tween.set_loops(0)  # 0 = infinite
+	pulse_tween.set_loops(999)  # High number to avoid infinite loop detection
 	pulse_tween.tween_property(pdc_range_ring, "modulate:a", 0.6, 0.8).set_trans(Tween.TRANS_SINE)
 	pulse_tween.tween_property(pdc_range_ring, "modulate:a", 1.0, 0.8).set_trans(Tween.TRANS_SINE)
 
@@ -522,14 +522,14 @@ func _animate_shield_pulse():
 
 	# Continuous breathing pulse
 	var pulse_tween = create_tween()
-	pulse_tween.set_loops(0)  # 0 = infinite
+	pulse_tween.set_loops(999)  # High number to avoid infinite loop detection
 
 	pulse_tween.tween_property(shield_outer_ring, "modulate:a", 0.5, 1.2).set_trans(Tween.TRANS_SINE)
 	pulse_tween.tween_property(shield_outer_ring, "modulate:a", 1.0, 1.2).set_trans(Tween.TRANS_SINE)
 
 	# Rotate hex pattern slowly for shimmer effect
 	var rotate_tween = create_tween()
-	rotate_tween.set_loops(0)  # 0 = infinite
+	rotate_tween.set_loops(999)  # High number to avoid infinite loop detection
 	rotate_tween.tween_property(shield_hex_pattern, "rotation", TAU, 8.0)
 	rotate_tween.tween_callback(func(): shield_hex_pattern.rotation = 0)
 
@@ -634,18 +634,18 @@ func _animate_gravity_vortex():
 
 	# Continuous rotation of spiral arms
 	var spin_tween = create_tween()
-	spin_tween.set_loops(0)  # 0 = infinite
+	spin_tween.set_loops(999)  # High number to avoid infinite loop detection
 	spin_tween.tween_property(gravity_spiral_1, "rotation", TAU, 3.0)
 	spin_tween.tween_callback(func(): gravity_spiral_1.rotation = 0)
 
 	var spin_tween2 = create_tween()
-	spin_tween2.set_loops(0)  # 0 = infinite
+	spin_tween2.set_loops(999)  # High number to avoid infinite loop detection
 	spin_tween2.tween_property(gravity_spiral_2, "rotation", TAU, 3.0)
 	spin_tween2.tween_callback(func(): gravity_spiral_2.rotation = 0)
 
 	# Pulsing outer ring
 	var pulse_tween = create_tween()
-	pulse_tween.set_loops(0)  # 0 = infinite
+	pulse_tween.set_loops(999)  # High number to avoid infinite loop detection
 	pulse_tween.tween_property(gravity_ring_outer, "width", 7.0, 1.0).set_trans(Tween.TRANS_SINE)
 	pulse_tween.tween_property(gravity_ring_outer, "width", 5.0, 1.0).set_trans(Tween.TRANS_SINE)
 
@@ -716,12 +716,12 @@ func _setup_starbase_visuals():
 
 	# Animate the sweep rotation
 	var sweep_tween = create_tween()
-	sweep_tween.set_loops(0)  # 0 = infinite
+	sweep_tween.set_loops(999)  # High number to avoid infinite loop detection
 	sweep_tween.tween_property(sweep, "rotation", TAU, 4.0).from(0.0)
 
 	# Pulse the range ring
 	var pulse_tween = create_tween()
-	pulse_tween.set_loops(0)  # 0 = infinite
+	pulse_tween.set_loops(999)  # High number to avoid infinite loop detection
 	pulse_tween.tween_property(starbase_range_ring, "modulate:a", 0.4, 1.5).set_trans(Tween.TRANS_SINE)
 	pulse_tween.tween_property(starbase_range_ring, "modulate:a", 1.0, 1.5).set_trans(Tween.TRANS_SINE)
 
@@ -773,7 +773,7 @@ func _setup_turret_visuals():
 
 	# Slow pulse on range ring
 	var pulse_tween = create_tween()
-	pulse_tween.set_loops(0)  # 0 = infinite
+	pulse_tween.set_loops(999)  # High number to avoid infinite loop detection
 	pulse_tween.tween_property(range_ring, "modulate:a", 0.5, 2.0).set_trans(Tween.TRANS_SINE)
 	pulse_tween.tween_property(range_ring, "modulate:a", 1.0, 2.0).set_trans(Tween.TRANS_SINE)
 
@@ -834,19 +834,19 @@ func _setup_progenitor_drone_visuals():
 
 	# Eerie pulsing effect on core - slower for larger creature
 	var pulse_tween = create_tween()
-	pulse_tween.set_loops(0)  # 0 = infinite
+	pulse_tween.set_loops(999)  # High number to avoid infinite loop detection
 	pulse_tween.tween_property(core_glow, "modulate:a", 0.5, 0.8).set_trans(Tween.TRANS_SINE)
 	pulse_tween.tween_property(core_glow, "modulate:a", 1.0, 0.8).set_trans(Tween.TRANS_SINE)
 
 	# Slow menacing pulse on range ring
 	var range_tween = create_tween()
-	range_tween.set_loops(0)  # 0 = infinite
+	range_tween.set_loops(999)  # High number to avoid infinite loop detection
 	range_tween.tween_property(range_ring, "modulate:a", 0.2, 2.0).set_trans(Tween.TRANS_SINE)
 	range_tween.tween_property(range_ring, "modulate:a", 0.8, 2.0).set_trans(Tween.TRANS_SINE)
 
 	# Scale pulsing - slower, more ominous breathing
 	var scale_tween = create_tween()
-	scale_tween.set_loops(0)  # 0 = infinite
+	scale_tween.set_loops(999)  # High number to avoid infinite loop detection
 	scale_tween.tween_property(self, "scale", Vector2(1.08, 0.92), 1.2).set_trans(Tween.TRANS_SINE)
 	scale_tween.tween_property(self, "scale", Vector2(0.92, 1.08), 1.2).set_trans(Tween.TRANS_SINE)
 
@@ -2957,7 +2957,8 @@ func _find_nearest_position(from: Vector2, positions: Array) -> Vector2:
 
 
 func _find_factory_build_location(state: Dictionary) -> Vector2:
-	"""Find a good location for harvester to build a factory"""
+	"""Find a good location for harvester to build a factory.
+	Harvesters ONLY go for UNCLAIMED strategic points - they don't follow the battle fleet."""
 	var my_team = ship_data.team
 	var my_pos = position
 	var min_factory_distance = 150.0  # Don't build too close to existing factories
@@ -2969,7 +2970,8 @@ func _find_factory_build_location(state: Dictionary) -> Vector2:
 			var factory = state.factories[factory_id]
 			factory_positions.append(factory["position"])
 
-	# Priority 1: Strategic points we own that don't have factories nearby
+	# ONLY target: Unclaimed strategic points (owner == null)
+	# Harvesters are expansion units - they claim new territory, not reinforce existing
 	if state.has("strategic_points"):
 		var best_point = Vector2.ZERO
 		var best_dist = INF
@@ -2978,13 +2980,13 @@ func _find_factory_build_location(state: Dictionary) -> Vector2:
 			var point = state.strategic_points[point_id]
 			var point_owner = point.get("owner", null)
 
-			# Only consider points we own
-			if point_owner != my_team:
+			# ONLY go for unclaimed points
+			if point_owner != null:
 				continue
 
 			var point_pos = point["position"]
 
-			# Check if there's already a factory nearby
+			# Check if there's already a factory nearby (someone else building)
 			var has_factory_nearby = false
 			for fac_pos in factory_positions:
 				if point_pos.distance_to(fac_pos) < min_factory_distance:
@@ -3000,46 +3002,8 @@ func _find_factory_build_location(state: Dictionary) -> Vector2:
 		if best_point != Vector2.ZERO:
 			return best_point
 
-	# Priority 2: Find open space away from existing factories
-	# Try a few random positions and pick the best one
-	var best_pos = Vector2.ZERO
-	var best_score = -INF
-
-	for _i in range(5):
-		# Generate candidate position - spread out from our base
-		var base_pos = Vector2.ZERO
-		if vnp_main and vnp_main.base_nodes.has(my_team):
-			base_pos = vnp_main.base_nodes[my_team].position
-
-		# Random offset from base, biased toward center of map
-		var world_center = vnp_main.world_size / 2 if vnp_main else Vector2(600, 400)
-		var toward_center = (world_center - base_pos).normalized()
-		var random_offset = toward_center * randf_range(100, 400) + Vector2(randf_range(-200, 200), randf_range(-200, 200))
-		var candidate = base_pos + random_offset
-
-		# Score this position
-		var score = 0.0
-
-		# Closer to harvester is better
-		score -= my_pos.distance_to(candidate) * 0.5
-
-		# Further from existing factories is better
-		var min_fac_dist = INF
-		for fac_pos in factory_positions:
-			var d = candidate.distance_to(fac_pos)
-			if d < min_fac_dist:
-				min_fac_dist = d
-
-		if min_fac_dist < min_factory_distance:
-			continue  # Too close to existing factory
-
-		score += min_fac_dist * 0.3
-
-		if score > best_score:
-			best_score = score
-			best_pos = candidate
-
-	return best_pos
+	# No unclaimed points available - return zero (harvester will idle near base)
+	return Vector2.ZERO
 
 
 # === PROGENITOR DRONE BEHAVIOR ===

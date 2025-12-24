@@ -1050,31 +1050,34 @@ func resolve_event(choice_index: int) -> void:
 		# Standard event resolution
 		dispatch(Phase2Reducer.action_resolve_event(choice_index, _rng.randf()))
 
-	# Check if this is an EVA event and trigger visual EVA
+	# Check if this is an EVA event AND the chosen option involves EVA
+	# Only trigger visual EVA if the choice involves spacewalking
 	if event.get("is_eva_event", false):
-		var eva_target = event.get("eva_target", "engine")
-		# Determine which crew role does the EVA based on the choice
-		var crew_role = _get_eva_crew_role(choice)
-		eva_triggered.emit(crew_role, eva_target)
+		var choice_label = choice.get("label", "").to_lower()
+		var is_eva_choice = choice_label.contains("eva") or choice.get("is_eva_option", false)
 
-		# Check if the outcome includes eva_drift effect
-		var outcomes = choice.get("outcomes", [])
-		if not outcomes.is_empty():
-			# Roll for outcome
-			var roll = _rng.randf()
-			var cumulative = 0.0
-			for outcome in outcomes:
-				cumulative += outcome.get("weight", 0.0)
-				if roll <= cumulative:
-					# Check for eva_drift effect in this outcome
-					for eff in outcome.get("effects", []):
-						if eff.get("type", "") == "eva_drift":
-							var drift_target = eff.get("target", crew_role)
-							if drift_target == "random":
-								var roles = ["commander", "engineer", "scientist", "medical"]
-								drift_target = roles[_rng.randi() % roles.size()]
-							eva_drift_triggered.emit(drift_target)
-					break
+		if is_eva_choice:
+			var eva_target = event.get("eva_target", "engine")
+			var crew_role = _get_eva_crew_role(choice)
+			eva_triggered.emit(crew_role, eva_target)
+			print("[STORE] EVA triggered: %s -> %s" % [crew_role, eva_target])
+
+			# Check if the outcome includes eva_drift effect
+			var outcomes = choice.get("outcomes", [])
+			if not outcomes.is_empty():
+				var roll = _rng.randf()
+				var cumulative = 0.0
+				for outcome in outcomes:
+					cumulative += outcome.get("weight", 0.0)
+					if roll <= cumulative:
+						for eff in outcome.get("effects", []):
+							if eff.get("type", "") == "eva_drift":
+								var drift_target = eff.get("target", crew_role)
+								if drift_target == "random":
+									var roles = ["commander", "engineer", "scientist", "medical"]
+									drift_target = roles[_rng.randi() % roles.size()]
+								eva_drift_triggered.emit(drift_target)
+						break
 
 	# Check for crew_gather effects (for morale events like movie night)
 	var outcomes = choice.get("outcomes", [])

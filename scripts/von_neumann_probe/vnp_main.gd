@@ -2125,7 +2125,7 @@ func _show_factory_build_start(pos: Vector2, team: int):
 
 	# Pulse effect
 	var tween = create_tween()
-	tween.set_loops(0)  # Infinite loops until factory completes
+	tween.set_loops(999)  # High number to avoid infinite loop detection  # Infinite loops until factory completes
 	tween.tween_property(ring, "modulate:a", 0.3, 0.5)
 	tween.tween_property(ring, "modulate:a", 0.8, 0.5)
 
@@ -2914,7 +2914,7 @@ func _create_bright_star(pos: Vector2, color: Color):
 	# Add subtle twinkle animation to some stars
 	if randf() > 0.5:
 		var tween = create_tween()
-		tween.set_loops(0)
+		tween.set_loops(999)  # High number to avoid infinite loop detection
 		var twinkle_time = randf_range(2.0, 5.0)
 		tween.tween_property(star, "modulate:a", 0.5, twinkle_time)
 		tween.tween_property(star, "modulate:a", 1.0, twinkle_time)

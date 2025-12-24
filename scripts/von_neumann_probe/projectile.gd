@@ -70,6 +70,12 @@ func init(data: Dictionary):
 	var start_pos: Vector2 = data.get("start_position", Vector2.ZERO)
 	var start_rot: float = data.get("start_rotation", 0.0)
 
+	# Warn if spawning at origin (likely a bug)
+	if start_pos == Vector2.ZERO:
+		push_warning("[PROJECTILE] Spawning at origin (0,0) - missing start_position? Skipping.")
+		deactivate()
+		return
+
 	global_position = start_pos
 	rotation = start_rot
 	direction = Vector2.RIGHT.rotated(start_rot)

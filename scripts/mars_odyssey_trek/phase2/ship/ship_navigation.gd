@@ -89,11 +89,13 @@ static func get_default_offsets() -> Dictionary:
 		Waypoint.CORRIDOR_CENTER: Vector2(-h * 0.5, 0),           # Central hub
 		Waypoint.CORRIDOR_VERTICAL: Vector2(0, 0),                # Vertical connection
 
-		# Exterior waypoints (EVA)
-		Waypoint.AIRLOCK: Vector2(-h * 2.0, half_v),              # Left of cargo bay
-		Waypoint.EXTERIOR_ENGINE: Vector2(h * 1.5, half_v + 60),  # Behind engine (right side)
-		Waypoint.EXTERIOR_ANTENNA: Vector2(h * 0.5, -half_v - 70), # Above bridge
-		Waypoint.EXTERIOR_SOLAR: Vector2(-h * 2.0, -20),          # Left side of ship
+		# Exterior waypoints (EVA) - positioned OUTSIDE the hull visual
+		# Hull rect is (720, 280, 480, 360), layout_center is (960, 430)
+		# Engines extend to x~640, solar panels to y~140, nose antenna at x~1340
+		Waypoint.AIRLOCK: Vector2(-280, 70),             # Left edge of cargo bay (x=680, y=500)
+		Waypoint.EXTERIOR_ENGINE: Vector2(-320, 50),     # At engine bells (x=640, y=480)
+		Waypoint.EXTERIOR_ANTENNA: Vector2(380, -30),    # At nose antenna (x=1340, y=400)
+		Waypoint.EXTERIOR_SOLAR: Vector2(-40, -290),     # At top solar panel (x=920, y=140)
 	}
 
 # ============================================================================

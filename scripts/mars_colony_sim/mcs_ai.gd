@@ -165,9 +165,9 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 	var workforce = _MCSPopulation.get_workforce_summary(colonists)
 	var building_count = buildings.size()
 
-	# YEAR 1 SPECIAL: Only build a hab pod! Survival basics only.
+	# YEAR 1 SPECIAL: Only build a habitat! Survival basics only.
 	if current_year == 1 and building_count == 0:
-		return _MCSTypes.BuildingType.HAB_POD
+		return _MCSTypes.BuildingType.HABITAT
 
 	# Calculate current capacities
 	var housing_balance = _MCSEconomy.calc_housing_balance(buildings, colonists)
@@ -180,13 +180,13 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 	var housing_threshold = 10 if current_year > 5 else 4
 	if housing_balance.available < housing_threshold:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.HAB_POD,
+			"type": _MCSTypes.BuildingType.HABITAT,
 			"priority": 100
 		})
-	# Upgrade to apartments for large colonies (later game)
+	# Barracks for large colonies needing dense housing (later game)
 	if pop_count > 50 and housing_balance.available < 20 and current_year > 20:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.APARTMENT_BLOCK,
+			"type": _MCSTypes.BuildingType.BARRACKS,
 			"priority": 95
 		})
 
@@ -194,13 +194,13 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 	var power_threshold = 10 if current_year <= 3 else (20 if current_year <= 10 else 30)
 	if power_balance.balance < power_threshold and current_year >= 2:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.SOLAR_ARRAY,
+			"type": _MCSTypes.BuildingType.POWER_STATION,
 			"priority": 90
 		})
-	# Fission reactor for large colonies (much later)
+	# Reactor for large colonies (much later) - requires specialization
 	if pop_count > 80 and power_balance.balance < 50 and current_year > 30:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.FISSION_REACTOR,
+			"type": _MCSTypes.BuildingType.REACTOR,
 			"priority": 88
 		})
 
@@ -210,55 +210,43 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 	var food_buffer = 1.2 if current_year <= 5 else (1.5 if current_year <= 15 else 2.0)
 	if food < food_consumption * food_buffer and current_year >= 2:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.GREENHOUSE,
+			"type": _MCSTypes.BuildingType.AGRIDOME,
 			"priority": 85
 		})
-	# Hydroponics for efficiency (later game)
+	# Hydroponics for efficiency (later game - requires T3 specialization)
 	if pop_count > 40 and food < food_consumption * 2.5 and current_year > 20:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.HYDROPONICS,
 			"priority": 82
 		})
 
-	# Water extraction - only after year 3
+	# Water/Oxygen extraction - only after year 3
 	var water = resources.get("water", 0.0)
 	var water_threshold = pop_count * (100 if current_year <= 5 else 200)
 	if water < water_threshold and current_year >= 3:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.WATER_EXTRACTOR,
+			"type": _MCSTypes.BuildingType.EXTRACTOR,
 			"priority": 80
 		})
 
-	# Workshop for production - need more buildings first
-	var has_workshop = false
+	# Fabricator EARLY - critical for building_materials + machine_parts production!
+	# Without a fabricator, the colony cannot sustain upgrades or construction
+	var has_fabricator = false
 	for b in buildings:
-		if b.type == _MCSTypes.BuildingType.WORKSHOP:
-			has_workshop = true
-			break
-	if not has_workshop and building_count >= 12 and current_year >= 8:
-		priorities.append({
-			"type": _MCSTypes.BuildingType.WORKSHOP,
-			"priority": 75
-		})
-
-	# Factory EARLY - critical for building_materials production!
-	# Without a factory, the colony cannot sustain upgrades or construction
-	var has_factory = false
-	for b in buildings:
-		if b.type == _MCSTypes.BuildingType.FACTORY:
-			has_factory = true
+		if b.type == _MCSTypes.BuildingType.FABRICATOR or b.type == _MCSTypes.BuildingType.FOUNDRY or b.type == _MCSTypes.BuildingType.PRECISION:
+			has_fabricator = true
 			break
 
-	if not has_factory and current_year >= 3:
-		# First factory is CRITICAL - high priority
+	if not has_fabricator and current_year >= 3:
+		# First fabricator is CRITICAL - high priority
 		priorities.append({
-			"type": _MCSTypes.BuildingType.FACTORY,
+			"type": _MCSTypes.BuildingType.FABRICATOR,
 			"priority": 95  # Very high - almost as important as power/housing
 		})
 	elif current_year >= 10 and building_count > 20:
-		# Additional factories for larger colonies
+		# Additional fabricators for larger colonies
 		priorities.append({
-			"type": _MCSTypes.BuildingType.FACTORY,
+			"type": _MCSTypes.BuildingType.FABRICATOR,
 			"priority": 72
 		})
 
@@ -276,99 +264,81 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 			"priority": 92  # Very high - population growth is critical!
 		})
 
-	# SPACE_STATION - mass immigration (late game, tech locked)
-	# TODO: Add tech requirement check once research system is implemented
-	var has_space_station = false
+	# CATCHER (Asteroid Catcher) - massive material production (requires starport)
+	# The backbone of Martian commerce and late-game expansion
+	if has_starport and current_year >= 15:
+		var catcher_count = 0
+		for b in buildings:
+			if b.type == _MCSTypes.BuildingType.CATCHER:
+				catcher_count += 1
+		# Build catchers based on population (1 per 100 pop, or 1 if we have starport)
+		var target_catchers = maxi(1, pop_count / 100)
+		if catcher_count < target_catchers:
+			priorities.append({
+				"type": _MCSTypes.BuildingType.CATCHER,
+				"priority": 82  # High priority - unlocks massive material production
+			})
+
+	# ORBITAL (Space Station) - mass immigration (late game)
+	var has_orbital = false
 	for b in buildings:
-		if b.type == _MCSTypes.BuildingType.SPACE_STATION:
-			has_space_station = true
+		if b.type == _MCSTypes.BuildingType.ORBITAL:
+			has_orbital = true
 			break
-	if not has_space_station and current_year >= 25 and pop_count >= 50:
+	if not has_orbital and current_year >= 25 and pop_count >= 50 and has_starport:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.SPACE_STATION,
+			"type": _MCSTypes.BuildingType.ORBITAL,
 			"priority": 78
 		})
 
 	# Medical facilities - HIGH priority for birth capacity!
-	# Medical Bay enables artificial births (2 per tier per year)
+	# Medical enables artificial births (2 per tier per year)
 	var medical_count = 0
 	for b in buildings:
-		if b.type == _MCSTypes.BuildingType.MEDICAL_BAY or b.type == _MCSTypes.BuildingType.HOSPITAL:
+		if b.type == _MCSTypes.BuildingType.MEDICAL:
 			medical_count += 1
 	# Want enough medical capacity for ~10% population growth per year
 	var target_birth_capacity = maxi(2, pop_count / 10)  # At least 2 births/year
-	var current_birth_capacity = medical_count * 2  # ~2 per Medical Bay
+	var current_birth_capacity = medical_count * 2  # ~2 per Medical
 	if current_birth_capacity < target_birth_capacity and current_year >= 3:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.MEDICAL_BAY,
+			"type": _MCSTypes.BuildingType.MEDICAL,
 			"priority": 88  # HIGH - birth capacity drives population growth!
 		})
-	# Hospital upgrade (mid game - more efficient births)
-	if pop_count > 60 and medical_count < 3 and current_year > 15:
-		priorities.append({
-			"type": _MCSTypes.BuildingType.HOSPITAL,
-			"priority": 75
-		})
 
-	# School - once children appear and colony is stable
-	var has_school = false
+	# Academy - once children appear and colony is stable
+	var has_academy = false
 	for b in buildings:
-		if b.type == _MCSTypes.BuildingType.SCHOOL:
-			has_school = true
+		if b.type == _MCSTypes.BuildingType.ACADEMY:
+			has_academy = true
 			break
 	var child_count = 0
 	for c in colonists:
 		if c.is_alive and c.life_stage == _MCSTypes.LifeStage.CHILD:
 			child_count += 1
-	if not has_school and child_count >= 3 and current_year >= 12:
+	if not has_academy and child_count >= 3 and current_year >= 12:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.SCHOOL,
+			"type": _MCSTypes.BuildingType.ACADEMY,
 			"priority": 65
 		})
-	# University for advanced colony (late game)
-	if pop_count > 80 and current_year > 35:
-		priorities.append({
-			"type": _MCSTypes.BuildingType.UNIVERSITY,
-			"priority": 60
-		})
 
-	# Lab for research (mid-game)
-	var has_lab = false
+	# Research lab (mid-game)
+	var has_research = false
 	for b in buildings:
-		if b.type == _MCSTypes.BuildingType.LAB:
-			has_lab = true
+		if b.type == _MCSTypes.BuildingType.RESEARCH:
+			has_research = true
 			break
-	if not has_lab and pop_count > 40 and current_year >= 15:
+	if not has_research and pop_count > 40 and current_year >= 15:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.LAB,
+			"type": _MCSTypes.BuildingType.RESEARCH,
 			"priority": 55
-		})
-	# Research center (late game)
-	if pop_count > 100 and current_year > 40:
-		priorities.append({
-			"type": _MCSTypes.BuildingType.RESEARCH_CENTER,
-			"priority": 52
 		})
 
 	# Recreation and social buildings (mid-game comfort)
 	if pop_count > 40 and current_year >= 10:
 		priorities.append({
-			"type": _MCSTypes.BuildingType.RECREATION_CENTER,
+			"type": _MCSTypes.BuildingType.RECREATION,
 			"priority": 50
-		})
-
-	# Government hall for large colony (late game)
-	if pop_count > 80 and current_year > 35:
-		priorities.append({
-			"type": _MCSTypes.BuildingType.GOVERNMENT_HALL,
-			"priority": 45
-		})
-
-	# Temple for culture (mid-late game)
-	if pop_count > 60 and current_year > 25:
-		priorities.append({
-			"type": _MCSTypes.BuildingType.TEMPLE,
-			"priority": 40
 		})
 
 	# Personality adjustments - add variety
@@ -376,36 +346,36 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 		Personality.VISIONARY:
 			# Boost research/science and expansion
 			priorities.append({
-				"type": _MCSTypes.BuildingType.LAB,
+				"type": _MCSTypes.BuildingType.RESEARCH,
 				"priority": 60 + random_value * 30
 			})
 			priorities.append({
-				"type": _MCSTypes.BuildingType.RESEARCH_CENTER,
+				"type": _MCSTypes.BuildingType.ORBITAL,
 				"priority": 55 + random_value * 25
 			})
 		Personality.HUMANIST:
 			# Boost comfort and social buildings
 			priorities.append({
-				"type": _MCSTypes.BuildingType.RECREATION_CENTER,
+				"type": _MCSTypes.BuildingType.RECREATION,
 				"priority": 55 + random_value * 25
 			})
 			priorities.append({
-				"type": _MCSTypes.BuildingType.HOSPITAL,
+				"type": _MCSTypes.BuildingType.MEDICAL,
 				"priority": 50 + random_value * 20
 			})
 		Personality.CAUTIOUS:
 			# Boost medical and infrastructure
 			priorities.append({
-				"type": _MCSTypes.BuildingType.MEDICAL_BAY,
+				"type": _MCSTypes.BuildingType.MEDICAL,
 				"priority": 75 + random_value * 15
 			})
 		Personality.PRAGMATIST:
 			# Random variety for balanced growth
 			var variety_types = [
-				_MCSTypes.BuildingType.WORKSHOP,
-				_MCSTypes.BuildingType.SOLAR_ARRAY,
-				_MCSTypes.BuildingType.GREENHOUSE,
-				_MCSTypes.BuildingType.HAB_POD
+				_MCSTypes.BuildingType.FABRICATOR,
+				_MCSTypes.BuildingType.POWER_STATION,
+				_MCSTypes.BuildingType.AGRIDOME,
+				_MCSTypes.BuildingType.HABITAT
 			]
 			priorities.append({
 				"type": variety_types[int(random_value * variety_types.size()) % variety_types.size()],
@@ -430,69 +400,66 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 
 static func _get_building_cost(building_type: int) -> Dictionary:
 	match building_type:
-		# Housing
-		_MCSTypes.BuildingType.HAB_POD:
+		# === HOUSING ===
+		_MCSTypes.BuildingType.HABITAT:
 			return {"building_materials": 40, "machine_parts": 8}
-		_MCSTypes.BuildingType.APARTMENT_BLOCK:
-			return {"building_materials": 120, "machine_parts": 25}
-		_MCSTypes.BuildingType.LUXURY_QUARTERS:
-			return {"building_materials": 180, "machine_parts": 40}
 		_MCSTypes.BuildingType.BARRACKS:
 			return {"building_materials": 60, "machine_parts": 10}
-		# Food
-		_MCSTypes.BuildingType.GREENHOUSE:
+		_MCSTypes.BuildingType.QUARTERS:
+			return {"building_materials": 100, "machine_parts": 25}
+		# === PRODUCTION BASE ===
+		_MCSTypes.BuildingType.AGRIDOME:
 			return {"building_materials": 80, "machine_parts": 15}
-		_MCSTypes.BuildingType.HYDROPONICS:
-			return {"building_materials": 120, "machine_parts": 30}
-		_MCSTypes.BuildingType.PROTEIN_VATS:
-			return {"building_materials": 150, "machine_parts": 45}
-		# Power
-		_MCSTypes.BuildingType.SOLAR_ARRAY:
-			return {"building_materials": 35, "machine_parts": 5}
-		_MCSTypes.BuildingType.WIND_TURBINE:
-			return {"building_materials": 50, "machine_parts": 12}
-		_MCSTypes.BuildingType.RTG:
-			return {"building_materials": 80, "machine_parts": 35}
-		_MCSTypes.BuildingType.FISSION_REACTOR:
-			return {"building_materials": 200, "machine_parts": 60}
-		# Medical
-		_MCSTypes.BuildingType.MEDICAL_BAY:
-			return {"building_materials": 70, "machine_parts": 25}
-		_MCSTypes.BuildingType.HOSPITAL:
+		_MCSTypes.BuildingType.EXTRACTOR:
+			return {"building_materials": 50, "machine_parts": 18}
+		_MCSTypes.BuildingType.FABRICATOR:
 			return {"building_materials": 150, "machine_parts": 50}
-		# Science
-		_MCSTypes.BuildingType.SCHOOL:
-			return {"building_materials": 50, "machine_parts": 12}
-		_MCSTypes.BuildingType.UNIVERSITY:
-			return {"building_materials": 140, "machine_parts": 40}
-		_MCSTypes.BuildingType.LAB:
-			return {"building_materials": 80, "machine_parts": 22}
-		_MCSTypes.BuildingType.RESEARCH_CENTER:
-			return {"building_materials": 160, "machine_parts": 55}
-		# Industry
-		_MCSTypes.BuildingType.WORKSHOP:
-			return {"building_materials": 60, "machine_parts": 20}
-		_MCSTypes.BuildingType.FACTORY:
-			return {"building_materials": 180, "machine_parts": 60}
-		# Water
-		_MCSTypes.BuildingType.WATER_EXTRACTOR:
-			return {"building_materials": 45, "machine_parts": 15}
-		# Social
-		_MCSTypes.BuildingType.RECREATION_CENTER:
-			return {"building_materials": 55, "machine_parts": 12}
-		_MCSTypes.BuildingType.TEMPLE:
-			return {"building_materials": 80, "machine_parts": 15}
-		_MCSTypes.BuildingType.GOVERNMENT_HALL:
-			return {"building_materials": 130, "machine_parts": 35}
-		# Transport/Immigration
-		_MCSTypes.BuildingType.STARPORT:
+		_MCSTypes.BuildingType.POWER_STATION:
+			return {"building_materials": 40, "machine_parts": 8}
+		# === PRODUCTION BRANCHES ===
+		_MCSTypes.BuildingType.HYDROPONICS:
+			return {"building_materials": 100, "machine_parts": 25}
+		_MCSTypes.BuildingType.PROTEIN_VATS:
+			return {"building_materials": 120, "machine_parts": 30}
+		_MCSTypes.BuildingType.ICE_MINER:
+			return {"building_materials": 80, "machine_parts": 25}
+		_MCSTypes.BuildingType.ATMO_PROCESSOR:
+			return {"building_materials": 100, "machine_parts": 30}
+		_MCSTypes.BuildingType.FOUNDRY:
+			return {"building_materials": 150, "machine_parts": 40}
+		_MCSTypes.BuildingType.PRECISION:
+			return {"building_materials": 140, "machine_parts": 50}
+		_MCSTypes.BuildingType.SOLAR_FARM:
+			return {"building_materials": 50, "machine_parts": 10}
+		_MCSTypes.BuildingType.REACTOR:
+			return {"building_materials": 200, "machine_parts": 60}
+		# === SERVICES ===
+		_MCSTypes.BuildingType.MEDICAL:
+			return {"building_materials": 80, "machine_parts": 30}
+		_MCSTypes.BuildingType.ACADEMY:
+			return {"building_materials": 60, "machine_parts": 15}
+		_MCSTypes.BuildingType.RESEARCH:
 			return {"building_materials": 100, "machine_parts": 35}
-		_MCSTypes.BuildingType.SPACE_STATION:
-			return {"building_materials": 300, "machine_parts": 120}
-		# Superstructures - expensive mega-projects
+		_MCSTypes.BuildingType.RECREATION:
+			return {"building_materials": 55, "machine_parts": 12}
+		# === INFRASTRUCTURE ===
+		_MCSTypes.BuildingType.STORAGE:
+			return {"building_materials": 30, "machine_parts": 5}
+		_MCSTypes.BuildingType.COMMS:
+			return {"building_materials": 50, "machine_parts": 20}
+		_MCSTypes.BuildingType.LOGISTICS:
+			return {"building_materials": 70, "machine_parts": 25}
+		# === SPACE ECONOMY ===
+		_MCSTypes.BuildingType.STARPORT:
+			return {"building_materials": 400, "machine_parts": 100}
+		_MCSTypes.BuildingType.ORBITAL:
+			return {"building_materials": 600, "machine_parts": 150}
+		_MCSTypes.BuildingType.CATCHER:
+			return {"building_materials": 800, "machine_parts": 200}
+		# === MEGASTRUCTURES ===
 		_MCSTypes.BuildingType.MASS_DRIVER:
 			return {"building_materials": 500, "machine_parts": 200}
-		_MCSTypes.BuildingType.FUSION_REACTOR:
+		_MCSTypes.BuildingType.FUSION_PLANT:
 			return {"building_materials": 600, "machine_parts": 250}
 		_MCSTypes.BuildingType.SPACE_ELEVATOR:
 			return {"building_materials": 800, "machine_parts": 350}
@@ -604,12 +571,40 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 				resources = state.get("resources", {})  # Refresh resources after spending
 				upgraded_this_year += 1
 
-	# 4. BUILD SUPERSTRUCTURES - One every 5 years, targeting 10 by year 50
+	# 4. SPECIALIZE T2 BUILDINGS - Choose branch based on bottleneck
+	buildings = state.get("buildings", [])
+	resources = state.get("resources", {})
+	for building in buildings:
+		var tier = building.get("tier", 1)
+		var building_type = building.get("type", 0)
+
+		if tier == 2 and _MCSTypes.can_specialize(building_type):
+			var branch = choose_specialization(building, state, rng.randf())
+			if branch >= 0:
+				var building_id = building.get("id", "")
+				# Check if we can afford specialization (uses T3 upgrade cost)
+				var costs = _MCSTypes.get_upgrade_cost(3)
+				var can_afford = true
+				for resource_name in costs.keys():
+					if resources.get(resource_name, 0) < costs[resource_name]:
+						can_afford = false
+						break
+
+				if can_afford and store.has_method("specialize_building"):
+					store.specialize_building(building_id, branch)
+					actions.append("SPECIALIZE: %s -> %s" % [
+						_MCSTypes.get_building_name(building_type),
+						_MCSTypes.get_building_name(branch)
+					])
+					state = store.get_state()
+					resources = state.get("resources", {})
+
+	# 5. BUILD SUPERSTRUCTURES - One every 5 years, targeting 10 by year 50
 	# Count existing superstructures
 	var superstructure_count = 0
 	for b in buildings:
 		var btype = b.get("type", -1)
-		if btype in [_MCSTypes.BuildingType.MASS_DRIVER, _MCSTypes.BuildingType.FUSION_REACTOR, _MCSTypes.BuildingType.SPACE_ELEVATOR]:
+		if btype in [_MCSTypes.BuildingType.MASS_DRIVER, _MCSTypes.BuildingType.FUSION_PLANT, _MCSTypes.BuildingType.SPACE_ELEVATOR]:
 			superstructure_count += 1
 
 	# How many should we have by now? (1 per 5 years, starting at year 5)
@@ -684,13 +679,12 @@ static func _get_broken_buildings_by_priority(state: Dictionary) -> Array:
 
 	# Priority order for repairs
 	var priority_types = [
-		_MCSTypes.BuildingType.GREENHOUSE,      # Food production - critical
+		_MCSTypes.BuildingType.AGRIDOME,        # Food production - critical
 		_MCSTypes.BuildingType.HYDROPONICS,     # Food production
-		_MCSTypes.BuildingType.WATER_EXTRACTOR, # Water - critical
-		_MCSTypes.BuildingType.SOLAR_ARRAY,     # Power - critical
-		_MCSTypes.BuildingType.OXYGENATOR,      # Life support
-		_MCSTypes.BuildingType.HAB_POD,         # Housing
-		_MCSTypes.BuildingType.MEDICAL_BAY,     # Health
+		_MCSTypes.BuildingType.EXTRACTOR,       # Water + Oxygen - critical
+		_MCSTypes.BuildingType.POWER_STATION,   # Power - critical
+		_MCSTypes.BuildingType.HABITAT,         # Housing
+		_MCSTypes.BuildingType.MEDICAL,         # Health
 	]
 
 	for building in buildings:
@@ -709,14 +703,14 @@ static func _get_broken_buildings_by_priority(state: Dictionary) -> Array:
 	return broken
 
 ## Choose which superstructure to build
-## Cycles through: Mass Driver -> Fusion Reactor -> Space Elevator -> repeat
+## Cycles through: Mass Driver -> Fusion Plant -> Space Elevator -> repeat
 static func _choose_superstructure(state: Dictionary, random_value: float) -> int:
 	var buildings = state.get("buildings", [])
 
 	# Count existing superstructures
 	var superstructure_counts = {
 		_MCSTypes.BuildingType.MASS_DRIVER: 0,
-		_MCSTypes.BuildingType.FUSION_REACTOR: 0,
+		_MCSTypes.BuildingType.FUSION_PLANT: 0,
 		_MCSTypes.BuildingType.SPACE_ELEVATOR: 0
 	}
 
@@ -729,7 +723,7 @@ static func _choose_superstructure(state: Dictionary, random_value: float) -> in
 	# Start with mass driver (cargo), then fusion (power), then elevator (transport)
 	var build_order = [
 		_MCSTypes.BuildingType.MASS_DRIVER,
-		_MCSTypes.BuildingType.FUSION_REACTOR,
+		_MCSTypes.BuildingType.FUSION_PLANT,
 		_MCSTypes.BuildingType.SPACE_ELEVATOR
 	]
 
@@ -751,6 +745,73 @@ static func _choose_superstructure(state: Dictionary, random_value: float) -> in
 		return candidates[int(random_value * candidates.size()) % candidates.size()]
 
 	return build_order[0]  # Default to mass driver
+
+## Choose which specialization branch for a T2 building based on current bottleneck
+## Returns the branch BuildingType or -1 if no specialization needed
+static func choose_specialization(building: Dictionary, state: Dictionary, random_value: float) -> int:
+	var building_type = building.get("type", 0)
+	var tier = building.get("tier", 1)
+
+	# Only T2 base production buildings can specialize
+	if tier != 2 or not _MCSTypes.can_specialize(building_type):
+		return -1
+
+	var resources = state.get("resources", {})
+	var buildings = state.get("buildings", [])
+	var colonists = state.get("colonists", [])
+
+	# Analyze current bottlenecks
+	var food = resources.get("food", 0.0)
+	var water = resources.get("water", 0.0)
+	var oxygen = resources.get("oxygen", 0.0)
+	var machine_parts = resources.get("machine_parts", 0.0)
+	var building_materials = resources.get("building_materials", 0.0)
+	var fuel = resources.get("fuel", 0.0)
+	var pop = _MCSPopulation.count_alive(colonists)
+
+	# Calculate needs
+	var food_needed = pop * 600  # per year
+	var water_needed = pop * 200
+	var power_balance = _MCSEconomy.calc_power_balance(buildings, colonists)
+
+	match building_type:
+		_MCSTypes.BuildingType.AGRIDOME:
+			# HYDROPONICS: More efficient, needs electronics
+			# PROTEIN_VATS: Higher output, needs medicine
+			# Choose based on what we have
+			var electronics = resources.get("electronics", 0.0)
+			var medicine = resources.get("medicine", 0.0)
+
+			if electronics > 10 or medicine < 10:
+				return _MCSTypes.BuildingType.HYDROPONICS
+			else:
+				return _MCSTypes.BuildingType.PROTEIN_VATS
+
+		_MCSTypes.BuildingType.EXTRACTOR:
+			# ICE_MINER: Water focus + fuel production
+			# ATMO_PROCESSOR: Oxygen focus + terraforming
+			if fuel < 50 or water < water_needed * 1.5:
+				return _MCSTypes.BuildingType.ICE_MINER
+			else:
+				return _MCSTypes.BuildingType.ATMO_PROCESSOR
+
+		_MCSTypes.BuildingType.FABRICATOR:
+			# FOUNDRY: Building materials focus
+			# PRECISION: Machine parts focus
+			if machine_parts < 100 or building_materials > 1000:
+				return _MCSTypes.BuildingType.PRECISION
+			else:
+				return _MCSTypes.BuildingType.FOUNDRY
+
+		_MCSTypes.BuildingType.POWER_STATION:
+			# SOLAR_FARM: Cheap, no workers needed
+			# REACTOR: Reliable, higher output, needs fuel
+			if power_balance.balance < -50 or fuel > 100:
+				return _MCSTypes.BuildingType.REACTOR
+			else:
+				return _MCSTypes.BuildingType.SOLAR_FARM
+
+	return -1
 
 ## Calculate ROI (Return on Investment) for upgrading a building
 ## UPGRADES ARE OPTIMAL - heavily weighted to encourage upgrading over new construction

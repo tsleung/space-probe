@@ -806,16 +806,16 @@ func _draw_energy_network():
 				if not is_operational:
 					continue
 				# Categorize
-				if btype in [_MCSTypes.BuildingType.SOLAR_ARRAY, _MCSTypes.BuildingType.FISSION_REACTOR, _MCSTypes.BuildingType.RTG]:
+				if btype in [_MCSTypes.BuildingType.POWER_STATION, _MCSTypes.BuildingType.SOLAR_FARM, _MCSTypes.BuildingType.REACTOR, _MCSTypes.BuildingType.FUSION_PLANT]:
 					power_buildings.append({"pos": _iso_transform(layout.world_x, layout.world_y, layout.height * 0.5), "type": btype})
-				elif btype in [_MCSTypes.BuildingType.FACTORY, _MCSTypes.BuildingType.RESEARCH_CENTER]:
+				elif btype in [_MCSTypes.BuildingType.FABRICATOR, _MCSTypes.BuildingType.RESEARCH, _MCSTypes.BuildingType.FOUNDRY, _MCSTypes.BuildingType.PRECISION]:
 					consumers.append(_iso_transform(layout.world_x, layout.world_y, layout.height * 0.5))
 				break
 
 	# Draw energy beams from power to center hub
 	for power in power_buildings:
 		var beam_color = Color(0.3, 0.7, 1.0, 0.3)
-		if power.type == _MCSTypes.BuildingType.FISSION_REACTOR:
+		if power.type == _MCSTypes.BuildingType.REACTOR or power.type == _MCSTypes.BuildingType.FUSION_PLANT:
 			beam_color = Color(0.3, 1.0, 0.5, 0.3)  # Green for nuclear
 
 		# Pulsing beam
@@ -2077,7 +2077,7 @@ func _draw_perspective_dome(base_pos: Vector2, width: float, height: float,
 	"""
 	# Determine which upgrade path to use based on building type
 	var upgrade_key = "hab_pod"
-	if building_type == _MCSTypes.BuildingType.GREENHOUSE or building_type == _MCSTypes.BuildingType.HYDROPONICS:
+	if building_type == _MCSTypes.BuildingType.AGRIDOME or building_type == _MCSTypes.BuildingType.HYDROPONICS or building_type == _MCSTypes.BuildingType.PROTEIN_VATS:
 		upgrade_key = "greenhouse"
 	var upgrade_data = UPGRADE_PATHS.get(upgrade_key, {}).get(tier, {})
 
@@ -3964,59 +3964,75 @@ func _get_colonist_world_pos(colonist: Dictionary) -> Vector2:
 
 func _get_building_category(building_type: int) -> String:
 	match building_type:
-		_MCSTypes.BuildingType.HAB_POD, _MCSTypes.BuildingType.APARTMENT_BLOCK:
+		_MCSTypes.BuildingType.HABITAT, _MCSTypes.BuildingType.BARRACKS, _MCSTypes.BuildingType.QUARTERS:
 			return "housing"
-		_MCSTypes.BuildingType.GREENHOUSE, _MCSTypes.BuildingType.HYDROPONICS:
+		_MCSTypes.BuildingType.AGRIDOME, _MCSTypes.BuildingType.HYDROPONICS, _MCSTypes.BuildingType.PROTEIN_VATS:
 			return "food"
-		_MCSTypes.BuildingType.SOLAR_ARRAY, _MCSTypes.BuildingType.FISSION_REACTOR:
+		_MCSTypes.BuildingType.POWER_STATION, _MCSTypes.BuildingType.SOLAR_FARM, \
+		_MCSTypes.BuildingType.REACTOR, _MCSTypes.BuildingType.FUSION_PLANT:
 			return "power"
-		_MCSTypes.BuildingType.WATER_EXTRACTOR:
+		_MCSTypes.BuildingType.EXTRACTOR, _MCSTypes.BuildingType.ICE_MINER, _MCSTypes.BuildingType.ATMO_PROCESSOR:
 			return "water"
-		_MCSTypes.BuildingType.WORKSHOP, _MCSTypes.BuildingType.FACTORY:
+		_MCSTypes.BuildingType.FABRICATOR, _MCSTypes.BuildingType.FOUNDRY, _MCSTypes.BuildingType.PRECISION:
 			return "industry"
-		_MCSTypes.BuildingType.MEDICAL_BAY, _MCSTypes.BuildingType.HOSPITAL:
+		_MCSTypes.BuildingType.MEDICAL:
 			return "medical"
-		_MCSTypes.BuildingType.LAB, _MCSTypes.BuildingType.RESEARCH_CENTER:
+		_MCSTypes.BuildingType.RESEARCH:
 			return "research"
 		_:
 			return "housing"
 
 func _get_building_height_key(building_type: int) -> String:
 	match building_type:
-		_MCSTypes.BuildingType.HAB_POD: return "hab_pod"
-		_MCSTypes.BuildingType.APARTMENT_BLOCK: return "apartment_block"
-		_MCSTypes.BuildingType.GREENHOUSE: return "greenhouse"
+		_MCSTypes.BuildingType.HABITAT: return "hab_pod"
+		_MCSTypes.BuildingType.BARRACKS: return "apartment_block"
+		_MCSTypes.BuildingType.QUARTERS: return "apartment_block"
+		_MCSTypes.BuildingType.AGRIDOME: return "greenhouse"
 		_MCSTypes.BuildingType.HYDROPONICS: return "hydroponics"
-		_MCSTypes.BuildingType.SOLAR_ARRAY: return "solar_array"
-		_MCSTypes.BuildingType.WATER_EXTRACTOR: return "water_extractor"
-		_MCSTypes.BuildingType.OXYGENATOR: return "oxygenator"
-		_MCSTypes.BuildingType.WORKSHOP: return "workshop"
-		_MCSTypes.BuildingType.FACTORY: return "factory"
-		_MCSTypes.BuildingType.MEDICAL_BAY: return "medical_bay"
-		_MCSTypes.BuildingType.HOSPITAL: return "hospital"
-		_MCSTypes.BuildingType.LAB: return "lab"
-		_MCSTypes.BuildingType.RESEARCH_CENTER: return "research_center"
-		_MCSTypes.BuildingType.FISSION_REACTOR: return "fission_reactor"
+		_MCSTypes.BuildingType.PROTEIN_VATS: return "hydroponics"
+		_MCSTypes.BuildingType.POWER_STATION: return "solar_array"
+		_MCSTypes.BuildingType.SOLAR_FARM: return "solar_array"
+		_MCSTypes.BuildingType.EXTRACTOR: return "water_extractor"
+		_MCSTypes.BuildingType.ICE_MINER: return "water_extractor"
+		_MCSTypes.BuildingType.ATMO_PROCESSOR: return "oxygenator"
+		_MCSTypes.BuildingType.FABRICATOR: return "factory"
+		_MCSTypes.BuildingType.FOUNDRY: return "factory"
+		_MCSTypes.BuildingType.PRECISION: return "workshop"
+		_MCSTypes.BuildingType.MEDICAL: return "medical_bay"
+		_MCSTypes.BuildingType.ACADEMY: return "lab"
+		_MCSTypes.BuildingType.RESEARCH: return "research_center"
+		_MCSTypes.BuildingType.RECREATION: return "hab_pod"
+		_MCSTypes.BuildingType.REACTOR: return "fission_reactor"
+		_MCSTypes.BuildingType.FUSION_PLANT: return "fission_reactor"
 		_MCSTypes.BuildingType.STORAGE: return "storage"
 		_: return "hab_pod"
 
 func _get_building_label(building_type: int) -> String:
 	match building_type:
-		_MCSTypes.BuildingType.HAB_POD: return "H"
-		_MCSTypes.BuildingType.APARTMENT_BLOCK: return "A"
-		_MCSTypes.BuildingType.GREENHOUSE: return "G"
+		_MCSTypes.BuildingType.HABITAT: return "H"
+		_MCSTypes.BuildingType.BARRACKS: return "B"
+		_MCSTypes.BuildingType.QUARTERS: return "Q"
+		_MCSTypes.BuildingType.AGRIDOME: return "A"
 		_MCSTypes.BuildingType.HYDROPONICS: return "HY"
-		_MCSTypes.BuildingType.SOLAR_ARRAY: return "S"
-		_MCSTypes.BuildingType.WATER_EXTRACTOR: return "W"
-		_MCSTypes.BuildingType.WORKSHOP: return "WS"
-		_MCSTypes.BuildingType.FACTORY: return "F"
-		_MCSTypes.BuildingType.MEDICAL_BAY: return "M"
-		_MCSTypes.BuildingType.HOSPITAL: return "H+"
-		_MCSTypes.BuildingType.LAB: return "L"
-		_MCSTypes.BuildingType.RESEARCH_CENTER: return "R"
-		_MCSTypes.BuildingType.FISSION_REACTOR: return "FR"
-		_MCSTypes.BuildingType.OXYGENATOR: return "O2"
+		_MCSTypes.BuildingType.PROTEIN_VATS: return "PV"
+		_MCSTypes.BuildingType.POWER_STATION: return "P"
+		_MCSTypes.BuildingType.SOLAR_FARM: return "SF"
+		_MCSTypes.BuildingType.EXTRACTOR: return "E"
+		_MCSTypes.BuildingType.ICE_MINER: return "IM"
+		_MCSTypes.BuildingType.ATMO_PROCESSOR: return "AP"
+		_MCSTypes.BuildingType.FABRICATOR: return "F"
+		_MCSTypes.BuildingType.FOUNDRY: return "FO"
+		_MCSTypes.BuildingType.PRECISION: return "PR"
+		_MCSTypes.BuildingType.MEDICAL: return "M"
+		_MCSTypes.BuildingType.ACADEMY: return "AC"
+		_MCSTypes.BuildingType.RESEARCH: return "R"
+		_MCSTypes.BuildingType.RECREATION: return "RC"
+		_MCSTypes.BuildingType.REACTOR: return "RX"
+		_MCSTypes.BuildingType.FUSION_PLANT: return "FP"
 		_MCSTypes.BuildingType.STORAGE: return "ST"
+		_MCSTypes.BuildingType.STARPORT: return "SP"
+		_MCSTypes.BuildingType.ORBITAL: return "OR"
+		_MCSTypes.BuildingType.CATCHER: return "CA"
 		_: return "?"
 
 enum BuildingShape {
@@ -4029,46 +4045,41 @@ func _get_building_shape(building_type: int) -> BuildingShape:
 	"""Determine which visual shape to use for a building type"""
 	match building_type:
 		# DOME - low bunker/dome structures (survival era basics)
-		# Hab pods, medical bays, etc. are LOW pressurized shelters
-		_MCSTypes.BuildingType.HAB_POD, _MCSTypes.BuildingType.MEDICAL_BAY, \
-		_MCSTypes.BuildingType.SCHOOL, _MCSTypes.BuildingType.LAB, \
-		_MCSTypes.BuildingType.RECREATION_CENTER, _MCSTypes.BuildingType.TEMPLE:
+		_MCSTypes.BuildingType.HABITAT, _MCSTypes.BuildingType.MEDICAL, \
+		_MCSTypes.BuildingType.ACADEMY, _MCSTypes.BuildingType.RECREATION:
 			return BuildingShape.DOME
 		# TOWER - tall rectangular buildings (growth era and later)
-		_MCSTypes.BuildingType.APARTMENT_BLOCK, _MCSTypes.BuildingType.FACTORY, \
-		_MCSTypes.BuildingType.WORKSHOP, _MCSTypes.BuildingType.HOSPITAL, \
-		_MCSTypes.BuildingType.UNIVERSITY, _MCSTypes.BuildingType.BARRACKS, \
-		_MCSTypes.BuildingType.STORAGE, _MCSTypes.BuildingType.GOVERNMENT_HALL, \
-		_MCSTypes.BuildingType.PRISON:
+		_MCSTypes.BuildingType.BARRACKS, _MCSTypes.BuildingType.FABRICATOR, \
+		_MCSTypes.BuildingType.FOUNDRY, _MCSTypes.BuildingType.PRECISION, \
+		_MCSTypes.BuildingType.STORAGE, _MCSTypes.BuildingType.LOGISTICS:
 			return BuildingShape.TOWER
-		# ARCOLOGY - mega domes for research centers and luxury
-		_MCSTypes.BuildingType.RESEARCH_CENTER, _MCSTypes.BuildingType.LUXURY_QUARTERS:
+		# ARCOLOGY - mega domes for research and luxury
+		_MCSTypes.BuildingType.RESEARCH, _MCSTypes.BuildingType.QUARTERS:
 			return BuildingShape.ARCOLOGY
 		# GREENHOUSE - glass domes with plants
-		_MCSTypes.BuildingType.GREENHOUSE, _MCSTypes.BuildingType.HYDROPONICS, \
+		_MCSTypes.BuildingType.AGRIDOME, _MCSTypes.BuildingType.HYDROPONICS, \
 		_MCSTypes.BuildingType.PROTEIN_VATS:
 			return BuildingShape.GREENHOUSE
 		# SOLAR_ARRAY - flat panel arrays
-		_MCSTypes.BuildingType.SOLAR_ARRAY, _MCSTypes.BuildingType.WIND_TURBINE:
+		_MCSTypes.BuildingType.POWER_STATION, _MCSTypes.BuildingType.SOLAR_FARM:
 			return BuildingShape.SOLAR_ARRAY
 		# REACTOR - glowing core power plants
-		_MCSTypes.BuildingType.FISSION_REACTOR, _MCSTypes.BuildingType.RTG:
+		_MCSTypes.BuildingType.REACTOR, _MCSTypes.BuildingType.FUSION_PLANT:
 			return BuildingShape.REACTOR
-		# HEX_PRISM - small industrial (water extractor, oxygenator)
-		_MCSTypes.BuildingType.WATER_EXTRACTOR, _MCSTypes.BuildingType.OXYGENATOR, \
-		_MCSTypes.BuildingType.CO2_SCRUBBER, _MCSTypes.BuildingType.WASTE_PROCESSOR:
+		# HEX_PRISM - small industrial (extractor, etc)
+		_MCSTypes.BuildingType.EXTRACTOR, _MCSTypes.BuildingType.ICE_MINER, \
+		_MCSTypes.BuildingType.ATMO_PROCESSOR:
 			return BuildingShape.HEX_PRISM
 		# LANDING_PAD - flat pads with ships
-		_MCSTypes.BuildingType.LANDING_PAD, _MCSTypes.BuildingType.AIRLOCK:
+		_MCSTypes.BuildingType.STARPORT, _MCSTypes.BuildingType.ORBITAL, \
+		_MCSTypes.BuildingType.CATCHER:
 			return BuildingShape.LANDING_PAD
 		# COMMS_TOWER - lattice towers with dishes
-		_MCSTypes.BuildingType.COMMUNICATIONS:
+		_MCSTypes.BuildingType.COMMS:
 			return BuildingShape.COMMS_TOWER
 		# MEGASTRUCTURES
 		_MCSTypes.BuildingType.MASS_DRIVER:
 			return BuildingShape.MASS_DRIVER
-		_MCSTypes.BuildingType.FUSION_REACTOR:
-			return BuildingShape.FUSION_REACTOR
 		_MCSTypes.BuildingType.SPACE_ELEVATOR:
 			return BuildingShape.SPACE_ELEVATOR
 		# Default: hex prism for anything else

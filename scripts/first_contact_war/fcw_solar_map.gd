@@ -3814,74 +3814,30 @@ func update_state(state: Dictionary, zone_defenses: Dictionary, fleets_in_transi
 		# Clear herald ships targeting old zone
 		_herald_ships.clear()
 
-	# Update Herald state from entity
-	if not herald_entity.is_empty():
-		# Herald entity exists - read state from entity
-		var herald_origin = herald_entity.get("origin", FCWTypes.ZoneId.KUIPER)
-		var herald_dest = herald_entity.get("destination", FCWTypes.ZoneId.KUIPER)
-		var is_in_transit = herald_entity.movement_state == FCWTypes.MovementState.BURNING
+	# Always use herald_current_zone from state (this is what the game logic updates)
+	# The entity system is not currently synced with Herald movement
+	var new_current_zone = state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
+	var new_transit = state.get("herald_transit", {})
+	_herald_current_zone = new_current_zone
+	_herald_transit = new_transit.duplicate()
 
-		_herald_current_zone = herald_origin if not is_in_transit else herald_dest
-		if is_in_transit:
-			# Calculate travel progress based on entity position
-			var game_time = state.get("game_time", 0.0)
-			var origin_au = FCWTypes.get_zone_position(herald_origin, game_time)
-			var dest_au = FCWTypes.get_zone_position(herald_dest, game_time)
-			var total_dist = origin_au.distance_to(dest_au)
-			var current_dist = herald_entity.position.distance_to(dest_au)
-			var travel_progress = 1.0 - (current_dist / maxf(total_dist, 0.1))
-
-			_herald_transit = {
-				"from_zone": herald_origin,
-				"to_zone": herald_dest,
-				"turns_remaining": int((1.0 - travel_progress) * 5),  # Rough estimate
-				"total_turns": 5  # Estimate
-			}
+	# Update positions based on transit state
+	if _initialized:
+		if not _herald_transit.is_empty():
+			_herald_start_position = _get_zone_pixel_pos(_herald_transit.from_zone)
+			_herald_target_position = _get_zone_pixel_pos(_herald_transit.to_zone)
+			# Calculate transit progress for smooth interpolation
+			var total = _herald_transit.get("total_turns", 1)
+			var remaining = _herald_transit.get("turns_remaining", 0)
+			var progress = 1.0 - (float(remaining) / maxf(float(total), 1.0))
+			_herald_travel_progress = clampf(progress, 0.0, 1.0)
+			_herald_position = _herald_start_position.lerp(_herald_target_position, _herald_travel_progress)
 		else:
-			_herald_transit = {}
-
-		# Update positions based on zone IDs (use visual ZONE_POSITIONS, not AU)
-		if _initialized:
-			var origin_pos = _get_zone_pixel_pos(herald_origin)
-			var dest_pos = _get_zone_pixel_pos(herald_dest)
-
-			if is_in_transit:
-				# Interpolate position between zones using entity's actual progress
-				var game_time = state.get("game_time", 0.0)
-				var origin_au = FCWTypes.get_zone_position(herald_origin, game_time)
-				var dest_au = FCWTypes.get_zone_position(herald_dest, game_time)
-				var total_dist = origin_au.distance_to(dest_au)
-				var current_dist = herald_entity.position.distance_to(dest_au)
-				var travel_progress = clampf(1.0 - (current_dist / maxf(total_dist, 0.1)), 0.0, 1.0)
-
-				_herald_position = origin_pos.lerp(dest_pos, travel_progress)
-				_herald_start_position = origin_pos
-				_herald_target_position = dest_pos
-				_herald_travel_progress = travel_progress
-			else:
-				# Stationary at current zone
-				_herald_position = origin_pos
-				_herald_start_position = origin_pos
-				_herald_target_position = origin_pos
-				_herald_travel_progress = 1.0
-	else:
-		# Fallback to legacy state for backward compatibility
-		var new_current_zone = state.get("herald_current_zone", FCWTypes.ZoneId.KUIPER)
-		var new_transit = state.get("herald_transit", {})
-		_herald_current_zone = new_current_zone
-		_herald_transit = new_transit.duplicate()
-
-		# Update positions based on transit state
-		if _initialized:
-			if not _herald_transit.is_empty():
-				_herald_start_position = _get_zone_pixel_pos(_herald_transit.from_zone)
-				_herald_target_position = _get_zone_pixel_pos(_herald_transit.to_zone)
-			else:
-				var current_pos = _get_zone_pixel_pos(_herald_current_zone)
-				_herald_position = current_pos
-				_herald_start_position = current_pos
-				_herald_target_position = current_pos
-				_herald_travel_progress = 1.0
+			var current_pos = _get_zone_pixel_pos(_herald_current_zone)
+			_herald_position = current_pos
+			_herald_start_position = current_pos
+			_herald_target_position = current_pos
+			_herald_travel_progress = 1.0
 
 	_herald_strength = state.herald_strength
 

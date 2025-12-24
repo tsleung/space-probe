@@ -354,9 +354,22 @@ func hide_repair_progress(room_type: ShipTypes.RoomType) -> void:
 func start_eva(crew_role: String, target_waypoint: int = -1) -> void:
 	## Start an EVA for the specified crew member
 	## If target_waypoint is -1, picks a random exterior target
+	print("[EVA-DEBUG] ShipView.start_eva called: role=%s, waypoint=%d" % [crew_role, target_waypoint])
+	print("[EVA-DEBUG] eva_ctrl is null: %s" % (eva_ctrl == null))
+	print("[EVA-DEBUG] crew dict keys: %s" % str(crew.keys()))
+	print("[EVA-DEBUG] ship_nav is null: %s" % (ship_nav == null))
+
+	if not eva_ctrl:
+		push_error("[EVA-DEBUG] CRITICAL: eva_ctrl is NULL!")
+		return
+
 	if target_waypoint == -1:
 		target_waypoint = ShipNavigation.get_random_exterior_target()
+		print("[EVA-DEBUG] Random target selected: %d" % target_waypoint)
+
+	print("[EVA-DEBUG] Calling eva_ctrl.start_eva('%s', %d)..." % [crew_role, target_waypoint])
 	eva_ctrl.start_eva(crew_role, target_waypoint)
+	print("[EVA-DEBUG] eva_ctrl.start_eva() returned")
 
 func complete_eva(crew_role: String, success: bool = true) -> void:
 	## Complete an active EVA

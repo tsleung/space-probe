@@ -520,75 +520,89 @@ func _get_building_output_text(building: Dictionary) -> String:
 
 	match building_type:
 		# Housing - show actual capacity from tier stats
-		_MCSTypes.BuildingType.HAB_POD, _MCSTypes.BuildingType.APARTMENT_BLOCK, \
-		_MCSTypes.BuildingType.LUXURY_QUARTERS, _MCSTypes.BuildingType.BARRACKS:
-			var capacity = stats.get("housing_capacity", 4)
+		_MCSTypes.BuildingType.HABITAT, _MCSTypes.BuildingType.BARRACKS, \
+		_MCSTypes.BuildingType.QUARTERS:
+			var capacity = stats.get("housing_capacity", 6)
 			return "→ %d beds%s" % [capacity, tier_label]
 
 		# Food production - show actual production from tier stats
-		_MCSTypes.BuildingType.GREENHOUSE, _MCSTypes.BuildingType.HYDROPONICS, \
+		_MCSTypes.BuildingType.AGRIDOME, _MCSTypes.BuildingType.HYDROPONICS, \
 		_MCSTypes.BuildingType.PROTEIN_VATS:
 			var prod = stats.get("production", {})
 			var food = prod.get("food", 0)
 			return "→ +%d food/yr%s" % [food, tier_label]
 
 		# Power - show actual generation from tier stats
-		_MCSTypes.BuildingType.SOLAR_ARRAY, _MCSTypes.BuildingType.WIND_TURBINE, \
-		_MCSTypes.BuildingType.RTG, _MCSTypes.BuildingType.FISSION_REACTOR, \
-		_MCSTypes.BuildingType.FUSION_REACTOR:
+		_MCSTypes.BuildingType.POWER_STATION, _MCSTypes.BuildingType.SOLAR_FARM, \
+		_MCSTypes.BuildingType.REACTOR, _MCSTypes.BuildingType.FUSION_PLANT:
 			var power = stats.get("power_gen", 0)
 			return "→ +%d power%s" % [power, tier_label]
 
-		# Water - show actual production from tier stats
-		_MCSTypes.BuildingType.WATER_EXTRACTOR:
+		# Extractor - water + oxygen
+		_MCSTypes.BuildingType.EXTRACTOR, _MCSTypes.BuildingType.ICE_MINER, \
+		_MCSTypes.BuildingType.ATMO_PROCESSOR:
 			var prod = stats.get("production", {})
 			var water = prod.get("water", 0)
-			return "→ +%d water/yr%s" % [water, tier_label]
-
-		# Oxygen
-		_MCSTypes.BuildingType.OXYGENATOR:
-			var prod = stats.get("production", {})
 			var oxygen = prod.get("oxygen", 0)
-			return "→ +%d oxygen/yr%s" % [oxygen, tier_label]
+			return "→ +%d water +%d O2%s" % [water, oxygen, tier_label]
 
-		# Industry - show parts production
-		_MCSTypes.BuildingType.WORKSHOP:
-			var prod = stats.get("production", {})
-			var parts = prod.get("machine_parts", 0)
-			if parts > 0:
-				return "→ +%d parts%s" % [parts, tier_label]
-			return "→ repairs%s" % tier_label
-		_MCSTypes.BuildingType.FACTORY:
+		# Fabricator - parts + materials
+		_MCSTypes.BuildingType.FABRICATOR, _MCSTypes.BuildingType.FOUNDRY, \
+		_MCSTypes.BuildingType.PRECISION:
 			var prod = stats.get("production", {})
 			var parts = prod.get("machine_parts", 0)
 			var mats = prod.get("building_materials", 0)
 			return "→ +%d parts +%d mats%s" % [parts, mats, tier_label]
 
 		# Medical
-		_MCSTypes.BuildingType.MEDICAL_BAY, _MCSTypes.BuildingType.HOSPITAL:
+		_MCSTypes.BuildingType.MEDICAL:
 			var health = stats.get("health_boost", 0)
 			return "→ +%d health%s" % [health, tier_label]
 
-		# Science/Education
-		_MCSTypes.BuildingType.LAB, _MCSTypes.BuildingType.RESEARCH_CENTER:
-			var research = stats.get("research_boost", 0)
-			return "→ +%d research%s" % [research, tier_label]
-		_MCSTypes.BuildingType.SCHOOL:
+		# Education
+		_MCSTypes.BuildingType.ACADEMY:
 			var edu = stats.get("education_capacity", 0)
 			return "→ %d students%s" % [edu, tier_label]
-		_MCSTypes.BuildingType.UNIVERSITY:
-			return "→ +skills%s" % tier_label
 
-		# Social
-		_MCSTypes.BuildingType.RECREATION_CENTER:
+		# Research
+		_MCSTypes.BuildingType.RESEARCH:
+			var research = stats.get("research_boost", 0)
+			return "→ +%d research%s" % [research, tier_label]
+
+		# Recreation
+		_MCSTypes.BuildingType.RECREATION:
 			return "→ +morale%s" % tier_label
-		_MCSTypes.BuildingType.TEMPLE:
-			return "→ +stability"
-		_MCSTypes.BuildingType.GOVERNMENT_HALL:
-			return "→ governance"
+
 		# Infrastructure
-		_MCSTypes.BuildingType.LANDING_PAD:
-			return "→ trade"
+		_MCSTypes.BuildingType.STORAGE:
+			var cap = stats.get("storage_capacity", 0)
+			return "→ +%d storage%s" % [cap, tier_label]
+		_MCSTypes.BuildingType.COMMS:
+			return "→ trade info%s" % tier_label
+		_MCSTypes.BuildingType.LOGISTICS:
+			return "→ +build speed%s" % tier_label
+
+		# Space Economy
+		_MCSTypes.BuildingType.STARPORT:
+			var imm = stats.get("immigration_capacity", 0)
+			return "→ +%d immigrants%s" % [imm, tier_label]
+		_MCSTypes.BuildingType.ORBITAL:
+			var imm = stats.get("immigration_capacity", 0)
+			return "→ +%d immigrants%s" % [imm, tier_label]
+		_MCSTypes.BuildingType.CATCHER:
+			var prod = stats.get("production", {})
+			var mats = prod.get("building_materials", 0)
+			return "→ +%d mats/yr%s" % [mats, tier_label]
+
+		# Megastructures
+		_MCSTypes.BuildingType.MASS_DRIVER:
+			return "→ exports%s" % tier_label
+		_MCSTypes.BuildingType.FUSION_PLANT:
+			var power = stats.get("power_gen", 0)
+			return "→ +%d power%s" % [power, tier_label]
+		_MCSTypes.BuildingType.SPACE_ELEVATOR:
+			return "→ transport%s" % tier_label
+
 		_:
 			return ""
 
@@ -1104,20 +1118,41 @@ func _update_build_cost():
 
 	# Building costs (simplified)
 	var costs = {
-		_MCSTypes.BuildingType.HAB_POD: {"materials": 50, "power": 10},
-		_MCSTypes.BuildingType.APARTMENT_BLOCK: {"materials": 100, "power": 25},
-		_MCSTypes.BuildingType.GREENHOUSE: {"materials": 40, "power": 15},
-		_MCSTypes.BuildingType.HYDROPONICS: {"materials": 60, "power": 20},
-		_MCSTypes.BuildingType.SOLAR_ARRAY: {"materials": 30, "power": 0},
-		_MCSTypes.BuildingType.FISSION_REACTOR: {"materials": 150, "power": 0},
-		_MCSTypes.BuildingType.WATER_EXTRACTOR: {"materials": 60, "power": 20},
-		_MCSTypes.BuildingType.WORKSHOP: {"materials": 70, "power": 15},
-		_MCSTypes.BuildingType.FACTORY: {"materials": 120, "power": 30},
-		_MCSTypes.BuildingType.MEDICAL_BAY: {"materials": 100, "power": 20},
-		_MCSTypes.BuildingType.SCHOOL: {"materials": 60, "power": 10},
-		_MCSTypes.BuildingType.LAB: {"materials": 90, "power": 25},
-		_MCSTypes.BuildingType.GOVERNMENT_HALL: {"materials": 120, "power": 30},
-		_MCSTypes.BuildingType.LANDING_PAD: {"materials": 200, "power": 50},
+		# Housing
+		_MCSTypes.BuildingType.HABITAT: {"materials": 40, "power": 8},
+		_MCSTypes.BuildingType.BARRACKS: {"materials": 60, "power": 10},
+		_MCSTypes.BuildingType.QUARTERS: {"materials": 100, "power": 12},
+		# Production Base
+		_MCSTypes.BuildingType.AGRIDOME: {"materials": 80, "power": 15},
+		_MCSTypes.BuildingType.EXTRACTOR: {"materials": 50, "power": 20},
+		_MCSTypes.BuildingType.FABRICATOR: {"materials": 150, "power": 35},
+		_MCSTypes.BuildingType.POWER_STATION: {"materials": 40, "power": 0},
+		# Production Branches
+		_MCSTypes.BuildingType.HYDROPONICS: {"materials": 100, "power": 20},
+		_MCSTypes.BuildingType.PROTEIN_VATS: {"materials": 120, "power": 18},
+		_MCSTypes.BuildingType.ICE_MINER: {"materials": 80, "power": 22},
+		_MCSTypes.BuildingType.ATMO_PROCESSOR: {"materials": 100, "power": 25},
+		_MCSTypes.BuildingType.FOUNDRY: {"materials": 150, "power": 40},
+		_MCSTypes.BuildingType.PRECISION: {"materials": 140, "power": 40},
+		_MCSTypes.BuildingType.SOLAR_FARM: {"materials": 50, "power": 0},
+		_MCSTypes.BuildingType.REACTOR: {"materials": 200, "power": 0},
+		# Services
+		_MCSTypes.BuildingType.MEDICAL: {"materials": 80, "power": 15},
+		_MCSTypes.BuildingType.ACADEMY: {"materials": 60, "power": 10},
+		_MCSTypes.BuildingType.RESEARCH: {"materials": 100, "power": 25},
+		_MCSTypes.BuildingType.RECREATION: {"materials": 55, "power": 12},
+		# Infrastructure
+		_MCSTypes.BuildingType.STORAGE: {"materials": 30, "power": 5},
+		_MCSTypes.BuildingType.COMMS: {"materials": 50, "power": 12},
+		_MCSTypes.BuildingType.LOGISTICS: {"materials": 70, "power": 15},
+		# Space Economy
+		_MCSTypes.BuildingType.STARPORT: {"materials": 400, "power": 35},
+		_MCSTypes.BuildingType.ORBITAL: {"materials": 600, "power": 60},
+		_MCSTypes.BuildingType.CATCHER: {"materials": 800, "power": 85},
+		# Megastructures
+		_MCSTypes.BuildingType.MASS_DRIVER: {"materials": 500, "power": 100},
+		_MCSTypes.BuildingType.FUSION_PLANT: {"materials": 600, "power": 0},
+		_MCSTypes.BuildingType.SPACE_ELEVATOR: {"materials": 800, "power": 160},
 	}
 
 	var building_types = _MCSTypes.BuildingType.values()

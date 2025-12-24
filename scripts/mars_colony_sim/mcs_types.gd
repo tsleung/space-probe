@@ -68,27 +68,109 @@ enum Faction {
 	VISIONARIES      # Long-term terraforming
 }
 
-enum BuildingType {
-	# Housing
-	HAB_POD, APARTMENT_BLOCK, LUXURY_QUARTERS, BARRACKS,
-	# Production
-	GREENHOUSE, HYDROPONICS, PROTEIN_VATS, WORKSHOP, FACTORY,
-	# Power
-	SOLAR_ARRAY, WIND_TURBINE, RTG, FISSION_REACTOR,
-	# Life Support
-	WATER_EXTRACTOR, OXYGENATOR, WASTE_PROCESSOR, CO2_SCRUBBER,
-	# Services
-	MEDICAL_BAY, HOSPITAL, SCHOOL, UNIVERSITY, LAB, RESEARCH_CENTER,
-	# Social
-	RECREATION_CENTER, TEMPLE, GOVERNMENT_HALL, PRISON,
-	# Infrastructure
-	STORAGE, AIRLOCK, LANDING_PAD, COMMUNICATIONS,
-	# Transport/Immigration
-	STARPORT,           # Landing facility for Earth ships, enables immigration
-	SPACE_STATION,      # Orbital facility, enables mass immigration (tech unlock)
-	# Megastructures
-	MASS_DRIVER, FUSION_REACTOR, SPACE_ELEVATOR
+enum BuildingCategory {
+	HOUSING,
+	PRODUCTION,
+	SERVICES,
+	INFRASTRUCTURE,
+	SPACE_ECONOMY,
+	MEGASTRUCTURE
 }
+
+enum BuildingType {
+	# === HOUSING (3) ===
+	HABITAT,            # Standard living quarters (was HAB_POD + APARTMENT_BLOCK)
+	BARRACKS,           # Dense but spartan housing
+	QUARTERS,           # Luxury expensive housing
+
+	# === PRODUCTION - Base Types (4) ===
+	AGRIDOME,           # Food production (base, branches at T3)
+	EXTRACTOR,          # Water + Oxygen (base, branches at T3)
+	FABRICATOR,         # Materials + Parts (base, branches at T3)
+	POWER_STATION,      # Energy (base, branches at T3)
+
+	# === PRODUCTION - T3 Branches (8) ===
+	# AGRIDOME branches:
+	HYDROPONICS,        # Efficient food, needs electronics
+	PROTEIN_VATS,       # Dense food, needs medicine
+	# EXTRACTOR branches:
+	ICE_MINER,          # Water focus, can produce fuel
+	ATMO_PROCESSOR,     # Oxygen focus, terraforming
+	# FABRICATOR branches:
+	FOUNDRY,            # Building materials focus
+	PRECISION,          # Machine parts focus
+	# POWER_STATION branches:
+	SOLAR_FARM,         # Cheap, weather-dependent
+	REACTOR,            # Reliable, needs fuel, T5 fusion
+
+	# === SERVICES (4) ===
+	MEDICAL,            # Health + birth capacity (was MEDICAL_BAY + HOSPITAL)
+	ACADEMY,            # Education + skills (was SCHOOL + UNIVERSITY)
+	RESEARCH,           # Science + tech unlock (was LAB + RESEARCH_CENTER)
+	RECREATION,         # Morale + culture (was RECREATION_CENTER + TEMPLE + etc)
+
+	# === INFRASTRUCTURE (3) ===
+	STORAGE,            # Resource stockpile
+	COMMS,              # Earth connection, trade info (was COMMUNICATIONS)
+	LOGISTICS,          # Transport hub, construction speed (was AIRLOCK + LANDING_PAD)
+
+	# === SPACE ECONOMY (3) ===
+	STARPORT,           # Gateway to orbit, immigration, trade
+	ORBITAL,            # Space station, mass immigration (was SPACE_STATION)
+	CATCHER,            # Asteroid mining, massive materials (was ASTEROID_CATCHER)
+
+	# === MEGASTRUCTURES (3) ===
+	MASS_DRIVER,        # Electromagnetic launcher
+	FUSION_PLANT,       # Massive power (was FUSION_REACTOR)
+	SPACE_ELEVATOR,     # Ultimate transport
+}
+
+# Specialization branch mappings: base type -> [branch1, branch2]
+const SPECIALIZATION_BRANCHES = {
+	BuildingType.AGRIDOME: [BuildingType.HYDROPONICS, BuildingType.PROTEIN_VATS],
+	BuildingType.EXTRACTOR: [BuildingType.ICE_MINER, BuildingType.ATMO_PROCESSOR],
+	BuildingType.FABRICATOR: [BuildingType.FOUNDRY, BuildingType.PRECISION],
+	BuildingType.POWER_STATION: [BuildingType.SOLAR_FARM, BuildingType.REACTOR],
+}
+
+# Reverse mapping: branch -> base type
+const BRANCH_TO_BASE = {
+	BuildingType.HYDROPONICS: BuildingType.AGRIDOME,
+	BuildingType.PROTEIN_VATS: BuildingType.AGRIDOME,
+	BuildingType.ICE_MINER: BuildingType.EXTRACTOR,
+	BuildingType.ATMO_PROCESSOR: BuildingType.EXTRACTOR,
+	BuildingType.FOUNDRY: BuildingType.FABRICATOR,
+	BuildingType.PRECISION: BuildingType.FABRICATOR,
+	BuildingType.SOLAR_FARM: BuildingType.POWER_STATION,
+	BuildingType.REACTOR: BuildingType.POWER_STATION,
+}
+
+# Category lookup
+static func get_building_category(type: BuildingType) -> BuildingCategory:
+	match type:
+		BuildingType.HABITAT, BuildingType.BARRACKS, BuildingType.QUARTERS:
+			return BuildingCategory.HOUSING
+		BuildingType.AGRIDOME, BuildingType.EXTRACTOR, BuildingType.FABRICATOR, BuildingType.POWER_STATION, \
+		BuildingType.HYDROPONICS, BuildingType.PROTEIN_VATS, BuildingType.ICE_MINER, BuildingType.ATMO_PROCESSOR, \
+		BuildingType.FOUNDRY, BuildingType.PRECISION, BuildingType.SOLAR_FARM, BuildingType.REACTOR:
+			return BuildingCategory.PRODUCTION
+		BuildingType.MEDICAL, BuildingType.ACADEMY, BuildingType.RESEARCH, BuildingType.RECREATION:
+			return BuildingCategory.SERVICES
+		BuildingType.STORAGE, BuildingType.COMMS, BuildingType.LOGISTICS:
+			return BuildingCategory.INFRASTRUCTURE
+		BuildingType.STARPORT, BuildingType.ORBITAL, BuildingType.CATCHER:
+			return BuildingCategory.SPACE_ECONOMY
+		BuildingType.MASS_DRIVER, BuildingType.FUSION_PLANT, BuildingType.SPACE_ELEVATOR:
+			return BuildingCategory.MEGASTRUCTURE
+	return BuildingCategory.INFRASTRUCTURE
+
+# Check if building type is a specialization branch
+static func is_branch_type(type: BuildingType) -> bool:
+	return BRANCH_TO_BASE.has(type)
+
+# Check if building type can specialize at T3
+static func can_specialize(type: BuildingType) -> bool:
+	return SPECIALIZATION_BRANCHES.has(type)
 
 enum ResourceType {
 	# Primary (extracted)
@@ -98,7 +180,9 @@ enum ResourceType {
 	# Tertiary (manufactured)
 	FOOD, MEDICINE, ELECTRONICS, MACHINE_PARTS, BUILDING_MATERIALS, FUEL,
 	# Quaternary (luxury)
-	ART, ENTERTAINMENT, COMFORT_ITEMS
+	ART, ENTERTAINMENT, COMFORT_ITEMS,
+	# Economy
+	CREDITS  # Trade currency with Earth
 }
 
 enum EventSeverity {
@@ -139,194 +223,198 @@ const UPGRADE_DURATIONS = {
 
 ## Tier-based stats: production scales UP, workers scale DOWN
 ## Key insight: Worker efficiency is the main driver for upgrades
-## Tier 5 = 3x production with ~50% workers needed
+## T3 is branching point for production buildings - choose specialization
 const BUILDING_TIER_STATS = {
 	# === HOUSING ===
-	BuildingType.HAB_POD: {
-		1: {"housing_capacity": 4, "power": 5},
-		2: {"housing_capacity": 6, "power": 5},
-		3: {"housing_capacity": 8, "power": 5},
-		4: {"housing_capacity": 12, "power": 6},
-		5: {"housing_capacity": 20, "power": 8},
-	},
-	BuildingType.APARTMENT_BLOCK: {
-		1: {"housing_capacity": 20, "power": 25},
-		2: {"housing_capacity": 28, "power": 24},
-		3: {"housing_capacity": 38, "power": 23},
-		4: {"housing_capacity": 52, "power": 22},
-		5: {"housing_capacity": 75, "power": 20},
-	},
-	BuildingType.LUXURY_QUARTERS: {
-		1: {"housing_capacity": 8, "power": 15},
-		2: {"housing_capacity": 12, "power": 14},
-		3: {"housing_capacity": 16, "power": 13},
+	BuildingType.HABITAT: {  # Standard housing (was HAB_POD + APARTMENT_BLOCK)
+		1: {"housing_capacity": 6, "power": 8},
+		2: {"housing_capacity": 10, "power": 8},
+		3: {"housing_capacity": 16, "power": 10},
 		4: {"housing_capacity": 24, "power": 12},
-		5: {"housing_capacity": 35, "power": 10},
+		5: {"housing_capacity": 30, "power": 15},
+	},
+	BuildingType.BARRACKS: {  # Dense but spartan
+		1: {"housing_capacity": 12, "morale_penalty": -5, "power": 10},
+		2: {"housing_capacity": 20, "morale_penalty": -5, "power": 12},
+		3: {"housing_capacity": 30, "morale_penalty": -3, "power": 14},
+		4: {"housing_capacity": 40, "morale_penalty": -2, "power": 16},
+		5: {"housing_capacity": 50, "morale_penalty": 0, "power": 18},
+	},
+	BuildingType.QUARTERS: {  # Luxury expensive
+		1: {"housing_capacity": 3, "morale_boost": 5, "power": 12},
+		2: {"housing_capacity": 5, "morale_boost": 8, "power": 12},
+		3: {"housing_capacity": 8, "morale_boost": 12, "power": 14},
+		4: {"housing_capacity": 12, "morale_boost": 18, "power": 15},
+		5: {"housing_capacity": 15, "morale_boost": 25, "power": 15},
 	},
 
-	# === FOOD PRODUCTION ===
-	BuildingType.GREENHOUSE: {
-		1: {"production": {"food": 500}, "power": 15, "workers": 2},
-		2: {"production": {"food": 650}, "power": 14, "workers": 2},
-		3: {"production": {"food": 850}, "power": 13, "workers": 2},
-		4: {"production": {"food": 1100}, "power": 12, "workers": 1},
-		5: {"production": {"food": 1500}, "power": 10, "workers": 1},
+	# === PRODUCTION BASE TYPES (T1-T2 only, must specialize at T3) ===
+	BuildingType.AGRIDOME: {  # Food production base
+		1: {"production": {"food": 600}, "power": 15, "workers": 2},
+		2: {"production": {"food": 800}, "power": 14, "workers": 2},
+		# T3+ requires specialization to HYDROPONICS or PROTEIN_VATS
 	},
-	BuildingType.HYDROPONICS: {
-		1: {"production": {"food": 800}, "power": 25, "workers": 2},
-		2: {"production": {"food": 1040}, "power": 24, "workers": 2},
-		3: {"production": {"food": 1360}, "power": 22, "workers": 2},
-		4: {"production": {"food": 1760}, "power": 20, "workers": 1},
-		5: {"production": {"food": 2400}, "power": 18, "workers": 1},
+	BuildingType.EXTRACTOR: {  # Water + Oxygen base
+		1: {"production": {"water": 400, "oxygen": 150}, "power": 20, "workers": 2},
+		2: {"production": {"water": 550, "oxygen": 200}, "power": 19, "workers": 2},
+		# T3+ requires specialization to ICE_MINER or ATMO_PROCESSOR
 	},
-
-	# === POWER ===
-	BuildingType.SOLAR_ARRAY: {
-		1: {"power_gen": 50, "workers": 0},
-		2: {"power_gen": 65, "workers": 0},
-		3: {"power_gen": 85, "workers": 0},
-		4: {"power_gen": 110, "workers": 0},
-		5: {"power_gen": 150, "workers": 0},
+	BuildingType.FABRICATOR: {  # Materials + Parts base
+		1: {"production": {"machine_parts": 30, "building_materials": 40}, "power": 35, "workers": 3},
+		2: {"production": {"machine_parts": 45, "building_materials": 60}, "power": 33, "workers": 3},
+		# T3+ requires specialization to FOUNDRY or PRECISION
 	},
-	BuildingType.FISSION_REACTOR: {
-		1: {"power_gen": 200, "workers": 2},
-		2: {"power_gen": 280, "workers": 2},
-		3: {"power_gen": 380, "workers": 2},
-		4: {"power_gen": 500, "workers": 1},
-		5: {"power_gen": 700, "workers": 1},
-	},
-	BuildingType.FUSION_REACTOR: {
-		1: {"power_gen": 500, "workers": 3},
-		2: {"power_gen": 700, "workers": 3},
-		3: {"power_gen": 950, "workers": 2},
-		4: {"power_gen": 1300, "workers": 2},
-		5: {"power_gen": 2000, "workers": 1},
+	BuildingType.POWER_STATION: {  # Energy base
+		1: {"power_gen": 60, "workers": 1},
+		2: {"power_gen": 90, "workers": 1},
+		# T3+ requires specialization to SOLAR_FARM or REACTOR
 	},
 
-	# === LIFE SUPPORT ===
-	BuildingType.WATER_EXTRACTOR: {
-		1: {"production": {"water": 400}, "power": 20, "workers": 1},
-		2: {"production": {"water": 520}, "power": 19, "workers": 1},
-		3: {"production": {"water": 680}, "power": 18, "workers": 1},
-		4: {"production": {"water": 880}, "power": 16, "workers": 0},  # Automated!
-		5: {"production": {"water": 1200}, "power": 15, "workers": 0},
+	# === AGRIDOME BRANCHES ===
+	BuildingType.HYDROPONICS: {  # Efficient food, needs electronics
+		3: {"production": {"food": 1200}, "power": 20, "workers": 2, "consumes": {"electronics": 2}},
+		4: {"production": {"food": 1800}, "power": 18, "workers": 1, "consumes": {"electronics": 3}},
+		5: {"production": {"food": 2800}, "power": 15, "workers": 0, "consumes": {"electronics": 4}},
 	},
-	BuildingType.OXYGENATOR: {
-		1: {"production": {"oxygen": 200}, "power": 15, "workers": 1},
-		2: {"production": {"oxygen": 260}, "power": 14, "workers": 1},
-		3: {"production": {"oxygen": 340}, "power": 13, "workers": 1},
-		4: {"production": {"oxygen": 440}, "power": 12, "workers": 0},
-		5: {"production": {"oxygen": 600}, "power": 10, "workers": 0},
+	BuildingType.PROTEIN_VATS: {  # Dense food, needs medicine
+		3: {"production": {"food": 1000}, "power": 18, "workers": 2, "consumes": {"medicine": 2}},
+		4: {"production": {"food": 1600}, "power": 16, "workers": 1, "consumes": {"medicine": 2}},
+		5: {"production": {"food": 2400}, "power": 14, "workers": 1, "consumes": {"medicine": 3}},
 	},
 
-	# === INDUSTRY ===
-	BuildingType.WORKSHOP: {
-		1: {"production": {"machine_parts": 20}, "power": 30, "workers": 3},
-		2: {"production": {"machine_parts": 28}, "power": 28, "workers": 3},
-		3: {"production": {"machine_parts": 38}, "power": 26, "workers": 2},
-		4: {"production": {"machine_parts": 50}, "power": 24, "workers": 2},
-		5: {"production": {"machine_parts": 70}, "power": 20, "workers": 1},
+	# === EXTRACTOR BRANCHES ===
+	BuildingType.ICE_MINER: {  # Water focus, can produce fuel
+		3: {"production": {"water": 900, "oxygen": 100, "fuel": 20}, "power": 22, "workers": 2},
+		4: {"production": {"water": 1400, "oxygen": 120, "fuel": 40}, "power": 20, "workers": 1},
+		5: {"production": {"water": 2200, "oxygen": 150, "fuel": 80}, "power": 18, "workers": 0},
 	},
-	BuildingType.FACTORY: {
-		1: {"production": {"machine_parts": 50, "building_materials": 30}, "power": 60, "workers": 6},
-		2: {"production": {"machine_parts": 70, "building_materials": 42}, "power": 55, "workers": 5},
-		3: {"production": {"machine_parts": 95, "building_materials": 57}, "power": 50, "workers": 4},
-		4: {"production": {"machine_parts": 130, "building_materials": 78}, "power": 45, "workers": 3},
-		5: {"production": {"machine_parts": 180, "building_materials": 108}, "power": 40, "workers": 2},
+	BuildingType.ATMO_PROCESSOR: {  # Oxygen focus, terraforming
+		3: {"production": {"water": 200, "oxygen": 500}, "power": 25, "workers": 2, "terraforming": 1},
+		4: {"production": {"water": 250, "oxygen": 800}, "power": 22, "workers": 1, "terraforming": 2},
+		5: {"production": {"water": 300, "oxygen": 1200}, "power": 20, "workers": 0, "terraforming": 5},
+	},
+
+	# === FABRICATOR BRANCHES ===
+	BuildingType.FOUNDRY: {  # Building materials focus
+		3: {"production": {"building_materials": 150, "machine_parts": 20}, "power": 40, "workers": 3},
+		4: {"production": {"building_materials": 280, "machine_parts": 30}, "power": 38, "workers": 2},
+		5: {"production": {"building_materials": 500, "machine_parts": 50}, "power": 35, "workers": 1},
+	},
+	BuildingType.PRECISION: {  # Machine parts focus
+		3: {"production": {"machine_parts": 100, "building_materials": 30}, "power": 40, "workers": 3},
+		4: {"production": {"machine_parts": 180, "building_materials": 40}, "power": 38, "workers": 2},
+		5: {"production": {"machine_parts": 300, "building_materials": 60}, "power": 35, "workers": 1},
+	},
+
+	# === POWER_STATION BRANCHES ===
+	BuildingType.SOLAR_FARM: {  # Cheap, weather-dependent
+		3: {"power_gen": 140, "workers": 0, "weather_dependent": true},
+		4: {"power_gen": 220, "workers": 0, "weather_dependent": true},
+		5: {"power_gen": 350, "workers": 0, "weather_dependent": false},  # Orbital collection
+	},
+	BuildingType.REACTOR: {  # Reliable, needs fuel
+		3: {"power_gen": 200, "workers": 2, "consumes": {"fuel": 10}},
+		4: {"power_gen": 400, "workers": 1, "consumes": {"fuel": 15}},
+		5: {"power_gen": 800, "workers": 1, "consumes": {"fuel": 0}},  # Fusion - no fuel!
 	},
 
 	# === SERVICES ===
-	BuildingType.MEDICAL_BAY: {
-		1: {"health_boost": 5, "power": 10, "workers": 2},
-		2: {"health_boost": 8, "power": 10, "workers": 2},
-		3: {"health_boost": 12, "power": 10, "workers": 2},
-		4: {"health_boost": 18, "power": 10, "workers": 1},
-		5: {"health_boost": 25, "power": 10, "workers": 1},
+	BuildingType.MEDICAL: {  # Health + birth capacity (was MEDICAL_BAY + HOSPITAL)
+		1: {"health_boost": 8, "birth_capacity": 2, "power": 15, "workers": 2},
+		2: {"health_boost": 15, "birth_capacity": 4, "power": 18, "workers": 2},
+		3: {"health_boost": 25, "birth_capacity": 6, "power": 20, "workers": 2},
+		4: {"health_boost": 40, "birth_capacity": 10, "power": 22, "workers": 1},
+		5: {"health_boost": 60, "birth_capacity": 15, "power": 25, "workers": 1},
 	},
-	BuildingType.HOSPITAL: {
-		1: {"health_boost": 15, "power": 30, "workers": 4},
-		2: {"health_boost": 22, "power": 28, "workers": 4},
-		3: {"health_boost": 32, "power": 26, "workers": 3},
-		4: {"health_boost": 45, "power": 24, "workers": 2},
-		5: {"health_boost": 65, "power": 20, "workers": 2},
+	BuildingType.ACADEMY: {  # Education + skills (was SCHOOL + UNIVERSITY)
+		1: {"education_capacity": 12, "skill_boost": 5, "power": 10, "workers": 2},
+		2: {"education_capacity": 20, "skill_boost": 10, "power": 12, "workers": 2},
+		3: {"education_capacity": 32, "skill_boost": 18, "power": 14, "workers": 2},
+		4: {"education_capacity": 50, "skill_boost": 30, "power": 16, "workers": 1},
+		5: {"education_capacity": 80, "skill_boost": 50, "power": 18, "workers": 1},
 	},
-	BuildingType.SCHOOL: {
-		1: {"education_capacity": 10, "power": 8, "workers": 2},
-		2: {"education_capacity": 15, "power": 8, "workers": 2},
-		3: {"education_capacity": 22, "power": 8, "workers": 2},
-		4: {"education_capacity": 32, "power": 8, "workers": 1},
-		5: {"education_capacity": 50, "power": 8, "workers": 1},
+	BuildingType.RESEARCH: {  # Science + tech unlock (was LAB + RESEARCH_CENTER)
+		1: {"research_boost": 15, "power": 25, "workers": 2},
+		2: {"research_boost": 28, "power": 28, "workers": 2},
+		3: {"research_boost": 50, "power": 32, "workers": 2},
+		4: {"research_boost": 85, "power": 35, "workers": 2},
+		5: {"research_boost": 150, "power": 40, "workers": 1},
 	},
-	BuildingType.LAB: {
-		1: {"research_boost": 10, "power": 20, "workers": 2},
-		2: {"research_boost": 15, "power": 19, "workers": 2},
-		3: {"research_boost": 22, "power": 18, "workers": 2},
-		4: {"research_boost": 32, "power": 16, "workers": 1},
-		5: {"research_boost": 50, "power": 15, "workers": 1},
-	},
-	BuildingType.RESEARCH_CENTER: {
-		1: {"research_boost": 25, "power": 40, "workers": 4},
-		2: {"research_boost": 38, "power": 38, "workers": 4},
-		3: {"research_boost": 55, "power": 35, "workers": 3},
-		4: {"research_boost": 80, "power": 32, "workers": 2},
-		5: {"research_boost": 120, "power": 28, "workers": 2},
+	BuildingType.RECREATION: {  # Morale + culture (was RECREATION_CENTER + TEMPLE)
+		1: {"morale_boost": 12, "power": 12, "workers": 1},
+		2: {"morale_boost": 20, "power": 12, "workers": 1},
+		3: {"morale_boost": 32, "power": 14, "workers": 1},
+		4: {"morale_boost": 50, "power": 14, "workers": 0},
+		5: {"morale_boost": 80, "power": 15, "workers": 0},
 	},
 
-	# === COMMUNICATIONS ===
-	BuildingType.COMMUNICATIONS: {
-		1: {"research_boost": 5, "morale_boost": 2, "power": 10, "workers": 1},
-		2: {"research_boost": 10, "morale_boost": 4, "power": 10, "workers": 1},
-		3: {"research_boost": 15, "morale_boost": 6, "power": 10, "workers": 1},
-		4: {"research_boost": 25, "morale_boost": 10, "power": 10, "workers": 0},
-		5: {"research_boost": 40, "morale_boost": 15, "power": 10, "workers": 0},
+	# === INFRASTRUCTURE ===
+	BuildingType.STORAGE: {  # Resource stockpile
+		1: {"storage_capacity": 2000, "power": 5, "workers": 0},
+		2: {"storage_capacity": 4000, "power": 6, "workers": 0},
+		3: {"storage_capacity": 8000, "power": 7, "workers": 0},
+		4: {"storage_capacity": 15000, "power": 8, "workers": 0},
+		5: {"storage_capacity": 30000, "power": 10, "workers": 0},
+	},
+	BuildingType.COMMS: {  # Earth connection (was COMMUNICATIONS)
+		1: {"research_boost": 5, "morale_boost": 3, "trade_capacity": 50, "power": 12, "workers": 1},
+		2: {"research_boost": 10, "morale_boost": 5, "trade_capacity": 100, "power": 12, "workers": 1},
+		3: {"research_boost": 18, "morale_boost": 8, "trade_capacity": 180, "power": 14, "workers": 1},
+		4: {"research_boost": 30, "morale_boost": 12, "trade_capacity": 300, "power": 14, "workers": 0},
+		5: {"research_boost": 50, "morale_boost": 18, "trade_capacity": 500, "power": 15, "workers": 0},
+	},
+	BuildingType.LOGISTICS: {  # Transport hub (was AIRLOCK + LANDING_PAD)
+		1: {"construction_speed": 1.1, "power": 15, "workers": 1},
+		2: {"construction_speed": 1.2, "power": 16, "workers": 1},
+		3: {"construction_speed": 1.35, "power": 18, "workers": 1},
+		4: {"construction_speed": 1.5, "power": 20, "workers": 1},
+		5: {"construction_speed": 1.8, "power": 22, "workers": 0},
 	},
 
-	# === TRANSPORT/IMMIGRATION ===
-	BuildingType.STARPORT: {
-		1: {"immigration_capacity": 2, "power": 30, "workers": 2},
-		2: {"immigration_capacity": 4, "power": 28, "workers": 2},
-		3: {"immigration_capacity": 6, "power": 25, "workers": 2},
-		4: {"immigration_capacity": 10, "power": 22, "workers": 1},
-		5: {"immigration_capacity": 15, "power": 20, "workers": 1},
+	# === SPACE ECONOMY ===
+	BuildingType.STARPORT: {  # Gateway to orbit
+		1: {"immigration_capacity": 3, "trade_capacity": 100, "power": 35, "workers": 2},
+		2: {"immigration_capacity": 5, "trade_capacity": 180, "power": 35, "workers": 2},
+		3: {"immigration_capacity": 8, "trade_capacity": 300, "power": 38, "workers": 2},
+		4: {"immigration_capacity": 12, "trade_capacity": 500, "power": 40, "workers": 1},
+		5: {"immigration_capacity": 18, "trade_capacity": 800, "power": 42, "workers": 1},
 	},
-	BuildingType.SPACE_STATION: {
-		1: {"immigration_capacity": 5, "power": 50, "workers": 3},
-		2: {"immigration_capacity": 10, "power": 48, "workers": 3},
-		3: {"immigration_capacity": 18, "power": 45, "workers": 2},
-		4: {"immigration_capacity": 30, "power": 40, "workers": 2},
-		5: {"immigration_capacity": 50, "power": 35, "workers": 1},
+	BuildingType.ORBITAL: {  # Space station (was SPACE_STATION)
+		1: {"immigration_capacity": 8, "production": {"machine_parts": 30}, "power": 60, "workers": 3},
+		2: {"immigration_capacity": 15, "production": {"machine_parts": 50}, "power": 58, "workers": 3},
+		3: {"immigration_capacity": 25, "production": {"machine_parts": 80}, "power": 55, "workers": 2},
+		4: {"immigration_capacity": 40, "production": {"machine_parts": 120}, "power": 50, "workers": 2},
+		5: {"immigration_capacity": 60, "production": {"machine_parts": 180}, "power": 45, "workers": 1},
 	},
-
-	# === SOCIAL ===
-	BuildingType.RECREATION_CENTER: {
-		1: {"morale_boost": 8, "power": 15, "workers": 1},
-		2: {"morale_boost": 12, "power": 14, "workers": 1},
-		3: {"morale_boost": 18, "power": 13, "workers": 1},
-		4: {"morale_boost": 26, "power": 12, "workers": 0},
-		5: {"morale_boost": 40, "power": 10, "workers": 0},
-	},
-	BuildingType.TEMPLE: {
-		1: {"morale_boost": 10, "power": 5, "workers": 1},
-		2: {"morale_boost": 15, "power": 5, "workers": 1},
-		3: {"morale_boost": 22, "power": 5, "workers": 1},
-		4: {"morale_boost": 32, "power": 5, "workers": 0},
-		5: {"morale_boost": 50, "power": 5, "workers": 0},
+	BuildingType.CATCHER: {  # Asteroid mining (was ASTEROID_CATCHER)
+		1: {"production": {"building_materials": 350, "machine_parts": 60}, "power": 85, "workers": 4},
+		2: {"production": {"building_materials": 600, "machine_parts": 100}, "power": 80, "workers": 4},
+		3: {"production": {"building_materials": 1000, "machine_parts": 180}, "power": 75, "workers": 3},
+		4: {"production": {"building_materials": 1600, "machine_parts": 300}, "power": 65, "workers": 2},
+		5: {"production": {"building_materials": 2500, "machine_parts": 500}, "power": 55, "workers": 1},
 	},
 
 	# === MEGASTRUCTURES ===
-	BuildingType.MASS_DRIVER: {
-		1: {"export_capacity": 100, "power": 100, "workers": 4},
-		2: {"export_capacity": 150, "power": 95, "workers": 4},
-		3: {"export_capacity": 220, "power": 90, "workers": 3},
-		4: {"export_capacity": 320, "power": 85, "workers": 2},
-		5: {"export_capacity": 500, "power": 80, "workers": 2},
+	BuildingType.MASS_DRIVER: {  # Electromagnetic launcher
+		1: {"export_capacity": 120, "power": 100, "workers": 4},
+		2: {"export_capacity": 200, "power": 95, "workers": 4},
+		3: {"export_capacity": 320, "power": 90, "workers": 3},
+		4: {"export_capacity": 500, "power": 85, "workers": 2},
+		5: {"export_capacity": 800, "power": 80, "workers": 1},
 	},
-	BuildingType.SPACE_ELEVATOR: {
-		1: {"export_capacity": 200, "import_capacity": 50, "power": 150, "workers": 6},
-		2: {"export_capacity": 300, "import_capacity": 80, "power": 140, "workers": 5},
-		3: {"export_capacity": 450, "import_capacity": 120, "power": 130, "workers": 4},
-		4: {"export_capacity": 650, "import_capacity": 180, "power": 120, "workers": 3},
-		5: {"export_capacity": 1000, "import_capacity": 300, "power": 100, "workers": 2},
+	BuildingType.FUSION_PLANT: {  # Massive power (was FUSION_REACTOR)
+		1: {"power_gen": 600, "workers": 3},
+		2: {"power_gen": 900, "workers": 3},
+		3: {"power_gen": 1400, "workers": 2},
+		4: {"power_gen": 2200, "workers": 2},
+		5: {"power_gen": 3500, "workers": 1},
+	},
+	BuildingType.SPACE_ELEVATOR: {  # Ultimate transport
+		1: {"export_capacity": 250, "import_capacity": 80, "immigration_capacity": 10, "power": 160, "workers": 6},
+		2: {"export_capacity": 400, "import_capacity": 130, "immigration_capacity": 18, "power": 150, "workers": 5},
+		3: {"export_capacity": 600, "import_capacity": 200, "immigration_capacity": 30, "power": 140, "workers": 4},
+		4: {"export_capacity": 900, "import_capacity": 300, "immigration_capacity": 50, "power": 125, "workers": 3},
+		5: {"export_capacity": 1400, "import_capacity": 500, "immigration_capacity": 80, "power": 110, "workers": 2},
 	},
 }
 
@@ -445,7 +533,7 @@ static func _calc_life_stage(age: int) -> LifeStage:
 static func create_building(overrides: Dictionary = {}) -> Dictionary:
 	var building = {
 		"id": _generate_id(),
-		"type": BuildingType.HAB_POD,
+		"type": BuildingType.HABITAT,
 		"name": "",
 		"position": Vector2i.ZERO,
 		"hex_size": 1,
@@ -522,7 +610,10 @@ static func create_resource_stockpile(overrides: Dictionary = {}) -> Dictionary:
 		# Quaternary (luxury - none at start!)
 		"art": 0.0,
 		"entertainment": 0.0,   # No luxuries (was 10)
-		"comfort_items": 0.0    # Survival mode (was 20)
+		"comfort_items": 0.0,   # Survival mode (was 20)
+
+		# Economy
+		"credits": 0.0  # Trade currency (earned via exports)
 	}
 
 	for key in overrides:
@@ -844,41 +935,40 @@ static func get_specialty_name(spec: Specialty) -> String:
 
 static func get_building_name(type: BuildingType) -> String:
 	match type:
-		BuildingType.HAB_POD: return "Hab Pod"
-		BuildingType.APARTMENT_BLOCK: return "Apartment Block"
-		BuildingType.LUXURY_QUARTERS: return "Luxury Quarters"
+		# Housing
+		BuildingType.HABITAT: return "Habitat"
 		BuildingType.BARRACKS: return "Barracks"
-		BuildingType.GREENHOUSE: return "Greenhouse"
-		BuildingType.HYDROPONICS: return "Hydroponics Bay"
+		BuildingType.QUARTERS: return "Quarters"
+		# Production - Base
+		BuildingType.AGRIDOME: return "Agridome"
+		BuildingType.EXTRACTOR: return "Extractor"
+		BuildingType.FABRICATOR: return "Fabricator"
+		BuildingType.POWER_STATION: return "Power Station"
+		# Production - Branches
+		BuildingType.HYDROPONICS: return "Hydroponics"
 		BuildingType.PROTEIN_VATS: return "Protein Vats"
-		BuildingType.WORKSHOP: return "Workshop"
-		BuildingType.FACTORY: return "Factory"
-		BuildingType.SOLAR_ARRAY: return "Solar Array"
-		BuildingType.WIND_TURBINE: return "Wind Turbine"
-		BuildingType.RTG: return "RTG"
-		BuildingType.FISSION_REACTOR: return "Fission Reactor"
-		BuildingType.WATER_EXTRACTOR: return "Water Extractor"
-		BuildingType.OXYGENATOR: return "Oxygenator"
-		BuildingType.WASTE_PROCESSOR: return "Waste Processor"
-		BuildingType.CO2_SCRUBBER: return "CO2 Scrubber"
-		BuildingType.MEDICAL_BAY: return "Medical Bay"
-		BuildingType.HOSPITAL: return "Hospital"
-		BuildingType.SCHOOL: return "School"
-		BuildingType.UNIVERSITY: return "University"
-		BuildingType.LAB: return "Laboratory"
-		BuildingType.RESEARCH_CENTER: return "Research Center"
-		BuildingType.RECREATION_CENTER: return "Recreation Center"
-		BuildingType.TEMPLE: return "Temple"
-		BuildingType.GOVERNMENT_HALL: return "Government Hall"
-		BuildingType.PRISON: return "Prison"
-		BuildingType.STORAGE: return "Storage"
-		BuildingType.AIRLOCK: return "Airlock"
-		BuildingType.LANDING_PAD: return "Landing Pad"
-		BuildingType.COMMUNICATIONS: return "Communications"
+		BuildingType.ICE_MINER: return "Ice Miner"
+		BuildingType.ATMO_PROCESSOR: return "Atmosphere Processor"
+		BuildingType.FOUNDRY: return "Foundry"
+		BuildingType.PRECISION: return "Precision Works"
+		BuildingType.SOLAR_FARM: return "Solar Farm"
+		BuildingType.REACTOR: return "Reactor"
+		# Services
+		BuildingType.MEDICAL: return "Medical Center"
+		BuildingType.ACADEMY: return "Academy"
+		BuildingType.RESEARCH: return "Research Lab"
+		BuildingType.RECREATION: return "Recreation Center"
+		# Infrastructure
+		BuildingType.STORAGE: return "Storage Depot"
+		BuildingType.COMMS: return "Communications Hub"
+		BuildingType.LOGISTICS: return "Logistics Center"
+		# Space Economy
 		BuildingType.STARPORT: return "Starport"
-		BuildingType.SPACE_STATION: return "Space Station"
+		BuildingType.ORBITAL: return "Orbital Station"
+		BuildingType.CATCHER: return "Asteroid Catcher"
+		# Megastructures
 		BuildingType.MASS_DRIVER: return "Mass Driver"
-		BuildingType.FUSION_REACTOR: return "Fusion Reactor"
+		BuildingType.FUSION_PLANT: return "Fusion Plant"
 		BuildingType.SPACE_ELEVATOR: return "Space Elevator"
 	return "Unknown"
 
@@ -955,109 +1045,257 @@ static func get_resource_name(resource_type: ResourceType) -> String:
 		ResourceType.ART: return "art"
 		ResourceType.ENTERTAINMENT: return "entertainment"
 		ResourceType.COMFORT_ITEMS: return "comfort_items"
+		ResourceType.CREDITS: return "credits"
 	return "unknown"
 
 static func get_building_definition(type: BuildingType) -> Dictionary:
 	match type:
-		BuildingType.HAB_POD:
+		# === HOUSING ===
+		BuildingType.HABITAT:
 			return {
-				"housing_capacity": 4,
-				"power_consumption": 5.0,
+				"housing_capacity": 6,
+				"power_consumption": 8.0,
 				"construction_years": 1,
 				"required_workers": 0,
 				"maintenance_cost": {"machine_parts": 1}
 			}
-		BuildingType.APARTMENT_BLOCK:
+		BuildingType.BARRACKS:
 			return {
-				"housing_capacity": 20,
-				"power_consumption": 25.0,
-				"construction_years": 2,
+				"housing_capacity": 12,
+				"power_consumption": 10.0,
+				"construction_years": 1,
 				"required_workers": 0,
-				"maintenance_cost": {"machine_parts": 3}
+				"maintenance_cost": {"machine_parts": 1}
 			}
-		BuildingType.GREENHOUSE:
+		BuildingType.QUARTERS:
+			return {
+				"housing_capacity": 3,
+				"power_consumption": 12.0,
+				"construction_years": 1,
+				"required_workers": 0,
+				"maintenance_cost": {"machine_parts": 2}
+			}
+		# === PRODUCTION BASE ===
+		BuildingType.AGRIDOME:
 			return {
 				"housing_capacity": 0,
 				"power_consumption": 15.0,
 				"construction_years": 1,
 				"required_workers": 2,
-				"produces": {"food": 500.0},
-				"consumes": {"water": 20.0},
+				"produces": {"food": 600.0},
 				"maintenance_cost": {"machine_parts": 1}
 			}
-		BuildingType.SOLAR_ARRAY:
-			return {
-				"housing_capacity": 0,
-				"power_generation": 50.0,
-				"construction_years": 1,
-				"required_workers": 0,
-				"maintenance_cost": {"machine_parts": 1}
-			}
-		BuildingType.WATER_EXTRACTOR:
+		BuildingType.EXTRACTOR:
 			return {
 				"housing_capacity": 0,
 				"power_consumption": 20.0,
 				"construction_years": 1,
-				"required_workers": 1,
-				"produces": {"water": 400.0},  # 24 colonists × 20 = 480 water/yr needed
+				"required_workers": 2,
+				"produces": {"water": 400.0, "oxygen": 150.0},
 				"maintenance_cost": {"machine_parts": 2}
 			}
-		BuildingType.WORKSHOP:
+		BuildingType.FABRICATOR:
 			return {
 				"housing_capacity": 0,
-				"power_consumption": 30.0,
+				"power_consumption": 35.0,
 				"construction_years": 1,
 				"required_workers": 3,
-				"produces": {"machine_parts": 20.0},
-				"consumes": {"building_materials": 15.0},
-				"maintenance_cost": {"machine_parts": 1}
+				"produces": {"machine_parts": 30.0, "building_materials": 40.0},
+				"maintenance_cost": {"machine_parts": 2}
 			}
-		BuildingType.FACTORY:
+		BuildingType.POWER_STATION:
 			return {
 				"housing_capacity": 0,
-				"power_consumption": 60.0,
-				"construction_years": 2,
-				"required_workers": 6,
-				"produces": {"machine_parts": 50.0, "building_materials": 30.0},
-				"consumes": {"fuel": 10.0},
-				"maintenance_cost": {"machine_parts": 5}
+				"power_generation": 60.0,
+				"construction_years": 1,
+				"required_workers": 1,
+				"maintenance_cost": {"machine_parts": 1}
 			}
+		# === PRODUCTION BRANCHES (T3+) ===
 		BuildingType.HYDROPONICS:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 20.0,
+				"construction_years": 1,
+				"required_workers": 2,
+				"produces": {"food": 1200.0},
+				"consumes": {"electronics": 2},
+				"maintenance_cost": {"machine_parts": 2}
+			}
+		BuildingType.PROTEIN_VATS:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 18.0,
+				"construction_years": 1,
+				"required_workers": 2,
+				"produces": {"food": 1000.0},
+				"consumes": {"medicine": 2},
+				"maintenance_cost": {"machine_parts": 2}
+			}
+		BuildingType.ICE_MINER:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 22.0,
+				"construction_years": 1,
+				"required_workers": 2,
+				"produces": {"water": 900.0, "oxygen": 100.0, "fuel": 20.0},
+				"maintenance_cost": {"machine_parts": 2}
+			}
+		BuildingType.ATMO_PROCESSOR:
 			return {
 				"housing_capacity": 0,
 				"power_consumption": 25.0,
 				"construction_years": 1,
 				"required_workers": 2,
-				"produces": {"food": 800.0},
-				"consumes": {"water": 30.0},
+				"produces": {"water": 200.0, "oxygen": 500.0},
 				"maintenance_cost": {"machine_parts": 2}
 			}
-		BuildingType.OXYGENATOR:
+		BuildingType.FOUNDRY:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 40.0,
+				"construction_years": 1,
+				"required_workers": 3,
+				"produces": {"building_materials": 150.0, "machine_parts": 20.0},
+				"maintenance_cost": {"machine_parts": 3}
+			}
+		BuildingType.PRECISION:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 40.0,
+				"construction_years": 1,
+				"required_workers": 3,
+				"produces": {"machine_parts": 100.0, "building_materials": 30.0},
+				"maintenance_cost": {"machine_parts": 3}
+			}
+		BuildingType.SOLAR_FARM:
+			return {
+				"housing_capacity": 0,
+				"power_generation": 140.0,
+				"construction_years": 1,
+				"required_workers": 0,
+				"maintenance_cost": {"machine_parts": 1}
+			}
+		BuildingType.REACTOR:
+			return {
+				"housing_capacity": 0,
+				"power_generation": 200.0,
+				"construction_years": 2,
+				"required_workers": 2,
+				"consumes": {"fuel": 10},
+				"maintenance_cost": {"machine_parts": 4}
+			}
+		# === SERVICES ===
+		BuildingType.MEDICAL:
 			return {
 				"housing_capacity": 0,
 				"power_consumption": 15.0,
 				"construction_years": 1,
-				"required_workers": 1,
-				"produces": {"oxygen": 200.0},
-				"consumes": {"water": 10.0},
-				"maintenance_cost": {"machine_parts": 1}
+				"required_workers": 2,
+				"consumes": {"medicine": 5.0},
+				"maintenance_cost": {"machine_parts": 2}
 			}
-		BuildingType.MEDICAL_BAY:
+		BuildingType.ACADEMY:
 			return {
 				"housing_capacity": 0,
 				"power_consumption": 10.0,
 				"construction_years": 1,
 				"required_workers": 2,
-				"consumes": {"medicine": 10.0},
-				"maintenance_cost": {"machine_parts": 2, "electronics": 1}
+				"maintenance_cost": {"machine_parts": 1}
 			}
-		BuildingType.SCHOOL:
+		BuildingType.RESEARCH:
 			return {
 				"housing_capacity": 0,
-				"power_consumption": 8.0,
+				"power_consumption": 25.0,
 				"construction_years": 1,
 				"required_workers": 2,
+				"consumes": {"electronics": 2},
+				"maintenance_cost": {"machine_parts": 2}
+			}
+		BuildingType.RECREATION:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 12.0,
+				"construction_years": 1,
+				"required_workers": 1,
 				"maintenance_cost": {"machine_parts": 1}
+			}
+		# === INFRASTRUCTURE ===
+		BuildingType.STORAGE:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 5.0,
+				"construction_years": 1,
+				"required_workers": 0,
+				"maintenance_cost": {"machine_parts": 0}
+			}
+		BuildingType.COMMS:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 12.0,
+				"construction_years": 1,
+				"required_workers": 1,
+				"maintenance_cost": {"machine_parts": 1}
+			}
+		BuildingType.LOGISTICS:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 15.0,
+				"construction_years": 1,
+				"required_workers": 1,
+				"maintenance_cost": {"machine_parts": 1}
+			}
+		# === SPACE ECONOMY ===
+		BuildingType.STARPORT:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 35.0,
+				"construction_years": 2,
+				"required_workers": 2,
+				"maintenance_cost": {"machine_parts": 4, "fuel": 5}
+			}
+		BuildingType.ORBITAL:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 60.0,
+				"construction_years": 3,
+				"required_workers": 3,
+				"produces": {"machine_parts": 30.0},
+				"maintenance_cost": {"machine_parts": 6, "fuel": 10}
+			}
+		BuildingType.CATCHER:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 85.0,
+				"construction_years": 3,
+				"required_workers": 4,
+				"produces": {"building_materials": 350.0, "machine_parts": 60.0},
+				"maintenance_cost": {"machine_parts": 10, "fuel": 20}
+			}
+		# === MEGASTRUCTURES ===
+		BuildingType.MASS_DRIVER:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 100.0,
+				"construction_years": 4,
+				"required_workers": 4,
+				"maintenance_cost": {"machine_parts": 8, "fuel": 10}
+			}
+		BuildingType.FUSION_PLANT:
+			return {
+				"housing_capacity": 0,
+				"power_generation": 600.0,
+				"construction_years": 5,
+				"required_workers": 3,
+				"maintenance_cost": {"machine_parts": 10}
+			}
+		BuildingType.SPACE_ELEVATOR:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 160.0,
+				"construction_years": 6,
+				"required_workers": 6,
+				"maintenance_cost": {"machine_parts": 15, "fuel": 15}
 			}
 		_:
 			return {

@@ -6,10 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SpaceProbe is a collection of space simulation games built in Godot 4.5 (GDScript). The games include:
 
-- **MOT (Mars Odyssey Trek)** - The core game, a Mars mission simulator inspired by Oregon Trail
-- **FCW (First Contact War)** - Desperate last stand strategy game (see FCW Design Philosophy below)
-- **VNP (Von Neumann Probe)** - Real-time idle expansion
-- **MCS (Mars Colony Sim)** - Colony building expansion
+| Game | Description | Design Doc |
+|------|-------------|------------|
+| **MOT** | Mars Odyssey Trek - Oregon Trail meets Apollo 13 | `docs/games/mot/design.md` |
+| **FCW** | First Contact War - Desperate last stand strategy | `docs/games/fcw/design.md` |
+| **VNP** | Von Neumann Probe - Real-time fleet combat spectacle | `docs/games/vnp/design.md` |
+| **MCS** | Mars Colony Sim - Generational colony builder | `docs/games/mcs/design.md` |
 
 ## FCW Design Philosophy
 
@@ -65,71 +67,63 @@ This creates the central tragic choice:
 
 ## Development Philosophy: Documentation First
 
-**We document before we implement.** This is a core principle of this project.
+**We document before we implement. We update after we implement.**
+
+See `docs/DOCUMENTATION.md` for full governance, templates, and workflows.
 
 ### The Workflow
 
-1. **Document the design** - Before writing any code, document what you're building in `docs/`. This includes:
-   - What problem are we solving?
-   - What are the mechanics/systems involved?
-   - What are the tradeoffs and alternatives considered?
-   - What does success look like?
+1. **Research** (if needed) → `docs/games/{game}/research/`
+2. **Create project doc** → `docs/games/{game}/projects/` (BEFORE coding)
+3. **Implement** the code
+4. **Update design doc** → `docs/games/{game}/design.md` (AFTER coding)
+5. **Log decisions** → `docs/games/{game}/notes/decisions.md`
+6. **Archive project** → `docs/archive/projects/`
 
-2. **Implement the code** - With a clear spec, write the implementation.
+### Documentation Structure
 
-3. **Update docs if implementation diverges** - If experimentation reveals a better approach, update the documentation to match reality. The docs should always reflect what the system actually does.
+```
+docs/
+├── games/{mot,fcw,vnp,mcs}/  # Per-game documentation
+│   ├── design.md             # Source of truth (Living)
+│   ├── research/             # Exploration (Evergreen)
+│   ├── projects/             # Active work (Transient)
+│   └── notes/                # Decisions, changelog (Immutable)
+├── shared/                   # Cross-game docs
+│   ├── architecture/         # System architecture
+│   ├── projects/             # Engine work
+│   └── research/             # Multi-game research
+├── principles/               # How we work (Evergreen)
+├── reference/                # Lookup tables
+└── archive/                  # Historical artifacts
+```
 
-### Why Documentation First?
-
-- **Clarity of thought**: Writing forces you to think through the design before coding.
-- **Context preservation**: LLM sessions end, but docs persist. Future sessions (and humans) can understand the system.
-- **Prevents scope creep**: A documented spec keeps implementation focused.
-- **Enables iteration**: With a clear baseline, we can discuss changes meaningfully.
-
-### Key Documentation Files
+### Key Documentation
 
 | Doc | Purpose |
 |-----|---------|
-| `docs/game-design.md` | Core philosophy, win conditions, phases |
-| `docs/mot/phase-2-systems.md` | Complete Phase 2 mechanics reference |
-| `docs/mot/realtime-crisis-system.md` | CRISIS mode design |
-| `docs/expansions/first-contact-war.md` | FCW game design |
-| `docs/projects/vnp-game-design.md` | VNP mechanics |
+| `docs/DOCUMENTATION.md` | Documentation governance & templates |
+| `docs/DOMAIN_COUNCILS.md` | AI review councils for quality gates |
+| `docs/game-design.md` | Cross-game philosophy |
+| `docs/games/{game}/design.md` | Per-game source of truth (Living) |
+| `docs/games/{game}/notes/decisions.md` | Decision log (Immutable, append-only) |
+| `docs/games/{game}/notes/changelog.md` | Change history (Immutable, append-only) |
+| `docs/principles/godot-performance.md` | Performance best practices |
+| `docs/principles/llm-development.md` | LLM collaboration guidelines |
 
-## Design Documentation
+### Domain Councils
 
-See `docs/` for detailed specs:
-- `docs/game-design.md` - Core design philosophy
-- `docs/phase-1-ship-building.md` through `docs/phase-4-return-trip.md` - Phase mechanics
-- `docs/mot/phase-2-systems.md` - Complete MOT Phase 2 systems reference
-- `docs/architecture/overview.md` - System architecture
-- `docs/architecture/refactor-plan.md` - Architecture migration plan
-- `docs/principles/engineering-principles.md` - Coding principles
-- `docs/principles/llm-development.md` - LLM collaboration guidelines
-- `docs/principles/godot-performance.md` - Godot performance best practices
-- `docs/projects/` - Phase completion documentation
-- `docs/projects/vnp-game-design.md` - VNP game mechanics and design
+For significant changes, invoke parallel AI review councils:
 
-## Documentation Practices
+| Council | Mandate | Key Question |
+|---------|---------|--------------|
+| **Game Design** | Is this fun and coherent? | "Does this serve the player experience?" |
+| **Architecture** | Is this technically sound? | "Does this follow our patterns?" |
+| **Balance** | Do the numbers work? | "Is this mathematically fair?" |
+| **Quality** | Is this reliable? | "How do we test this?" |
+| **Performance** | Will this run well? | "What's the frame budget cost?" |
 
-**Keep docs updated as mechanics evolve.** When making changes:
-
-1. **If mechanics are settled**: Update the relevant game design doc with the new mechanics
-2. **If mechanics are in flux**: Add a note in the doc marking the area as "under active development" with discussion/direction notes
-3. **Design discussions**: Document the reasoning and tradeoffs being considered, even if the final decision hasn't been made
-
-Example note for evolving mechanics:
-```markdown
-## Base Weapon System (Under Development)
-
-**Current Direction**: Charge-based system where accumulated charges affect both power and range.
-- x1 charge = close range, desperation fire
-- x5 charges = long range, can clear center of map
-
-**Open Questions**: Charge accumulation rate, visual spectacle scaling
-```
-
-This ensures context is preserved across sessions and collaborators can understand the design intent.
+See `docs/DOMAIN_COUNCILS.md` for full council definitions and review process.
 
 ## Running the Project
 
@@ -137,9 +131,51 @@ This ensures context is preserved across sessions and collaborators can understa
 # Open in Godot Editor
 godot project.godot
 
-# Run from command line
+# Run main menu
 godot --path . scenes/ui/main_menu.tscn
+
+# Run specific games directly
+godot --path . scenes/von_neumann_probe/vnp_main.tscn     # VNP
+godot --path . scenes/first_contact_war/fcw_main.tscn    # FCW
+godot --path . scenes/mars_odyssey_trek/phase1_main.tscn # MOT Phase 1
+godot --path . scenes/mars_odyssey_trek/phase2_main.tscn # MOT Phase 2
 ```
+
+## Testing
+
+Uses [GUT](https://github.com/bitwes/Gut) (Godot Unit Test) framework. Tests are in `tests/unit/`.
+
+```bash
+# Run all tests from command line
+godot --headless -s addons/gut/gut_cmdln.gd
+
+# Run specific test file
+godot --headless -s addons/gut/gut_cmdln.gd -gtest=res://tests/unit/test_vnp_systems.gd
+
+# Run tests matching pattern
+godot --headless -s addons/gut/gut_cmdln.gd -gtest=res://tests/unit/test_vnp*.gd
+
+# Run tests in Godot Editor: use the GUT panel (bottom dock)
+```
+
+Test files follow `test_*.gd` naming convention and extend `GutTest`.
+
+## Safe Zones for Editing
+
+### Green Zone: Edit Freely
+Data files - game content, not engine logic:
+- `data/games/*/balance.json` - Tune numbers
+- `data/games/*/events/*.json` - Add/modify events
+- `data/games/*/components.json`, `crew_roster.json`, etc.
+
+### Yellow Zone: Edit with Care
+Game-specific logic - run tests after changes:
+- `scripts/mars_odyssey_trek/`, `scripts/von_neumann_probe/`, etc.
+- Game-specific stores, reducers, UI
+
+### Red Zone: Edit Rarely
+Engine infrastructure - affects all games:
+- `scripts/engine/` - Core store, systems, types
 
 ## Architecture Overview
 

@@ -93,21 +93,41 @@ func _on_back() -> void:
 	get_tree().change_scene_to_file("res://scenes/ui/main_menu.tscn")
 
 # ============================================================================
+# DEBUG INPUT
+# ============================================================================
+
+func _input(event: InputEvent) -> void:
+	# Shift+E = Force trigger EVA for testing
+	if event is InputEventKey and event.pressed:
+		if event.keycode == KEY_E and event.shift_pressed:
+			print("[EVA-DEBUG] ========== MANUAL EVA TRIGGER (Shift+E) ==========")
+			_on_eva_triggered("engineer", "engine")
+
+# ============================================================================
 # EVA EVENT HANDLERS
 # ============================================================================
 
 func _on_eva_triggered(crew_role: String, target: String) -> void:
 	## Trigger visual EVA when event resolves
-	if ship_view:
-		# Map target string to waypoint
-		var ShipNav = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_navigation.gd")
-		var waypoint = ShipNav.Waypoint.EXTERIOR_ENGINE
-		match target:
-			"engine": waypoint = ShipNav.Waypoint.EXTERIOR_ENGINE
-			"antenna": waypoint = ShipNav.Waypoint.EXTERIOR_ANTENNA
-			"solar": waypoint = ShipNav.Waypoint.EXTERIOR_SOLAR
-		ship_view.start_eva(crew_role, waypoint)
-		print("[EVA] Visual EVA started: %s -> %s" % [crew_role, target])
+	print("[EVA-DEBUG] _on_eva_triggered called: crew=%s, target=%s" % [crew_role, target])
+	print("[EVA-DEBUG] ship_view is null: %s" % (ship_view == null))
+
+	if not ship_view:
+		push_error("[EVA-DEBUG] CRITICAL: ship_view is NULL! Cannot start EVA.")
+		return
+
+	# Map target string to waypoint
+	var ShipNav = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_navigation.gd")
+	var waypoint = ShipNav.Waypoint.EXTERIOR_ENGINE
+	match target:
+		"engine": waypoint = ShipNav.Waypoint.EXTERIOR_ENGINE
+		"antenna": waypoint = ShipNav.Waypoint.EXTERIOR_ANTENNA
+		"solar": waypoint = ShipNav.Waypoint.EXTERIOR_SOLAR
+
+	print("[EVA-DEBUG] Mapped target '%s' to waypoint %d" % [target, waypoint])
+	print("[EVA-DEBUG] Calling ship_view.start_eva('%s', %d)..." % [crew_role, waypoint])
+	ship_view.start_eva(crew_role, waypoint)
+	print("[EVA-DEBUG] ship_view.start_eva() call completed")
 
 func _on_eva_drift_triggered(crew_role: String) -> void:
 	## Trigger drift when crew member flies off during EVA

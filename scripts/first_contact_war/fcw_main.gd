@@ -6,6 +6,7 @@ extends Control
 # Preload FCW scripts
 const FCWTypes = preload("res://scripts/first_contact_war/fcw_types.gd")
 const FCWStore = preload("res://scripts/first_contact_war/fcw_store.gd")
+const FCWReducer = preload("res://scripts/first_contact_war/fcw_reducer.gd")
 const FCWSolarMap = preload("res://scripts/first_contact_war/fcw_solar_map.gd")
 const FCWBattleSystem = preload("res://scripts/first_contact_war/fcw_battle_system.gd")
 const FCWBattleView = preload("res://scripts/first_contact_war/fcw_battle_view.gd")

@@ -6,8 +6,6 @@ class_name ExteriorSurfaceManager
 ## - Antenna Array: Affects communication (event warnings)
 ## - Solar Panel: Affects power generation
 
-const ShipNavigation = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_navigation.gd")
-
 # ============================================================================
 # SIGNALS
 # ============================================================================
@@ -26,18 +24,27 @@ enum SurfaceType {
 	SOLAR_PANEL
 }
 
-# Map waypoints to surface types
-const WAYPOINT_TO_SURFACE = {
-	ShipNavigation.Waypoint.EXTERIOR_ENGINE: SurfaceType.ENGINE_NOZZLE,
-	ShipNavigation.Waypoint.EXTERIOR_ANTENNA: SurfaceType.ANTENNA_ARRAY,
-	ShipNavigation.Waypoint.EXTERIOR_SOLAR: SurfaceType.SOLAR_PANEL,
-}
+# Waypoint IDs from ShipNavigation.Waypoint enum
+# EXTERIOR_ENGINE = 13, EXTERIOR_ANTENNA = 14, EXTERIOR_SOLAR = 15
+const WAYPOINT_ENGINE: int = 13
+const WAYPOINT_ANTENNA: int = 14
+const WAYPOINT_SOLAR: int = 15
 
-const SURFACE_NAMES = {
-	SurfaceType.ENGINE_NOZZLE: "Engine Nozzle",
-	SurfaceType.ANTENNA_ARRAY: "Antenna Array",
-	SurfaceType.SOLAR_PANEL: "Solar Panel",
-}
+# Map waypoints to surface types - initialized in _init to avoid enum-in-const issues
+var _waypoint_to_surface: Dictionary = {}
+var _surface_names: Dictionary = {}
+
+func _init() -> void:
+	_waypoint_to_surface = {
+		WAYPOINT_ENGINE: SurfaceType.ENGINE_NOZZLE,
+		WAYPOINT_ANTENNA: SurfaceType.ANTENNA_ARRAY,
+		WAYPOINT_SOLAR: SurfaceType.SOLAR_PANEL,
+	}
+	_surface_names = {
+		SurfaceType.ENGINE_NOZZLE: "Engine Nozzle",
+		SurfaceType.ANTENNA_ARRAY: "Antenna Array",
+		SurfaceType.SOLAR_PANEL: "Solar Panel",
+	}
 
 # ============================================================================
 # STATE
@@ -95,7 +102,7 @@ func damage_surface(surface_type: int, amount: float) -> void:
 
 func damage_by_waypoint(waypoint: int, amount: float) -> void:
 	## Damage surface based on EVA waypoint
-	var surface_type = WAYPOINT_TO_SURFACE.get(waypoint, -1)
+	var surface_type = _waypoint_to_surface.get(waypoint, -1)
 	if surface_type >= 0:
 		damage_surface(surface_type, amount)
 
@@ -119,7 +126,7 @@ func repair_surface(surface_type: int) -> void:
 
 func repair_by_waypoint(waypoint: int) -> void:
 	## Repair surface based on EVA waypoint
-	var surface_type = WAYPOINT_TO_SURFACE.get(waypoint, -1)
+	var surface_type = _waypoint_to_surface.get(waypoint, -1)
 	if surface_type >= 0:
 		repair_surface(surface_type)
 
@@ -169,7 +176,7 @@ func get_integrity(surface_type: int) -> float:
 	return 1.0
 
 func get_integrity_by_waypoint(waypoint: int) -> float:
-	var surface_type = WAYPOINT_TO_SURFACE.get(waypoint, -1)
+	var surface_type = _waypoint_to_surface.get(waypoint, -1)
 	if surface_type >= 0:
 		return get_integrity(surface_type)
 	return 1.0
@@ -188,7 +195,7 @@ func is_critical(surface_type: int) -> bool:
 	return false
 
 func get_surface_name(surface_type: int) -> String:
-	return SURFACE_NAMES.get(surface_type, "Unknown")
+	return _surface_names.get(surface_type, "Unknown")
 
 func get_all_surfaces_status() -> Dictionary:
 	return {

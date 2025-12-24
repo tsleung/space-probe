@@ -312,6 +312,10 @@ func repair_building(building_id: String) -> void:
 func upgrade_building(building_id: String) -> void:
 	dispatch(_MCSReducer.action_upgrade_building(building_id))
 
+func specialize_building(building_id: String, branch_type: int) -> void:
+	"""Specialize a T2 base building into a T3 branch type"""
+	dispatch(_MCSReducer.action_specialize_building(building_id, branch_type))
+
 func progress_upgrades() -> void:
 	"""Progress all ongoing building upgrades - called each year"""
 	dispatch(_MCSReducer.action_progress_upgrades())

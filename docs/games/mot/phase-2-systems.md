@@ -335,34 +335,51 @@ DRIFT TRIGGERED (15% chance after exterior work)
 | **ANTENNA MISALIGNMENT** | Antenna | Low | Antenna array knocked out of alignment |
 | **SOLAR PANEL DAMAGE** | Solar | Moderate | Micrometeorite damage to solar panels |
 
-### Exterior Surface Effects (Planned)
+### Exterior Surface Effects (via ExteriorSurfaceManager)
 
-When fully integrated, damaged exterior surfaces affect real game systems:
+Damaged exterior surfaces affect real game systems through `ExteriorSurfaceManager`:
 
-| Surface | Effect When Damaged |
-|---------|-------------------|
-| **Engine Nozzle** | `speed_multiplier = integrity / 100` (50% damage = 50% speed) |
-| **Antenna Array** | Event warning reduced (60°+ misalignment = -1 day warning) |
-| **Solar Panels** | `solar_power = base × (1 - degradation/100)` |
+| Surface | State Tracking | Effect When Damaged |
+|---------|---------------|-------------------|
+| **Engine Nozzle** | 0-100% integrity | `speed_multiplier = integrity / 100` (50% damage = 50% speed) |
+| **Antenna Array** | 0-90° misalignment | Event warning reduced (60°+ = -1 day warning) |
+| **Solar Panels** | 0-100% degradation | `solar_power = base × (1 - degradation/100)` |
+
+Hull events automatically damage exterior surfaces:
+- **Asteroids:** 30% chance to damage any exterior surface
+- **Solar Flares:** 40% chance to degrade solar panels
+- **Debris:** 20% chance to misalign antenna
+
+EVA repair restores surfaces to full functionality via `eva_repair_completed` signal chain.
 
 These create meaningful pressure to EVA: a damaged engine at 40% means you're only traveling at 40% speed. That's a compelling reason to risk an EVA.
 
 ### Navigation Waypoints
 
-EVA extends the ship navigation graph with exterior waypoints:
+EVA extends the ship navigation graph with exterior waypoints positioned OUTSIDE the hull visual:
 
 ```
-INTERIOR                    AIRLOCK                    EXTERIOR
-┌─────────┐               ┌─────────┐               ┌─────────┐
-│ BRIDGE  │               │         │               │ ENGINE  │
-│QUARTERS │               │ AIRLOCK │◀──────────────│ NOZZLE  │
-│LIFE_SUP │◀──────────────│         │               │         │
-│ENGINEER │  (via         │(exit)   │               │ ANTENNA │
-│CARGO_BAY│◀─ cargo bay)  │         │◀──────────────│ ARRAY   │
-│MEDICAL  │               │         │               │         │
-│CORRIDOR │               │         │               │ SOLAR   │
-└─────────┘               └─────────┘◀──────────────│ PANELS  │
-                                                    └─────────┘
+                                    ┌─────────────┐
+                                    │ EXTERIOR    │  y~140
+                                    │ SOLAR PANEL │  (above hull)
+                                    └─────────────┘
+                                           │
+EXTERIOR              HULL                 │                  EXTERIOR
+ENGINE    ─────────  ┌────────────────────────────────────┐   ANTENNA
+(at engine           │  ┌──────────────────────────────┐  │   (at nose)
+bells)               │  │    SHIP INTERIOR             │──────────▶
+x~640     ◀──────────│  │                              │  │   x~1340
+                     │  └──────────────────────────────┘  │
+           AIRLOCK   └────────────────────────────────────┘
+           (left of     Hull rect: (720, 280, 480, 360)
+           cargo bay)   Layout center: (960, 430)
+           x~680
+
+Waypoint Positions (relative to layout_center at 960, 430):
+- AIRLOCK:          (-280, +70)  → (680, 500)  - left edge of cargo bay
+- EXTERIOR_ENGINE:  (-320, +50)  → (640, 480)  - at engine bells
+- EXTERIOR_ANTENNA: (+380, -30)  → (1340, 400) - at nose antenna
+- EXTERIOR_SOLAR:   (-40, -290)  → (920, 140)  - at top solar panel
 ```
 
 Path from any room to exterior: `[room waypoints] → CARGO_BAY → AIRLOCK → EXTERIOR_TARGET`
@@ -386,7 +403,9 @@ tether.set_point_position(1, crew_position + wave)
 ```
 scripts/mars_odyssey_trek/phase2/ship/
 ├── eva_controller.gd          # EVA orchestration, drift/rescue
+├── exterior_surface_manager.gd # Tracks exterior surface damage/repair
 ├── ship_navigation.gd         # Waypoint graph (includes exterior)
+├── ship_systems_integration.gd # Wires exterior surfaces to game systems
 ├── ship_view.gd               # start_eva() wrapper
 ├── crew_member.gd             # EVA/TETHERED states
 └── ship_types.gd              # CrewState.EVA, CrewState.TETHERED
@@ -794,15 +813,16 @@ This creates:
 - [x] EVA tether visualization with wave animation
 - [x] EVA event types (~20% of events)
 
-### In Progress
-- [ ] Unify EVA systems (delete trigger_eva_visual, use EVAController only)
-- [ ] Implement phased EVA flow (interior walk → airlock → exterior)
-- [ ] Create ExteriorSurfaceManager for game system integration
+### Completed (EVA System)
+- [x] Unify EVA systems (EVAController is single source of truth)
+- [x] Phased EVA flow (interior walk → airlock → exterior → return)
+- [x] ExteriorSurfaceManager for game system integration
+- [x] Hull events damage exterior surfaces
+- [x] EVA repair restores exterior surfaces
 
 ### Remaining
 - [ ] Wire Phase2Store power effects
 - [ ] Wire control surfaces to crew commands
-- [ ] Wire exterior surfaces to speed/power/warning systems
 - [ ] Balance tuning pass
 - [ ] UI for surface interaction
 - [ ] Sound effects integration

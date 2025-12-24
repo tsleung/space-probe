@@ -44,6 +44,7 @@ text = "HERALD: 50 -> Kuiper Belt (WILL HOLD)"
 horizontal_alignment = 2
 
 [node name="GuidancePanel" type="PanelContainer" parent="MainContainer"]
+visible = false
 layout_mode = 2
 
 [node name="GuidanceLabel" type="RichTextLabel" parent="MainContainer/GuidancePanel"]

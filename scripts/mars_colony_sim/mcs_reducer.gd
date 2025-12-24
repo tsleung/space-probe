@@ -34,6 +34,7 @@ enum ActionType {
 	REPAIR_BUILDING,
 	UPGRADE_BUILDING,
 	PROGRESS_UPGRADES,  # Tick upgrade progress each year
+	SPECIALIZE_BUILDING,  # T2 base -> T3 specialized branch
 
 	# Resources
 	UPDATE_RESOURCE,
@@ -94,6 +95,8 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_upgrade_building(state, action)
 		ActionType.PROGRESS_UPGRADES:
 			return _reduce_progress_upgrades(state, action)
+		ActionType.SPECIALIZE_BUILDING:
+			return _reduce_specialize_building(state, action)
 		ActionType.UPDATE_RESOURCE:
 			return _reduce_update_resource(state, action)
 		ActionType.APPLY_PRODUCTION:
@@ -205,6 +208,13 @@ static func action_upgrade_building(building_id: String) -> Dictionary:
 static func action_progress_upgrades() -> Dictionary:
 	return {
 		"type": ActionType.PROGRESS_UPGRADES
+	}
+
+static func action_specialize_building(building_id: String, branch_type: int) -> Dictionary:
+	return {
+		"type": ActionType.SPECIALIZE_BUILDING,
+		"building_id": building_id,
+		"branch_type": branch_type
 	}
 
 static func action_update_resource(resource_type: int, delta: float) -> Dictionary:
@@ -322,10 +332,10 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 	# EPIC STARTING BUILDINGS - More for faster visual progression!
 	# =========================================================================
 
-	# 4 Hab Pods for housing (capacity comes from BUILDING_TIER_STATS: T1 = 4 each)
+	# 4 Habitats for housing (capacity comes from BUILDING_TIER_STATS: T1 = 6 each)
 	for i in range(4):
 		var hab = _MCSTypes.create_building({
-			"type": _MCSTypes.BuildingType.HAB_POD,
+			"type": _MCSTypes.BuildingType.HABITAT,
 			"id": "hab_%03d" % (i + 1),
 			"is_operational": true,
 			"construction_progress": 1.0,
@@ -333,10 +343,10 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 		})
 		new_state.buildings.append(hab)
 
-	# 3 Greenhouses for food
+	# 3 Agridomes for food
 	for i in range(3):
 		var farm = _MCSTypes.create_building({
-			"type": _MCSTypes.BuildingType.GREENHOUSE,
+			"type": _MCSTypes.BuildingType.AGRIDOME,
 			"id": "farm_%03d" % (i + 1),
 			"is_operational": true,
 			"construction_progress": 1.0,
@@ -344,51 +354,41 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 		})
 		new_state.buildings.append(farm)
 
-	# 4 Solar Arrays for power
+	# 4 Power Stations for power
 	for i in range(4):
 		var power = _MCSTypes.create_building({
-			"type": _MCSTypes.BuildingType.SOLAR_ARRAY,
-			"id": "solar_%03d" % (i + 1),
+			"type": _MCSTypes.BuildingType.POWER_STATION,
+			"id": "power_%03d" % (i + 1),
 			"is_operational": true,
 			"construction_progress": 1.0,
 			"constructed_year": 1
 		})
 		new_state.buildings.append(power)
 
-	# 2 Water Extractors
+	# 2 Extractors for water + oxygen
 	for i in range(2):
 		var water = _MCSTypes.create_building({
-			"type": _MCSTypes.BuildingType.WATER_EXTRACTOR,
-			"id": "water_%03d" % (i + 1),
+			"type": _MCSTypes.BuildingType.EXTRACTOR,
+			"id": "extractor_%03d" % (i + 1),
 			"is_operational": true,
 			"construction_progress": 1.0,
 			"constructed_year": 1
 		})
 		new_state.buildings.append(water)
 
-	# 1 Oxygenator for life support
-	var oxygenator = _MCSTypes.create_building({
-		"type": _MCSTypes.BuildingType.OXYGENATOR,
-		"id": "oxy_001",
+	# 1 Fabricator for production
+	var fabricator = _MCSTypes.create_building({
+		"type": _MCSTypes.BuildingType.FABRICATOR,
+		"id": "fabricator_001",
 		"is_operational": true,
 		"construction_progress": 1.0,
 		"constructed_year": 1
 	})
-	new_state.buildings.append(oxygenator)
+	new_state.buildings.append(fabricator)
 
-	# 1 Workshop for production
-	var workshop = _MCSTypes.create_building({
-		"type": _MCSTypes.BuildingType.WORKSHOP,
-		"id": "workshop_001",
-		"is_operational": true,
-		"construction_progress": 1.0,
-		"constructed_year": 1
-	})
-	new_state.buildings.append(workshop)
-
-	# 1 Medical Bay
+	# 1 Medical Center
 	var medical = _MCSTypes.create_building({
-		"type": _MCSTypes.BuildingType.MEDICAL_BAY,
+		"type": _MCSTypes.BuildingType.MEDICAL,
 		"id": "medical_001",
 		"is_operational": true,
 		"construction_progress": 1.0,
@@ -581,6 +581,34 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 			"log_type": "crisis"
 		})
 
+	# === TRADE PHASE ===
+	var trade_result = _MCSEconomy.execute_trade(
+		updates["resources"],
+		updates["buildings"],
+		updates["colonists"],
+		balance.get("trade_policy", {})
+	)
+	updates["resources"] = trade_result.resources
+	var trade_report = trade_result.report
+
+	# Log significant trade activity
+	if trade_report.credits_earned > 100:
+		new_log.append({
+			"year": new_year,
+			"message": "Trade: Earned %.0f credits from exports." % trade_report.credits_earned,
+			"log_type": "info"
+		})
+	if trade_report.credits_spent > 50:
+		var import_list = []
+		for resource_name in trade_report.imports.keys():
+			import_list.append("%.0f %s" % [trade_report.imports[resource_name], resource_name])
+		if import_list.size() > 0:
+			new_log.append({
+				"year": new_year,
+				"message": "Trade: Imported %s." % ", ".join(import_list),
+				"log_type": "info"
+			})
+
 	# === POLITICS PHASE ===
 	var politics = state.get("politics", {})
 	var pol_result = _MCSPolitics.update_faction_standings(
@@ -757,6 +785,44 @@ static func _reduce_advance_week(state: Dictionary, action: Dictionary) -> Dicti
 				"message": "%s has come of age and joined the workforce." % adult.display_name,
 				"log_type": "milestone"
 			})
+
+		# === ARTIFICIAL BIRTHS (Colony Gestation Program) ===
+		var birth_rand = random_values.slice(rand_idx, rand_idx + 50)
+		rand_idx += 50
+		var artificial_birth_result = _MCSPopulation.calculate_artificial_births(
+			updates["colonists"],
+			updates.get("buildings", buildings),
+			updates["resources"],
+			new_year,
+			birth_rand
+		)
+		if artificial_birth_result.births.size() > 0:
+			updates["colonists"] = updates["colonists"] + artificial_birth_result.births
+			updates["resources"]["medicine"] = maxf(0, updates["resources"].get("medicine", 0) - artificial_birth_result.medicine_consumed)
+			for birth in artificial_birth_result.births:
+				new_log.append({
+					"year": new_year,
+					"message": "%s was born via colony gestation program!" % birth.get("display_name", "Baby"),
+					"log_type": "birth"
+				})
+
+		# === IMMIGRATION (Starport/Space Station) ===
+		var imm_rand = random_values.slice(rand_idx, rand_idx + 100)
+		rand_idx += 100
+		var immigration_result = _MCSPopulation.calculate_immigration(
+			updates.get("buildings", buildings),
+			updates["resources"],
+			new_year,
+			imm_rand
+		)
+		if immigration_result.immigrants.size() > 0:
+			updates["colonists"] = updates["colonists"] + immigration_result.immigrants
+			for immigrant in immigration_result.immigrants:
+				new_log.append({
+					"year": new_year,
+					"message": "%s arrived from Earth!" % immigrant.get("display_name", "Colonist"),
+					"log_type": "birth"
+				})
 
 		# === YEARLY BUILDING MAINTENANCE ===
 		var maint_rand = random_values.slice(rand_idx, rand_idx + buildings.size() + 5)
@@ -1115,6 +1181,87 @@ static func _reduce_progress_upgrades(state: Dictionary, _action: Dictionary) ->
 		new_state = _with_field(new_state, "mission_log", log)
 
 	return new_state
+
+static func _reduce_specialize_building(state: Dictionary, action: Dictionary) -> Dictionary:
+	"""Specialize a T2 base production building into a T3 branch type.
+	Requirements:
+	- Building must be T2
+	- Building must be a specializable base type (AGRIDOME, EXTRACTOR, FABRICATOR, POWER_STATION)
+	- Branch type must be valid for that base type
+	- Must have resources for the specialization cost
+	"""
+	var building_id = action.get("building_id", "")
+	var branch_type = action.get("branch_type", 0)
+	var resources = state.get("resources", {}).duplicate(true)
+	var new_buildings: Array = []
+	var specialized = false
+	var building_name = ""
+
+	for building in state.get("buildings", []):
+		if building.get("id", "") == building_id and not specialized:
+			var current_tier = building.get("tier", 1)
+			var current_type = building.get("type", 0)
+
+			# Validate: Must be T2
+			if current_tier != 2:
+				new_buildings.append(building)
+				continue
+
+			# Validate: Must be a specializable base type
+			if not _MCSTypes.can_specialize(current_type):
+				new_buildings.append(building)
+				continue
+
+			# Validate: Branch must be valid for this base type
+			var valid_branches = _MCSTypes.SPECIALIZATION_BRANCHES.get(current_type, [])
+			if branch_type not in valid_branches:
+				new_buildings.append(building)
+				continue
+
+			# Check specialization cost (uses T3 upgrade cost)
+			var costs = _MCSTypes.get_upgrade_cost(3)
+			var can_afford = true
+			for resource_name in costs.keys():
+				if resources.get(resource_name, 0) < costs[resource_name]:
+					can_afford = false
+					break
+
+			if not can_afford:
+				new_buildings.append(building)
+				continue
+
+			# Deduct costs
+			for resource_name in costs.keys():
+				resources[resource_name] = resources.get(resource_name, 0) - costs[resource_name]
+
+			# Convert the building to the specialized type at T3
+			var specialized_building = building.duplicate(true)
+			specialized_building["type"] = branch_type
+			specialized_building["tier"] = 3
+			specialized_building["specialized_from"] = current_type  # Track origin
+			specialized_building["specialization_year"] = state.get("current_year", 1)
+			new_buildings.append(specialized_building)
+
+			specialized = true
+			building_name = _MCSTypes.get_building_name(branch_type)
+		else:
+			new_buildings.append(building)
+
+	if not specialized:
+		return state
+
+	var new_log = state.get("mission_log", []).duplicate()
+	new_log.append({
+		"year": state.get("current_year", 1),
+		"message": "Building specialized into %s!" % building_name,
+		"log_type": "success"
+	})
+
+	return _with_fields(state, {
+		"buildings": new_buildings,
+		"resources": resources,
+		"mission_log": new_log
+	})
 
 static func _reduce_update_resource(state: Dictionary, action: Dictionary) -> Dictionary:
 	var new_resources = state.get("resources", {}).duplicate(true)

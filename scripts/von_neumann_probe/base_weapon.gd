@@ -1043,7 +1043,7 @@ func _create_pull_effect(center: Vector2, radius: float) -> Array:
 
 		# Animate pulsing inward
 		var tween = create_tween()
-		tween.set_loops(0)
+		tween.set_loops(999)  # High number to avoid infinite loop detection
 		tween.tween_property(line, "modulate:a", 0.1, 0.3)
 		tween.tween_property(line, "modulate:a", 0.6, 0.3)
 
