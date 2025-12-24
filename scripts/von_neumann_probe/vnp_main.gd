@@ -21,6 +21,7 @@ const WORLD_SCALE = 1.5  # World is 1.5x larger than viewport for momentum-based
 # Balance constants - CRANKED UP FOR DRAMA
 const ENERGY_REGEN_RATE = 60  # 6x faster ship production - FAST action
 const NEMESIS_ENERGY_MULTIPLIER = 1.3  # Reduced from 1.5 - still advantaged but competitive
+const FACTORY_ENERGY_BONUS = 15  # Additional energy per completed factory
 const VICTORY_DISPLAY_TIME = 3.0
 
 var ship_nodes = {}
@@ -120,6 +121,8 @@ var progenitor_wave_count: int = 0  # Track waves for escalation
 # Explosion rate limiting (prevents lag when tabbed back)
 var explosion_count_this_frame: int = 0
 const MAX_EXPLOSIONS_PER_FRAME: int = 3
+const MAX_DELTA: float = 0.1  # Clamp delta to prevent huge time jumps after alt-tab
+var skip_effects_frames: int = 0  # Skip visual effects for N frames after focus regain
 
 # Victory state
 var showing_victory = false
@@ -184,7 +187,20 @@ func return_projectile(p: Node):
 	if is_instance_valid(p) and p.has_method("deactivate"):
 		p.deactivate()
 
+func _notification(what):
+	# Detect when window regains focus after alt-tab
+	if what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		# Skip effects for 2 frames to prevent explosion backlog
+		skip_effects_frames = 2
+
 func _process(delta):
+	# Clamp delta to prevent huge time jumps after alt-tab
+	delta = min(delta, MAX_DELTA)
+
+	# Decrement skip frames counter
+	if skip_effects_frames > 0:
+		skip_effects_frames -= 1
+
 	# Reset explosion counter each frame
 	explosion_count_this_frame = 0
 
@@ -967,11 +983,26 @@ func _on_energy_regen():
 	if showing_victory:
 		return
 
+	# Count completed factories per team for bonus
+	var factory_counts = {}
+	var state = store.get_state()
+	if state != null and state.has("factories"):
+		for factory_id in state.factories:
+			var factory = state.factories[factory_id]
+			if factory.get("complete", false):
+				var team = factory["team"]
+				factory_counts[team] = factory_counts.get(team, 0) + 1
+
 	for team in VnpTypes.Team.values():
 		# Progenitor doesn't get energy - it spawns drones via convergence
 		if team == VnpTypes.Team.PROGENITOR:
 			continue
 		var amount = ENERGY_REGEN_RATE
+
+		# Factory bonus - each completed factory adds linear bonus
+		var num_factories = factory_counts.get(team, 0)
+		amount += num_factories * FACTORY_ENERGY_BONUS
+
 		if team == VnpTypes.Team.NEMESIS:
 			amount = int(amount * NEMESIS_ENERGY_MULTIPLIER)
 		store.dispatch({
@@ -1608,6 +1639,9 @@ func _absorb_outpost(point_id: String):
 
 func _create_absorption_effect(pos: Vector2):
 	"""Visual effect when ship is absorbed"""
+	# Skip effects if recovering from alt-tab
+	if skip_effects_frames > 0:
+		return
 	# Create a quick particle burst toward center
 	var state = store.get_state()
 	var center = state.convergence.get("center", gameplay_center)
@@ -2515,6 +2549,9 @@ func _update_strategic_point_visuals(state):
 
 
 func _spawn_death_explosion(pos: Vector2, size: int, team: int):
+	# Skip effects entirely for a few frames after focus regain
+	if skip_effects_frames > 0:
+		return
 	# Rate limit explosions to prevent lag when tabbed back
 	if explosion_count_this_frame >= MAX_EXPLOSIONS_PER_FRAME:
 		return

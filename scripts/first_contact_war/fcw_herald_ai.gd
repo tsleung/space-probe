@@ -538,46 +538,57 @@ static func process_weekly_herald_turn(state: Dictionary) -> Dictionary:
 
 static func update_zone_signatures(state: Dictionary) -> Dictionary:
 	## Calculate and update zone signatures based on weekly activity
+	## Signatures are 0.0-1.0 representing detection likelihood
+	## Population sets minimum baseline; activity adds on top
 	var new_state = state.duplicate(true)
 	var sigs = new_state.zone_signatures.duplicate()
 	var activity = new_state.weekly_activity
 
 	for zone_id in FCWTypes.ZoneId.values():
 		var zone = new_state.zones.get(zone_id, {})
-		var sig = sigs.get(zone_id, 0.0)
 
-		# Population emissions (unavoidable baseline)
+		# Calculate population baseline (minimum signature for inhabited zones)
+		# Earth (8B) = 0.08, Mars (10M) = 0.0001
 		var pop = zone.get("population", 0)
-		sig += pop * FCWTypes.SIG_POPULATION
+		var pop_baseline = clampf(pop * FCWTypes.SIG_POPULATION, 0.0, 0.15)
+
+		# Calculate weekly activity contribution (does NOT accumulate)
+		var activity_sig = 0.0
 
 		# Stationed ships
 		var stationed = zone.get("stationed_ships", {})
 		var ship_count = 0
 		for ship_type in stationed:
 			ship_count += stationed[ship_type]
-		sig += ship_count * FCWTypes.SIG_STATIONED_SHIP
+		activity_sig += ship_count * FCWTypes.SIG_STATIONED_SHIP
 
 		# Production activity this week
 		var built = activity.ships_built.get(zone_id, 0)
-		sig += built * FCWTypes.SIG_PRODUCTION
+		activity_sig += built * FCWTypes.SIG_PRODUCTION
 
 		# Transit traffic this week
 		var transits = activity.ships_transited.get(zone_id, 0)
-		sig += transits * FCWTypes.SIG_TRANSIT
+		activity_sig += transits * FCWTypes.SIG_TRANSIT
 
 		# Active burns this week (very visible!)
 		var burns = activity.burns_detected.get(zone_id, 0)
-		sig += burns * FCWTypes.SIG_ACTIVE_BURN
+		activity_sig += burns * FCWTypes.SIG_ACTIVE_BURN
 
 		# Combat events this week
 		var combat = activity.combat_events.get(zone_id, 0)
-		sig += combat * FCWTypes.SIG_COMBAT
+		activity_sig += combat * FCWTypes.SIG_COMBAT
 
 		# Evacuation activity
 		var evac = activity.evacuations.get(zone_id, 0)
-		sig += (evac / 1_000_000.0) * FCWTypes.SIG_EVACUATION
+		activity_sig += (evac / 1_000_000.0) * FCWTypes.SIG_EVACUATION
 
-		sigs[zone_id] = sig
+		# Final signature = max(population baseline, decayed previous) + this week's activity
+		# Note: decay is applied in decay_zone_signatures after this
+		var prev_sig = sigs.get(zone_id, 0.0)
+		var sig = maxf(pop_baseline, prev_sig) + activity_sig
+
+		# Clamp to valid range (0.0-1.0)
+		sigs[zone_id] = clampf(sig, 0.0, 1.0)
 
 	new_state.zone_signatures = sigs
 	return new_state

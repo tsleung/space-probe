@@ -72,7 +72,7 @@ func _create_ui():
 	# Victory label (centered, hidden by default)
 	victory_label = Label.new()
 	victory_label.name = "VictoryLabel"
-	victory_label.set_anchors_preset(Control.PRESET_CENTER)
+	victory_label.set_anchors_preset(Control.PRESET_FULL_RECT)
 	victory_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	victory_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	victory_label.add_theme_font_size_override("font_size", 48)

@@ -599,148 +599,123 @@ func _add_solar_visual(container: Node2D, config: Dictionary) -> void:
 	container.add_child(arm)
 
 func _create_airlock_visual() -> void:
-	## Create MASSIVE airlock door visual with dramatic effects
+	## Create airlock door visual with dramatic effects (scaled down to not overlap cargo bay)
 	var airlock_pos = ship_nav.get_waypoint_position(ShipNavigation.Waypoint.AIRLOCK)
 
 	var airlock = Node2D.new()
 	airlock.position = airlock_pos
 	airlock.name = "Airlock"
+	airlock.z_index = -2  # Behind ship rooms
 
-	# OUTER RING - Heavy industrial frame
+	# OUTER RING - Heavy industrial frame (scaled down from 45 to 28)
 	var outer_frame = Polygon2D.new()
-	outer_frame.polygon = _create_circle(45, 24)
+	outer_frame.polygon = _create_circle(28, 16)
 	outer_frame.color = Color(0.25, 0.25, 0.3)
 	outer_frame.name = "OuterFrame"
 	airlock.add_child(outer_frame)
 
 	# Warning stripes ring
 	var warning_ring = Line2D.new()
-	for i in range(25):
-		var angle = (float(i) / 24) * TAU
-		warning_ring.add_point(Vector2(cos(angle) * 40, sin(angle) * 40))
-	warning_ring.width = 6.0
-	warning_ring.default_color = Color(0.9, 0.7, 0.1) if true else Color(0.1, 0.1, 0.1)
+	for i in range(17):
+		var angle = (float(i) / 16) * TAU
+		warning_ring.add_point(Vector2(cos(angle) * 25, sin(angle) * 25))
+	warning_ring.width = 4.0
+	warning_ring.default_color = Color(0.9, 0.7, 0.1)
 	warning_ring.name = "WarningRing"
 	airlock.add_child(warning_ring)
 
-	# Main hatch (circular) - BIG
+	# Main hatch (circular) - scaled down from 35 to 22
 	var hatch = Polygon2D.new()
-	hatch.polygon = _create_circle(35, 20)
+	hatch.polygon = _create_circle(22, 14)
 	hatch.color = Color(0.45, 0.45, 0.5)
 	hatch.name = "Hatch"
 	airlock.add_child(hatch)
 
 	# Hatch inner ring with details
 	var inner = Polygon2D.new()
-	inner.polygon = _create_circle(28, 16)
+	inner.polygon = _create_circle(17, 12)
 	inner.color = Color(0.35, 0.35, 0.4)
 	inner.name = "InnerRing"
 	airlock.add_child(inner)
 
 	# Center viewport window
 	var viewport = Polygon2D.new()
-	viewport.polygon = _create_circle(12, 12)
+	viewport.polygon = _create_circle(8, 10)
 	viewport.color = Color(0.15, 0.2, 0.25)
 	viewport.name = "Viewport"
 	airlock.add_child(viewport)
 
 	# Viewport glass reflection
 	var glass = Polygon2D.new()
-	glass.polygon = _create_circle(10, 12)
+	glass.polygon = _create_circle(6, 10)
 	glass.color = Color(0.3, 0.4, 0.5, 0.4)
 	glass.name = "Glass"
 	airlock.add_child(glass)
 
-	# Locking bolts around the hatch (8 bolts)
-	for i in range(8):
-		var angle = (float(i) / 8) * TAU
+	# Locking bolts around the hatch (6 bolts, scaled down)
+	for i in range(6):
+		var angle = (float(i) / 6) * TAU
 		var bolt = Polygon2D.new()
-		bolt.polygon = _create_circle(4, 6)
-		bolt.position = Vector2(cos(angle) * 32, sin(angle) * 32)
+		bolt.polygon = _create_circle(3, 6)
+		bolt.position = Vector2(cos(angle) * 20, sin(angle) * 20)
 		bolt.color = Color(0.5, 0.5, 0.55)
 		bolt.name = "Bolt%d" % i
 		airlock.add_child(bolt)
 
 	# Main handle wheel
 	var handle_bg = Polygon2D.new()
-	handle_bg.polygon = _create_circle(8, 8)
+	handle_bg.polygon = _create_circle(5, 8)
 	handle_bg.color = Color(0.3, 0.3, 0.35)
 	handle_bg.name = "HandleBg"
 	airlock.add_child(handle_bg)
 
 	var handle = Line2D.new()
-	handle.add_point(Vector2(-6, 0))
-	handle.add_point(Vector2(6, 0))
+	handle.add_point(Vector2(-4, 0))
+	handle.add_point(Vector2(4, 0))
 	handle.add_point(Vector2(0, 0))
-	handle.add_point(Vector2(0, -6))
-	handle.add_point(Vector2(0, 6))
-	handle.width = 3.0
+	handle.add_point(Vector2(0, -4))
+	handle.add_point(Vector2(0, 4))
+	handle.width = 2.0
 	handle.default_color = Color(0.8, 0.6, 0.2)
 	handle.name = "Handle"
 	airlock.add_child(handle)
 
-	# AIRLOCK label - positioned ABOVE the airlock, much bigger
+	# AIRLOCK label - compact, above the hatch
 	var label = Label.new()
 	label.text = "◄ AIRLOCK ►"
-	label.position = Vector2(-55, -70)
-	label.add_theme_font_size_override("font_size", 14)
+	label.position = Vector2(-38, -45)
+	label.add_theme_font_size_override("font_size", 11)
 	label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3))
 	label.name = "AirlockLabel"
 	airlock.add_child(label)
 
-	# Status lights panel (multiple lights for drama)
-	var light_panel = Node2D.new()
-	light_panel.position = Vector2(55, -20)
-	light_panel.name = "LightPanel"
-	airlock.add_child(light_panel)
-
-	# Panel background
-	var panel_bg = Polygon2D.new()
-	panel_bg.polygon = PackedVector2Array([
-		Vector2(-12, -25), Vector2(12, -25),
-		Vector2(12, 25), Vector2(-12, 25)
-	])
-	panel_bg.color = Color(0.15, 0.15, 0.18)
-	light_panel.add_child(panel_bg)
-
-	# Three status lights: SEAL, PRESSURE, READY
-	var light_colors = [Color(0.2, 0.8, 0.2), Color(0.2, 0.8, 0.2), Color(0.2, 0.8, 0.2)]
-	var light_names = ["SealLight", "PressureLight", "ReadyLight"]
-	for i in range(3):
-		var light = Polygon2D.new()
-		light.polygon = _create_circle(6, 8)
-		light.position = Vector2(0, -15 + i * 15)
-		light.color = light_colors[i]
-		light.name = light_names[i]
-		light_panel.add_child(light)
-
-	# Main status light (the big one)
+	# Main status light (compact - combined into one)
 	var status_light = Polygon2D.new()
-	status_light.polygon = _create_circle(8, 10)
-	status_light.position = Vector2(-55, 0)
+	status_light.polygon = _create_circle(5, 8)
+	status_light.position = Vector2(-35, 0)
 	status_light.color = Color(0.2, 0.9, 0.2)  # Bright green = pressurized/safe
 	status_light.name = "StatusLight"
 	airlock.add_child(status_light)
 
 	# Status light glow
 	var status_glow = Polygon2D.new()
-	status_glow.polygon = _create_circle(14, 10)
-	status_glow.position = Vector2(-55, 0)
+	status_glow.polygon = _create_circle(9, 8)
+	status_glow.position = Vector2(-35, 0)
 	status_glow.color = Color(0.2, 0.9, 0.2, 0.3)
 	status_glow.name = "StatusGlow"
 	status_glow.z_index = -1
 	airlock.add_child(status_glow)
 
-	# Pressure gauge - BIGGER
+	# Pressure gauge - compact, below airlock
 	var gauge_container = Node2D.new()
-	gauge_container.position = Vector2(0, 55)
+	gauge_container.position = Vector2(0, 38)
 	gauge_container.name = "GaugeContainer"
 	airlock.add_child(gauge_container)
 
 	var gauge_bg = Polygon2D.new()
 	gauge_bg.polygon = PackedVector2Array([
-		Vector2(-35, -8), Vector2(35, -8),
-		Vector2(35, 8), Vector2(-35, 8)
+		Vector2(-22, -5), Vector2(22, -5),
+		Vector2(22, 5), Vector2(-22, 5)
 	])
 	gauge_bg.color = Color(0.15, 0.15, 0.18)
 	gauge_bg.name = "GaugeBg"
@@ -748,8 +723,8 @@ func _create_airlock_visual() -> void:
 
 	var gauge_fill = Polygon2D.new()
 	gauge_fill.polygon = PackedVector2Array([
-		Vector2(-33, -6), Vector2(33, -6),
-		Vector2(33, 6), Vector2(-33, 6)
+		Vector2(-20, -3), Vector2(20, -3),
+		Vector2(20, 3), Vector2(-20, 3)
 	])
 	gauge_fill.color = Color(0.2, 0.7, 0.9)  # Blue = full pressure
 	gauge_fill.name = "GaugeFill"
@@ -758,8 +733,8 @@ func _create_airlock_visual() -> void:
 	# Gauge label
 	var gauge_label = Label.new()
 	gauge_label.text = "PRESSURE"
-	gauge_label.position = Vector2(-28, -22)
-	gauge_label.add_theme_font_size_override("font_size", 9)
+	gauge_label.position = Vector2(-22, -16)
+	gauge_label.add_theme_font_size_override("font_size", 8)
 	gauge_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 	gauge_container.add_child(gauge_label)
 
@@ -1069,17 +1044,7 @@ func _animate_airlock_open() -> void:
 	if status_glow:
 		status_glow.color = Color(1.0, 0.2, 0.1, 0.5)
 
-	# Flash all panel lights red with staggered timing
-	var light_panel = airlock_node.get_node_or_null("LightPanel")
-	if light_panel:
-		for i in range(3):
-			var light = light_panel.get_node_or_null(["SealLight", "PressureLight", "ReadyLight"][i])
-			if light:
-				var light_tween = create_tween()
-				light_tween.tween_interval(i * 0.1)
-				light_tween.tween_property(light, "color", Color(1.0, 0.2, 0.1), 0.1)
-				light_tween.tween_property(light, "color", Color(0.3, 0.1, 0.1), 0.1)
-				light_tween.set_loops(5)
+	# Status light handled above - flash with warning ring
 
 	# WARNING RING FLASHES
 	var warning_ring = airlock_node.get_node_or_null("WarningRing")
@@ -1113,11 +1078,11 @@ func _animate_airlock_open() -> void:
 		handle_tween.tween_property(handle, "rotation", TAU, 0.8).set_ease(Tween.EASE_OUT)
 
 	# Bolts retract (scale down)
-	for i in range(8):
+	for i in range(6):
 		var bolt = airlock_node.get_node_or_null("Bolt%d" % i)
 		if bolt:
 			var bolt_tween = create_tween()
-			bolt_tween.tween_interval(i * 0.05)
+			bolt_tween.tween_interval(i * 0.06)
 			bolt_tween.tween_property(bolt, "scale", Vector2(0.3, 0.3), 0.2)
 
 	# Open the hatch with dramatic swing
@@ -1170,29 +1135,17 @@ func _animate_airlock_close() -> void:
 		handle_tween.tween_property(handle, "rotation", TAU * 2, 0.8).set_ease(Tween.EASE_OUT)
 
 	# BOLTS SLAM BACK INTO PLACE - staggered for drama
-	for i in range(8):
+	for i in range(6):
 		var bolt = airlock_node.get_node_or_null("Bolt%d" % i)
 		if bolt:
 			var bolt_tween = create_tween()
-			bolt_tween.tween_interval(0.5 + i * 0.08)
+			bolt_tween.tween_interval(0.5 + i * 0.1)
 			bolt_tween.tween_property(bolt, "scale", Vector2(1.0, 1.0), 0.15).set_ease(Tween.EASE_OUT)
 			# Bolt flash on engage
 			bolt_tween.parallel().tween_property(bolt, "color", Color(0.8, 0.8, 0.3), 0.1)
 			bolt_tween.tween_property(bolt, "color", Color(0.5, 0.5, 0.55), 0.2)
 
-	# SEAL CONFIRMED - panel lights sequence
-	var light_panel = airlock_node.get_node_or_null("LightPanel")
-	if light_panel:
-		var light_names = ["SealLight", "PressureLight", "ReadyLight"]
-		for i in range(3):
-			var light = light_panel.get_node_or_null(light_names[i])
-			if light:
-				var light_tween = create_tween()
-				# Start yellow (in progress)
-				light_tween.tween_property(light, "color", Color(0.9, 0.7, 0.2), 0.2)
-				# Wait then turn green
-				light_tween.tween_interval(0.8 + i * 0.4)
-				light_tween.tween_property(light, "color", Color(0.2, 0.9, 0.2), 0.2)
+	# SEAL CONFIRMED - status light turns green after bolts engage
 
 	# REPRESSURIZATION - the gauge fills with satisfying drama
 	var gauge_container = airlock_node.get_node_or_null("GaugeContainer")

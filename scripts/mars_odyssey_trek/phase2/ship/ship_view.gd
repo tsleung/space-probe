@@ -38,6 +38,21 @@ const SHIP_PADDING = 15
 @export var layout_center: Vector2 = Vector2(400, 270)
 
 # ============================================================================
+# ZOOM SETTINGS
+# ============================================================================
+
+const ZOOM_MIN: float = 0.5   # Maximum zoom out
+const ZOOM_MAX: float = 3.0   # Maximum zoom in
+const ZOOM_STEP: float = 0.15  # Zoom increment per scroll
+const ZOOM_SMOOTH: float = 0.15  # Tween duration for smooth zoom
+
+var current_zoom: float = 1.0
+var target_zoom: float = 1.0
+var zoom_center: Vector2 = Vector2.ZERO  # Point to zoom towards
+var zoom_tween: Tween = null
+var default_position: Vector2 = Vector2.ZERO  # Store original position for reset
+
+# ============================================================================
 # NODES
 # ============================================================================
 
@@ -60,6 +75,7 @@ var life_support_sys: LifeSupportSystems  # Hydroponics & Water Reclaimer
 # ============================================================================
 
 func _ready() -> void:
+	default_position = position
 	_create_navigation_region()
 	_create_ship_layout()
 	_setup_navigation_graph()
@@ -67,6 +83,71 @@ func _ready() -> void:
 	_setup_life_support_systems()
 	_create_crew()
 	_position_crew_at_stations()
+
+func _unhandled_input(event: InputEvent) -> void:
+	# Handle mouse wheel zoom (works with touchpad pinch gestures too)
+	if event is InputEventMouseButton:
+		var mouse_event = event as InputEventMouseButton
+		if mouse_event.pressed:
+			if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				_zoom_at_point(mouse_event.global_position, ZOOM_STEP)
+			elif mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				_zoom_at_point(mouse_event.global_position, -ZOOM_STEP)
+
+	# Handle touchpad magnify gesture (macOS)
+	if event is InputEventMagnifyGesture:
+		var magnify_event = event as InputEventMagnifyGesture
+		var zoom_delta = (magnify_event.factor - 1.0) * 0.5
+		_zoom_at_point(magnify_event.position, zoom_delta)
+
+	# Reset zoom with 0 key or Home key
+	if event is InputEventKey:
+		var key_event = event as InputEventKey
+		if key_event.pressed and not key_event.echo:
+			if key_event.keycode == KEY_0 or key_event.keycode == KEY_HOME:
+				reset_zoom()
+
+func _zoom_at_point(screen_point: Vector2, zoom_delta: float) -> void:
+	## Zoom towards a point on screen
+	var old_zoom = target_zoom
+	target_zoom = clamp(target_zoom + zoom_delta, ZOOM_MIN, ZOOM_MAX)
+
+	if target_zoom == old_zoom:
+		return  # No change
+
+	# Calculate the world position under the cursor before zoom
+	var world_point_before = (screen_point - global_position) / current_zoom
+
+	# Kill any existing tween
+	if zoom_tween and zoom_tween.is_valid():
+		zoom_tween.kill()
+
+	# Create smooth zoom tween
+	zoom_tween = create_tween()
+	zoom_tween.set_parallel(true)
+
+	# Tween the scale
+	zoom_tween.tween_property(self, "scale", Vector2(target_zoom, target_zoom), ZOOM_SMOOTH)
+
+	# Calculate new position to keep the cursor point stationary
+	var new_position = screen_point - world_point_before * target_zoom
+	zoom_tween.tween_property(self, "position", new_position, ZOOM_SMOOTH)
+
+	# Update current zoom after tween completes
+	zoom_tween.chain().tween_callback(func(): current_zoom = target_zoom)
+
+func reset_zoom() -> void:
+	## Reset zoom to default (1.0) and position
+	target_zoom = 1.0
+	current_zoom = 1.0
+
+	if zoom_tween and zoom_tween.is_valid():
+		zoom_tween.kill()
+
+	zoom_tween = create_tween()
+	zoom_tween.set_parallel(true)
+	zoom_tween.tween_property(self, "scale", Vector2.ONE, ZOOM_SMOOTH * 2)
+	zoom_tween.tween_property(self, "position", default_position, ZOOM_SMOOTH * 2)
 
 func _setup_eva_controller() -> void:
 	## Initialize the EVA controller with exterior surfaces
@@ -350,6 +431,40 @@ func assign_task_to_crew(role: String, task_type: ShipTypes.TaskType) -> void:
 	var member = crew.get(role)
 	if member:
 		member.start_task(task_type)
+
+func send_crew_to_room_with_task(role: String, room_type: int, task_type: ShipTypes.TaskType) -> void:
+	## Send crew to a room and start a task when they arrive
+	var member = crew.get(role)
+	var room = rooms.get(room_type)
+
+	if not member:
+		print("[SHIP] Warning: No crew member with role '%s'" % role)
+		return
+	if not room:
+		print("[SHIP] Warning: No room of type %d" % room_type)
+		return
+
+	# Store the task to start on arrival
+	if not member.has_meta("pending_task"):
+		pass  # OK to add new meta
+	member.set_meta("pending_task", task_type)
+
+	# Connect to arrival signal (one-shot)
+	var callback = func(arrived_room: int):
+		if arrived_room == room_type:
+			var pending = member.get_meta("pending_task", -1)
+			if pending >= 0:
+				member.start_task(pending)
+				member.remove_meta("pending_task")
+				print("[SHIP] %s arrived at %s, starting task" % [role, ShipTypes.get_room_name(room_type)])
+
+	member.arrived_at_destination.connect(callback, CONNECT_ONE_SHOT)
+
+	# Get waypoint path and send crew
+	var waypoint_path = ship_nav.find_path(member.current_room, room_type)
+	waypoint_path.append(room.get_work_position())  # Go to work position, not random spot
+	member.move_along_path(room_type, waypoint_path, room, false)
+	print("[SHIP] Sending %s to %s for task" % [role, ShipTypes.get_room_name(room_type)])
 
 func send_nearest_crew_to_room(room_type: ShipTypes.RoomType, emergency: bool = false) -> String:
 	var room = rooms.get(room_type)

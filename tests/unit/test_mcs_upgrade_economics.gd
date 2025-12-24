@@ -22,12 +22,12 @@ const MCSPopulation = preload("res://scripts/mars_colony_sim/mcs_population.gd")
 func test_tier_stats_exist_for_key_buildings():
 	# Key production buildings should have tier stats
 	var key_buildings = [
-		MCSTypes.BuildingType.GREENHOUSE,
+		MCSTypes.BuildingType.AGRIDOME,
 		MCSTypes.BuildingType.HYDROPONICS,
-		MCSTypes.BuildingType.SOLAR_ARRAY,
-		MCSTypes.BuildingType.WATER_EXTRACTOR,
-		MCSTypes.BuildingType.WORKSHOP,
-		MCSTypes.BuildingType.FACTORY,
+		MCSTypes.BuildingType.SOLAR_FARM,
+		MCSTypes.BuildingType.EXTRACTOR,
+		MCSTypes.BuildingType.FABRICATOR,
+		MCSTypes.BuildingType.FOUNDRY,
 	]
 
 	for building_type in key_buildings:
@@ -36,22 +36,22 @@ func test_tier_stats_exist_for_key_buildings():
 
 
 func test_tier_production_increases_with_tier():
-	# Greenhouse production should increase: 500 -> 650 -> 850 -> 1100 -> 1500
+	# Agridome production should increase: 500 -> 650 -> 850 -> 1100 -> 1500
 	var expected_food = [500, 650, 850, 1100, 1500]
 
 	for tier in range(1, 6):
-		var stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.GREENHOUSE, tier)
+		var stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.AGRIDOME, tier)
 		var actual_food = stats.get("production", {}).get("food", 0)
 		assert_eq(actual_food, expected_food[tier - 1],
-			"Greenhouse tier %d should produce %d food" % [tier, expected_food[tier - 1]])
+			"Agridome tier %d should produce %d food" % [tier, expected_food[tier - 1]])
 
 
 func test_tier_5_produces_triple_tier_1():
 	# Tier 5 should produce approximately 3x tier 1 (the design spec)
 	var buildings_to_check = [
-		MCSTypes.BuildingType.GREENHOUSE,
+		MCSTypes.BuildingType.AGRIDOME,
 		MCSTypes.BuildingType.HYDROPONICS,
-		MCSTypes.BuildingType.WATER_EXTRACTOR,
+		MCSTypes.BuildingType.EXTRACTOR,
 	]
 
 	for building_type in buildings_to_check:
@@ -70,9 +70,9 @@ func test_tier_5_produces_triple_tier_1():
 func test_tier_workers_decrease_at_high_tiers():
 	# Workers should decrease at tier 4-5 (the key upgrade incentive)
 	var buildings_with_worker_reduction = [
-		MCSTypes.BuildingType.GREENHOUSE,
-		MCSTypes.BuildingType.FACTORY,
-		MCSTypes.BuildingType.WATER_EXTRACTOR,
+		MCSTypes.BuildingType.AGRIDOME,
+		MCSTypes.BuildingType.FOUNDRY,
+		MCSTypes.BuildingType.EXTRACTOR,
 	]
 
 	for building_type in buildings_with_worker_reduction:
@@ -86,35 +86,35 @@ func test_tier_workers_decrease_at_high_tiers():
 			"Building type %d tier 5 should need fewer workers than tier 1" % building_type)
 
 
-func test_factory_workers_decrease_significantly():
-	# Factory: 6 workers at tier 1, 2 workers at tier 5 (saves 4 workers!)
-	var tier1 = MCSTypes.get_tier_stats(MCSTypes.BuildingType.FACTORY, 1)
-	var tier5 = MCSTypes.get_tier_stats(MCSTypes.BuildingType.FACTORY, 5)
+func test_foundry_workers_decrease_significantly():
+	# Foundry: 6 workers at tier 1, 2 workers at tier 5 (saves 4 workers!)
+	var tier1 = MCSTypes.get_tier_stats(MCSTypes.BuildingType.FOUNDRY, 1)
+	var tier5 = MCSTypes.get_tier_stats(MCSTypes.BuildingType.FOUNDRY, 5)
 
-	assert_eq(tier1.get("workers", 0), 6, "Factory tier 1 should need 6 workers")
-	assert_eq(tier5.get("workers", 0), 2, "Factory tier 5 should need only 2 workers")
+	assert_eq(tier1.get("workers", 0), 6, "Foundry tier 1 should need 6 workers")
+	assert_eq(tier5.get("workers", 0), 2, "Foundry tier 5 should need only 2 workers")
 
 
 func test_solar_array_power_increases():
-	# Solar array power: 50 -> 65 -> 85 -> 110 -> 150
+	# Solar farm power: 50 -> 65 -> 85 -> 110 -> 150
 	var expected_power = [50, 65, 85, 110, 150]
 
 	for tier in range(1, 6):
-		var stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.SOLAR_ARRAY, tier)
+		var stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.SOLAR_FARM, tier)
 		var actual_power = stats.get("power_gen", 0)
 		assert_eq(actual_power, expected_power[tier - 1],
-			"Solar array tier %d should generate %d power" % [tier, expected_power[tier - 1]])
+			"Solar farm tier %d should generate %d power" % [tier, expected_power[tier - 1]])
 
 
 func test_housing_capacity_increases():
-	# Hab pod: 4 -> 6 -> 8 -> 12 -> 20
+	# Habitat: 4 -> 6 -> 8 -> 12 -> 20
 	var expected_capacity = [4, 6, 8, 12, 20]
 
 	for tier in range(1, 6):
-		var stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.HAB_POD, tier)
+		var stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.HABITAT, tier)
 		var actual_capacity = stats.get("housing_capacity", 0)
 		assert_eq(actual_capacity, expected_capacity[tier - 1],
-			"Hab pod tier %d should house %d colonists" % [tier, expected_capacity[tier - 1]])
+			"Habitat tier %d should house %d colonists" % [tier, expected_capacity[tier - 1]])
 
 
 # ============================================================================
@@ -214,29 +214,29 @@ func _create_test_colonist(alive: bool = true, adult: bool = true) -> Dictionary
 func test_production_uses_tier_stats():
 	var colonists = [_create_test_colonist(), _create_test_colonist()]
 
-	# Tier 1 greenhouse produces 500 food
-	var tier1_building = _create_test_building(MCSTypes.BuildingType.GREENHOUSE, 1)
+	# Tier 1 agridome produces 500 food
+	var tier1_building = _create_test_building(MCSTypes.BuildingType.AGRIDOME, 1)
 	tier1_building.assigned_workers = ["worker1", "worker2"]
 	var tier1_production = MCSEconomy.calc_yearly_production([tier1_building], colonists)
 
-	# Tier 5 greenhouse produces 1500 food
-	var tier5_building = _create_test_building(MCSTypes.BuildingType.GREENHOUSE, 5)
+	# Tier 5 agridome produces 1500 food
+	var tier5_building = _create_test_building(MCSTypes.BuildingType.AGRIDOME, 5)
 	tier5_building.assigned_workers = ["worker1"]  # Only needs 1 worker at tier 5
 	var tier5_production = MCSEconomy.calc_yearly_production([tier5_building], colonists)
 
-	assert_eq(tier1_production.get("food", 0), 500.0, "Tier 1 greenhouse should produce 500 food")
-	assert_eq(tier5_production.get("food", 0), 1500.0, "Tier 5 greenhouse should produce 1500 food")
+	assert_eq(tier1_production.get("food", 0), 500.0, "Tier 1 agridome should produce 500 food")
+	assert_eq(tier5_production.get("food", 0), 1500.0, "Tier 5 agridome should produce 1500 food")
 
 
 func test_power_generation_uses_tier_stats():
 	var colonists = []
 
 	# Tier 1 solar array generates 50 power
-	var tier1_solar = _create_test_building(MCSTypes.BuildingType.SOLAR_ARRAY, 1)
+	var tier1_solar = _create_test_building(MCSTypes.BuildingType.SOLAR_FARM, 1)
 	var tier1_balance = MCSEconomy.calc_power_balance([tier1_solar], colonists)
 
 	# Tier 5 solar array generates 150 power
-	var tier5_solar = _create_test_building(MCSTypes.BuildingType.SOLAR_ARRAY, 5)
+	var tier5_solar = _create_test_building(MCSTypes.BuildingType.SOLAR_FARM, 5)
 	var tier5_balance = MCSEconomy.calc_power_balance([tier5_solar], colonists)
 
 	assert_eq(tier1_balance.get("generation", 0), 50.0, "Tier 1 solar should generate 50 power")
@@ -246,12 +246,12 @@ func test_power_generation_uses_tier_stats():
 func test_housing_uses_tier_stats():
 	var colonists = []
 
-	# Tier 1 hab pod houses 4
-	var tier1_hab = _create_test_building(MCSTypes.BuildingType.HAB_POD, 1)
+	# Tier 1 habitat houses 4
+	var tier1_hab = _create_test_building(MCSTypes.BuildingType.HABITAT, 1)
 	var tier1_housing = MCSEconomy.calc_housing_balance([tier1_hab], colonists)
 
-	# Tier 5 hab pod houses 20
-	var tier5_hab = _create_test_building(MCSTypes.BuildingType.HAB_POD, 5)
+	# Tier 5 habitat houses 20
+	var tier5_hab = _create_test_building(MCSTypes.BuildingType.HABITAT, 5)
 	var tier5_housing = MCSEconomy.calc_housing_balance([tier5_hab], colonists)
 
 	assert_eq(tier1_housing.get("capacity", 0), 4, "Tier 1 hab should house 4")
@@ -259,16 +259,16 @@ func test_housing_uses_tier_stats():
 
 
 func test_efficiency_uses_tier_worker_requirements():
-	# A tier 5 greenhouse needs only 1 worker but tier 1 needs 2
+	# A tier 5 agridome needs only 1 worker but tier 1 needs 2
 	var colonists = [_create_test_colonist()]
 
 	# Tier 1 with 1 worker (needs 2) = 50% efficiency
-	var tier1_building = _create_test_building(MCSTypes.BuildingType.GREENHOUSE, 1)
+	var tier1_building = _create_test_building(MCSTypes.BuildingType.AGRIDOME, 1)
 	tier1_building.assigned_workers = ["worker1"]
 	var tier1_eff = MCSEconomy.calc_building_efficiency(tier1_building, colonists)
 
 	# Tier 5 with 1 worker (needs 1) = 100% efficiency
-	var tier5_building = _create_test_building(MCSTypes.BuildingType.GREENHOUSE, 5)
+	var tier5_building = _create_test_building(MCSTypes.BuildingType.AGRIDOME, 5)
 	tier5_building.assigned_workers = ["worker1"]
 	var tier5_eff = MCSEconomy.calc_building_efficiency(tier5_building, colonists)
 
@@ -296,14 +296,14 @@ func _create_test_state() -> Dictionary:
 
 func test_upgrade_deducts_resources():
 	var state = _create_test_state()
-	var building = _create_test_building(MCSTypes.BuildingType.GREENHOUSE, 1)
-	building.id = "greenhouse_1"
+	var building = _create_test_building(MCSTypes.BuildingType.AGRIDOME, 1)
+	building.id = "agridome_1"
 	state.buildings = [building]
 
 	var initial_materials = state.resources.building_materials
 	var initial_parts = state.resources.machine_parts
 
-	var action = MCSReducer.action_upgrade_building("greenhouse_1")
+	var action = MCSReducer.action_upgrade_building("agridome_1")
 	var new_state = MCSReducer.reduce(state, action)
 
 	# Tier 2 costs: 25 materials + 10 parts
@@ -320,11 +320,11 @@ func test_upgrade_fails_without_resources():
 	var state = _create_test_state()
 	state.resources.building_materials = 10  # Not enough for tier 2 (needs 25)
 
-	var building = _create_test_building(MCSTypes.BuildingType.GREENHOUSE, 1)
-	building.id = "greenhouse_1"
+	var building = _create_test_building(MCSTypes.BuildingType.AGRIDOME, 1)
+	building.id = "agridome_1"
 	state.buildings = [building]
 
-	var action = MCSReducer.action_upgrade_building("greenhouse_1")
+	var action = MCSReducer.action_upgrade_building("agridome_1")
 	var new_state = MCSReducer.reduce(state, action)
 
 	# Building should NOT be upgrading
@@ -338,11 +338,11 @@ func test_upgrade_fails_without_resources():
 
 func test_upgrade_starts_correctly():
 	var state = _create_test_state()
-	var building = _create_test_building(MCSTypes.BuildingType.GREENHOUSE, 1)
-	building.id = "greenhouse_1"
+	var building = _create_test_building(MCSTypes.BuildingType.AGRIDOME, 1)
+	building.id = "agridome_1"
 	state.buildings = [building]
 
-	var action = MCSReducer.action_upgrade_building("greenhouse_1")
+	var action = MCSReducer.action_upgrade_building("agridome_1")
 	var new_state = MCSReducer.reduce(state, action)
 
 	var new_building = new_state.buildings[0]
@@ -353,13 +353,13 @@ func test_upgrade_starts_correctly():
 
 func test_upgrade_cannot_exceed_tier_5():
 	var state = _create_test_state()
-	var building = _create_test_building(MCSTypes.BuildingType.GREENHOUSE, 5)  # Already tier 5
-	building.id = "greenhouse_5"
+	var building = _create_test_building(MCSTypes.BuildingType.AGRIDOME, 5)  # Already tier 5
+	building.id = "agridome_5"
 	state.buildings = [building]
 
 	var initial_resources = state.resources.duplicate()
 
-	var action = MCSReducer.action_upgrade_building("greenhouse_5")
+	var action = MCSReducer.action_upgrade_building("agridome_5")
 	var new_state = MCSReducer.reduce(state, action)
 
 	var new_building = new_state.buildings[0]
@@ -369,8 +369,8 @@ func test_upgrade_cannot_exceed_tier_5():
 
 func test_upgrade_progress_uses_tier_duration():
 	var state = _create_test_state()
-	var building = _create_test_building(MCSTypes.BuildingType.GREENHOUSE, 1)
-	building.id = "greenhouse_1"
+	var building = _create_test_building(MCSTypes.BuildingType.AGRIDOME, 1)
+	building.id = "agridome_1"
 	building.upgrading = true
 	building.upgrade_progress = 0.0
 	building.target_tier = 4  # Tier 4 takes 2 years
@@ -387,8 +387,8 @@ func test_upgrade_progress_uses_tier_duration():
 
 func test_upgrade_completes_and_changes_tier():
 	var state = _create_test_state()
-	var building = _create_test_building(MCSTypes.BuildingType.GREENHOUSE, 1)
-	building.id = "greenhouse_1"
+	var building = _create_test_building(MCSTypes.BuildingType.AGRIDOME, 1)
+	building.id = "agridome_1"
 	building.upgrading = true
 	building.upgrade_progress = 0.9  # Almost complete
 	building.target_tier = 2
@@ -408,12 +408,12 @@ func test_upgrade_completes_and_changes_tier():
 # ============================================================================
 
 func test_upgrade_saves_workers_vs_new_building():
-	# 3 new greenhouses: 3 * 2 = 6 workers, produce 1500 food
-	# 1 tier 5 greenhouse: 1 worker, produces 1500 food
+	# 3 new agridomes: 3 * 2 = 6 workers, produce 1500 food
+	# 1 tier 5 agridome: 1 worker, produces 1500 food
 	# Upgrading saves 5 workers!
 
-	var tier5_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.GREENHOUSE, 5)
-	var tier1_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.GREENHOUSE, 1)
+	var tier5_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.AGRIDOME, 5)
+	var tier1_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.AGRIDOME, 1)
 
 	var workers_3_new = 3 * tier1_stats.get("workers", 0)
 	var workers_1_tier5 = tier5_stats.get("workers", 0)
@@ -431,11 +431,11 @@ func test_upgrade_saves_workers_vs_new_building():
 
 func test_upgrade_is_efficient():
 	# UPGRADES ARE THE OPTIMAL STRATEGY!
-	# Upgrading 1 building to tier 5 costs LESS than building 3 new greenhouses
+	# Upgrading 1 building to tier 5 costs LESS than building 3 new agridomes
 	# AND gives more production AND saves workers
 
-	var new_building_cost_materials = 80 * 3  # 80 per greenhouse (from AI)
-	var new_building_cost_parts = 15 * 3      # 15 per greenhouse
+	var new_building_cost_materials = 80 * 3  # 80 per agridome (from AI)
+	var new_building_cost_parts = 15 * 3      # 15 per agridome
 
 	var upgrade_cost_materials = 0
 	var upgrade_cost_parts = 0
@@ -444,8 +444,8 @@ func test_upgrade_is_efficient():
 		upgrade_cost_materials += costs.get("building_materials", 0)
 		upgrade_cost_parts += costs.get("machine_parts", 0)
 
-	# 1 T5 greenhouse = 1500 food/yr with 1 worker
-	# 3 T1 greenhouses = 1500 food/yr with 6 workers
+	# 1 T5 agridome = 1500 food/yr with 1 worker
+	# 3 T1 agridomes = 1500 food/yr with 6 workers
 	# Upgrading is MORE efficient!
 	assert_lt(upgrade_cost_materials, new_building_cost_materials * 1.5,
 		"Upgrading should be cost-competitive with building new")
@@ -495,11 +495,11 @@ func test_late_game_worker_efficiency():
 	# 60 tier 1 factories would need 360 workers (impossible!)
 	# 60 tier 5 factories need only 120 workers
 
-	var tier1_factory_workers = MCSTypes.get_tier_stats(MCSTypes.BuildingType.FACTORY, 1).get("workers", 0)
-	var tier5_factory_workers = MCSTypes.get_tier_stats(MCSTypes.BuildingType.FACTORY, 5).get("workers", 0)
+	var tier1_foundry_workers = MCSTypes.get_tier_stats(MCSTypes.BuildingType.FOUNDRY, 1).get("workers", 0)
+	var tier5_foundry_workers = MCSTypes.get_tier_stats(MCSTypes.BuildingType.FOUNDRY, 5).get("workers", 0)
 
-	var workers_60_tier1 = 60 * tier1_factory_workers
-	var workers_60_tier5 = 60 * tier5_factory_workers
+	var workers_60_tier1 = 60 * tier1_foundry_workers
+	var workers_60_tier5 = 60 * tier5_foundry_workers
 
 	assert_eq(workers_60_tier1, 360, "60 tier 1 factories would need 360 workers")
 	assert_eq(workers_60_tier5, 120, "60 tier 5 factories need only 120 workers")
@@ -522,10 +522,10 @@ func test_building_without_tier_stats_returns_default():
 
 func test_tier_clamped_to_valid_range():
 	# Requesting tier 0 or tier 10 should clamp to 1-5
-	var tier0_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.GREENHOUSE, 0)
-	var tier10_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.GREENHOUSE, 10)
-	var tier1_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.GREENHOUSE, 1)
-	var tier5_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.GREENHOUSE, 5)
+	var tier0_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.AGRIDOME, 0)
+	var tier10_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.AGRIDOME, 10)
+	var tier1_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.AGRIDOME, 1)
+	var tier5_stats = MCSTypes.get_tier_stats(MCSTypes.BuildingType.AGRIDOME, 5)
 
 	# Tier 0 should clamp to tier 1
 	assert_eq(tier0_stats.get("production", {}).get("food", 0),

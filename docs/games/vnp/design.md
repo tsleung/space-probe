@@ -75,6 +75,7 @@ Each counter deals **2x damage**, each disadvantage deals **0.5x damage**.
 
 1. **Energy** (Yellow)
    - Regenerates passively: 60/second for Player/Enemy, 90/second for Nemesis
+   - **Factory Bonus**: +15 energy/second per completed factory (linear scaling)
    - Used for all ship building
    - No upper limit
 
@@ -731,6 +732,7 @@ Factories are the core production facilities that each team can build. They are 
 | **Builder** | Harvester ships (max 2 per team) build factories at strategic points |
 | **Build Time** | 2.0 seconds (fast - limiting factor is resources, not time) |
 | **Production** | Ships spawn from factories based on AI build decisions |
+| **Energy Bonus** | +15 energy/second per completed factory (linear scaling!) |
 | **Health** | Factories are destructible by enemy ships |
 | **Targeting** | Combat ships prioritize enemy factories when no ships in range |
 | **Arc Storm** | Player's Arc Storm fires from ALL completed factories! |

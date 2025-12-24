@@ -4180,6 +4180,272 @@ func _draw_comms_tower(cx: float, cy: float, height: float):
 	if blink:
 		draw_circle(top_pos, 4 * _camera_zoom, Color.RED)
 
+func _draw_stadium(cx: float, cy: float, radius: float, height: float):
+	"""Draw stadium/arena building (isometric)"""
+	var wall_color = Color(0.7, 0.72, 0.75)
+	var field_color = Color(0.35, 0.55, 0.35)  # Green sports field
+	var seat_color = Color(0.5, 0.4, 0.35)
+	var light_color = Color(1.0, 0.95, 0.8, 0.6)
+
+	# Stadium is an elliptical bowl
+	var outer_r = radius
+	var inner_r = radius * 0.6
+	var bowl_h = height
+
+	# Draw seating tiers (bowl shape)
+	for tier_idx in range(4):
+		var t = float(tier_idx) / 4
+		var tier_r = lerp(outer_r, inner_r, t)
+		var tier_z = t * bowl_h
+
+		var tier_points = PackedVector2Array()
+		for i in range(16):
+			var angle = i * TAU / 16.0
+			tier_points.append(_iso_transform(cx + cos(angle) * tier_r, cy + sin(angle) * tier_r, tier_z))
+
+		# Draw tier as polygon
+		if tier_points.size() >= 3:
+			draw_polygon(tier_points, [seat_color.lerp(wall_color, t)])
+
+	# Inner field (at bowl bottom)
+	var field_points = PackedVector2Array()
+	for i in range(16):
+		var angle = i * TAU / 16.0
+		field_points.append(_iso_transform(cx + cos(angle) * inner_r * 0.9, cy + sin(angle) * inner_r * 0.9, bowl_h * 0.1))
+	if field_points.size() >= 3:
+		draw_polygon(field_points, [field_color])
+
+	# Field markings
+	var center = _iso_transform(cx, cy, bowl_h * 0.1)
+	draw_arc(center, inner_r * 0.3 * _camera_zoom, 0, TAU, 16, Color.WHITE, 1.5 * _camera_zoom)
+
+	# Stadium lights on poles
+	for i in range(4):
+		var angle = i * TAU / 4 + 0.4
+		var pole_x = cx + cos(angle) * outer_r * 1.1
+		var pole_y = cy + sin(angle) * outer_r * 1.1
+		var pole_base = _iso_transform(pole_x, pole_y, 0)
+		var pole_top = _iso_transform(pole_x, pole_y, height * 2.5)
+		draw_line(pole_base, pole_top, wall_color, 2 * _camera_zoom)
+
+		# Light cluster
+		draw_circle(pole_top, 6 * _camera_zoom, light_color)
+
+		# Light beams down onto field
+		var beam_end = _iso_transform(cx + cos(angle) * inner_r * 0.5, cy + sin(angle) * inner_r * 0.5, 0)
+		draw_line(pole_top, beam_end, Color(1.0, 0.98, 0.9, 0.15), 8 * _camera_zoom)
+
+func _draw_perspective_stadium(base_pos: Vector2, width: float, height: float, scale: float, depth_ratio: float, tier: int = 1):
+	"""Draw stadium in perspective view"""
+	var wall_color = Color(0.7, 0.72, 0.75)
+	var field_color = Color(0.35, 0.55, 0.35)
+	var seat_color = Color(0.5, 0.4, 0.35)
+
+	# Atmospheric haze
+	var haze = depth_ratio * 0.5
+	wall_color = wall_color.lerp(Color(0.6, 0.55, 0.5), haze)
+	field_color = field_color.lerp(Color(0.5, 0.5, 0.45), haze)
+	seat_color = seat_color.lerp(Color(0.55, 0.52, 0.48), haze)
+
+	var w = width * scale
+	var h = height * scale
+
+	# Elliptical bowl - front rim lower, back rim higher
+	var bowl_front = base_pos + Vector2(0, -h * 0.3)
+	var bowl_back = base_pos + Vector2(0, -h * 0.8)
+
+	# Draw seating area (simplified ellipse)
+	var outer_points = PackedVector2Array()
+	for i in range(17):
+		var angle = i * PI / 16  # Half ellipse (front facing)
+		var rim_y = lerp(bowl_front.y, bowl_back.y, 0.5 + sin(angle) * 0.5)
+		outer_points.append(Vector2(base_pos.x + cos(angle - PI/2) * w, rim_y))
+	if outer_points.size() >= 3:
+		draw_polygon(outer_points, [seat_color])
+
+	# Inner field
+	var field_w = w * 0.5
+	var field_h = h * 0.2
+	var field_center = base_pos + Vector2(0, -h * 0.4)
+	_draw_ellipse(field_center, field_w, field_h, field_color)
+
+	# Stadium lights (4 poles)
+	var light_color = Color(1.0, 0.95, 0.8, 0.7 - haze * 0.3)
+	for i in range(4):
+		var angle = i * PI / 3 - PI / 6
+		var pole_x = base_pos.x + cos(angle) * w * 0.9
+		var pole_base = base_pos + Vector2(cos(angle) * w * 0.9, 0)
+		var pole_top = pole_base + Vector2(0, -h * 2.0)
+		draw_line(pole_base, pole_top, wall_color, 2 * scale)
+		draw_circle(pole_top, 4 * scale, light_color)
+
+		# Light cone
+		var cone = PackedVector2Array([
+			pole_top,
+			field_center + Vector2(-field_w * 0.3, 0),
+			field_center + Vector2(field_w * 0.3, 0)
+		])
+		draw_polygon(cone, [Color(1.0, 0.98, 0.9, 0.05)])
+
+func _draw_procedural_skyscraper(cx: float, cy: float, radius: float, height: float, seed_val: int):
+	"""Draw procedurally generated skyscraper (isometric)"""
+	var rng = RandomNumberGenerator.new()
+	rng.seed = seed_val
+
+	# Generate building parameters from seed
+	var num_sections = 2 + rng.randi_range(0, 3)  # 2-5 sections
+	var base_width = radius * (0.8 + rng.randf() * 0.4)
+	var taper = 0.7 + rng.randf() * 0.3  # How much narrower at top
+
+	# Colors with slight variation
+	var base_color = Color(0.65 + rng.randf() * 0.15, 0.68 + rng.randf() * 0.12, 0.72 + rng.randf() * 0.1)
+	var accent_color = Color(0.4 + rng.randf() * 0.2, 0.6 + rng.randf() * 0.3, 0.8 + rng.randf() * 0.2)
+	var window_color = Color(0.9, 0.95, 1.0, 0.6)
+
+	var current_z = 0.0
+	var current_width = base_width
+
+	for section in range(num_sections):
+		var section_height = height / num_sections * (1.0 + rng.randf() * 0.5)
+		var section_width = current_width * (0.85 + rng.randf() * 0.15)
+
+		# Draw section as hex prism
+		var colors = base_color if section % 2 == 0 else base_color.lightened(0.1)
+		_draw_hex_prism(cx, cy + (section * 2), section_width * 0.7, section_height,
+			colors, colors.darkened(0.2), colors.darkened(0.1))
+
+		# Windows (grid pattern)
+		var window_rows = int(section_height / 8)
+		for row in range(window_rows):
+			var window_z = current_z + row * 8 + 4
+			for win in range(3):
+				var window_angle = win * TAU / 3
+				var win_x = cx + cos(window_angle) * section_width * 0.5
+				var win_y = cy + sin(window_angle) * section_width * 0.5
+				var win_pos = _iso_transform(win_x, win_y, window_z)
+				if rng.randf() > 0.3:  # 70% of windows lit
+					draw_circle(win_pos, 2 * _camera_zoom, window_color)
+
+		current_z += section_height
+		current_width = section_width * taper
+
+	# Spire or antenna at top
+	if rng.randf() > 0.5:
+		var spire_base = _iso_transform(cx, cy, current_z)
+		var spire_top = _iso_transform(cx, cy, current_z + height * 0.2)
+		draw_line(spire_base, spire_top, base_color.darkened(0.2), 2 * _camera_zoom)
+		draw_circle(spire_top, 3 * _camera_zoom, accent_color)
+
+func _draw_perspective_procedural_skyscraper(base_pos: Vector2, top_pos: Vector2, width: float, height: float,
+		scale: float, top_c: Color, left_c: Color, right_c: Color, depth_ratio: float, tier: int, seed_val: int):
+	"""Draw procedurally generated skyscraper in perspective"""
+	var rng = RandomNumberGenerator.new()
+	rng.seed = seed_val
+
+	# Generate parameters
+	var num_sections = 2 + rng.randi_range(0, 3)
+	var taper_style = rng.randi_range(0, 2)  # 0=straight, 1=stepped, 2=curved
+
+	# Atmospheric haze
+	var haze = depth_ratio * 0.5
+	var haze_color = Color(0.6, 0.55, 0.5)
+	top_c = top_c.lerp(haze_color, haze)
+	left_c = left_c.lerp(haze_color, haze)
+	right_c = right_c.lerp(haze_color, haze)
+
+	var w = width * scale
+	var h = height * scale * PERSPECTIVE_HEIGHT_SCALE / PERSPECTIVE_BASE_SCALE
+
+	# Generate glass/opacity variation
+	var glass_alpha = 0.3 + rng.randf() * 0.4  # 0.3-0.7
+	var glass_color = Color(0.5 + rng.randf() * 0.3, 0.7 + rng.randf() * 0.2, 0.9, glass_alpha)
+	glass_color = glass_color.lerp(haze_color, haze * 0.5)
+
+	var current_y = base_pos.y
+	var current_w = w
+
+	for section in range(num_sections):
+		var section_h = h / num_sections * (0.8 + rng.randf() * 0.4)
+		var next_w = current_w * (0.75 + rng.randf() * 0.2)
+
+		# Section base and top
+		var sec_base = Vector2(base_pos.x, current_y)
+		var sec_top = Vector2(base_pos.x, current_y - section_h)
+
+		# Alternate between solid and glass sections
+		var is_glass = rng.randf() > 0.6
+
+		if taper_style == 1 and section > 0:
+			# Stepped: draw setback
+			current_w = next_w
+			sec_base = Vector2(base_pos.x, current_y - 2)
+
+		if is_glass:
+			# Glass section with visible floors
+			var panel_color = glass_color
+			var outline = Color(0.4, 0.5, 0.6, 0.5 - haze * 0.3)
+
+			# Glass panels
+			var glass_points = PackedVector2Array([
+				sec_base + Vector2(-current_w * 0.5, 0),
+				sec_top + Vector2(-next_w * 0.5, 0),
+				sec_top + Vector2(next_w * 0.5, 0),
+				sec_base + Vector2(current_w * 0.5, 0)
+			])
+			draw_polygon(glass_points, [panel_color])
+
+			# Floor lines
+			var floors = int(section_h / 8)
+			for fl in range(floors):
+				var fl_y = sec_base.y - fl * 8
+				var fl_w = lerp(current_w, next_w, float(fl) / floors)
+				draw_line(Vector2(base_pos.x - fl_w * 0.45, fl_y),
+					Vector2(base_pos.x + fl_w * 0.45, fl_y), outline, 1)
+
+			# Outline
+			for i in range(glass_points.size()):
+				draw_line(glass_points[i], glass_points[(i + 1) % glass_points.size()], outline, 1)
+		else:
+			# Solid section
+			var solid_points = PackedVector2Array([
+				sec_base + Vector2(-current_w * 0.5, 0),
+				sec_top + Vector2(-next_w * 0.5, 0),
+				sec_top + Vector2(next_w * 0.5, 0),
+				sec_base + Vector2(current_w * 0.5, 0)
+			])
+			var section_color = left_c if section % 2 == 0 else right_c
+			draw_polygon(solid_points, [section_color])
+
+			# Windows (random pattern)
+			var window_color = Color(1.0, 0.95, 0.8, 0.6 - haze * 0.3)
+			var windows_per_row = int(current_w / 6)
+			var window_rows = int(section_h / 10)
+			for wr in range(window_rows):
+				for wc in range(windows_per_row):
+					if rng.randf() > 0.4:  # 60% windows lit
+						var win_x = base_pos.x - current_w * 0.4 + wc * (current_w * 0.8 / windows_per_row)
+						var win_y = sec_base.y - wr * 10 - 5
+						draw_rect(Rect2(win_x - 1.5, win_y - 2, 3, 4), window_color)
+
+		current_y -= section_h
+		current_w = next_w
+
+	# Crown/top feature
+	var crown_style = rng.randi_range(0, 2)
+	match crown_style:
+		0:  # Spire
+			var spire_h = h * 0.15
+			draw_line(Vector2(base_pos.x, current_y), Vector2(base_pos.x, current_y - spire_h),
+				top_c.darkened(0.2), 3 * scale)
+			draw_circle(Vector2(base_pos.x, current_y - spire_h), 4 * scale, Color(1.0, 0.9, 0.8, 0.7))
+		1:  # Helipad
+			_draw_ellipse(Vector2(base_pos.x, current_y - 2), current_w * 0.4, current_w * 0.2, top_c)
+		2:  # Antenna array
+			for ant in range(3):
+				var ant_x = base_pos.x + (ant - 1) * current_w * 0.25
+				draw_line(Vector2(ant_x, current_y), Vector2(ant_x, current_y - h * 0.08),
+					Color(0.5, 0.52, 0.55), 1.5)
+
 func _draw_force_field():
 	"""Draw colony-wide force field dome (called separately, not per-building)"""
 	if not _force_field_active:

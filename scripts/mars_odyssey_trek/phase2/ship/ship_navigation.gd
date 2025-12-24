@@ -126,17 +126,18 @@ static func get_default_offsets() -> Dictionary:
 		Waypoint.CORRIDOR_HYDRO_CARGO: Vector2(-h * 1.5, v),      # Between Hydroponics & Cargo
 
 		# Exterior waypoints (EVA) - positioned OUTSIDE the hull visual
-		Waypoint.AIRLOCK: Vector2(-280, 170),             # Left edge of cargo bay (below hydro)
+		# Airlock moved further left to not overlap cargo bay
+		Waypoint.AIRLOCK: Vector2(-360, 150),             # Outside hull, left of cargo bay
 
 		# Hull traversal waypoints - crew walks along the hull exterior
-		Waypoint.HULL_TOP: Vector2(-200, -160),          # Top of hull
-		Waypoint.HULL_LEFT: Vector2(-120, -220),         # Left side, toward solar
-		Waypoint.HULL_RIGHT: Vector2(-280, -80),         # Right side, toward engine
+		Waypoint.HULL_TOP: Vector2(-250, -180),          # Top of hull
+		Waypoint.HULL_LEFT: Vector2(-380, -100),         # Left side, toward solar
+		Waypoint.HULL_RIGHT: Vector2(-380, 50),          # Right side, toward engine
 
-		# Exterior work destinations
-		Waypoint.EXTERIOR_ENGINE: Vector2(-320, 50),     # At engine bells
-		Waypoint.EXTERIOR_ANTENNA: Vector2(380, -30),    # At nose antenna
-		Waypoint.EXTERIOR_SOLAR: Vector2(-40, -290),     # At top solar panel
+		# Exterior work destinations - positioned beyond hull traversal points
+		Waypoint.EXTERIOR_ENGINE: Vector2(-420, 100),    # At engine bells (far left, below)
+		Waypoint.EXTERIOR_ANTENNA: Vector2(380, -30),    # At nose antenna (far right)
+		Waypoint.EXTERIOR_SOLAR: Vector2(-320, -200),    # At top solar panel (upper left)
 	}
 
 # ============================================================================

@@ -4,6 +4,7 @@ extends Node
 ## Wires up speed controls and navigation
 
 const Phase2Types = preload("res://scripts/mars_odyssey_trek/phase2/phase2_types.gd")
+const Phase2Reducer = preload("res://scripts/mars_odyssey_trek/phase2/phase2_reducer.gd")
 const TaskManager = preload("res://scripts/mars_odyssey_trek/phase2/tasks/task_manager.gd")
 const TaskPanel = preload("res://scripts/mars_odyssey_trek/phase2/ui/task_panel.gd")
 const ShipNavigation = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_navigation.gd")
@@ -35,6 +36,11 @@ func _ready() -> void:
 	if controller and ship_systems:
 		controller.setup_ship_systems(ship_systems, crisis_controller, effects, ship_view)
 		print("[UI] Ship systems wired to controller")
+
+	# Wire up task manager to controller for crew-aware AI
+	if controller and task_manager:
+		controller.setup_task_manager(task_manager)
+		print("[UI] Task manager wired to controller for crew-aware AI")
 
 	# Connect EVA signals from store to ship_view
 	if store and ship_view:
@@ -186,11 +192,18 @@ func _setup_task_system() -> void:
 	if ship_view:
 		task_manager.setup(ship_view)
 
+	# Connect task_penalty_applied signal to dispatch action to store
+	task_manager.task_penalty_applied.connect(_on_task_penalty_applied)
+
 	# Create task panel UI (positioned at right side of screen)
 	task_panel = TaskPanel.new()
-	task_panel.position = Vector2(get_viewport().size.x - 240, 80)
+	# Position relative to viewport - use a fixed position that works
+	var viewport_size = get_viewport().get_visible_rect().size
+	task_panel.position = Vector2(viewport_size.x - 240, 100)
+	task_panel.z_index = 100  # Above everything
 	add_child(task_panel)
 	task_panel.setup(task_manager)
+	print("[TASK] Task panel created at position: %s (viewport: %s)" % [task_panel.position, viewport_size])
 
 	# Connect store signals for event-based tasks
 	if store:
@@ -206,6 +219,14 @@ func _on_hour_advanced_for_tasks(_day: int, _hour: int) -> void:
 	if task_manager:
 		task_manager.advance_hour()
 
+func _on_task_penalty_applied(penalty: Dictionary) -> void:
+	## Dispatch task penalty to store for state change
+	## This makes failed tasks ACTUALLY affect game state
+	if store:
+		var action = Phase2Reducer.action_apply_task_penalty(penalty)
+		store.dispatch(action)
+		print("[TASK] Penalty dispatched to store: %s" % penalty)
+
 var _pending_solar_flare: bool = false  # Track if solar flare is incoming
 
 func _on_event_resolved_for_solar_flare(_choice_index: int) -> void:
@@ -216,7 +237,7 @@ func _on_event_resolved_for_solar_flare(_choice_index: int) -> void:
 
 func _on_event_triggered_as_task(event: Dictionary) -> void:
 	## Convert certain events into trackable tasks
-	## Automatically creates tasks for relevant event types
+	## Automatically creates tasks for relevant event types AND assigns crew
 
 	var event_type = event.get("type", 0)
 
@@ -226,13 +247,97 @@ func _on_event_triggered_as_task(event: Dictionary) -> void:
 		print("[SOLAR FLARE] Solar flare event detected! Any EVA crew at risk.")
 
 	if not task_manager:
+		print("[TASK] WARNING: task_manager is null!")
 		return
 
 	# Automatically create tasks for certain event types (no requires_task flag needed)
 	var task_config = _get_auto_task_config(event)
 	if not task_config.is_empty():
+		# Assign a crew member to work on this task
+		var crew_role = _get_crew_for_task(task_config)
+		var room_type = _get_room_for_task(task_config)
+
+		# Update position to be at the crew member's destination
+		if ship_view and crew_role:
+			var room_pos = ship_view.get_room_position(room_type)
+			task_config["position"] = room_pos + Vector2(0, -30)  # Above the room
+			task_config["crew"] = [crew_role]
+
+			# Send crew to work location
+			_send_crew_to_work(crew_role, room_type, task_config)
+
 		var task_id = task_manager.create_task(task_config)
-		print("[TASK] Auto-created task for event: %s (ID: %s)" % [event.get("title", "?"), task_id])
+		print("[TASK] Created task: %s (ID: %s) - Assigned: %s at %s" % [
+			task_config.get("name", "?"),
+			task_id,
+			crew_role if crew_role else "none",
+			ShipTypes.RoomType.keys()[room_type] if room_type >= 0 else "unknown"
+		])
+
+const ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
+
+func _get_crew_for_task(task_config: Dictionary) -> String:
+	## Get the best crew member for a task based on type
+	var task_type = task_config.get("type", TaskManager.TaskType.CUSTOM)
+
+	match task_type:
+		TaskManager.TaskType.REPAIR:
+			return "engineer"
+		TaskManager.TaskType.MEDICAL:
+			return "medical"
+		TaskManager.TaskType.EVA:
+			return "engineer"
+		TaskManager.TaskType.RESEARCH:
+			return "scientist"
+		TaskManager.TaskType.CRISIS:
+			return "commander"
+		_:
+			return "engineer"  # Default
+
+func _get_room_for_task(task_config: Dictionary) -> int:
+	## Get the room where task should be performed
+	var task_type = task_config.get("type", TaskManager.TaskType.CUSTOM)
+
+	match task_type:
+		TaskManager.TaskType.REPAIR:
+			return ShipTypes.RoomType.ENGINEERING
+		TaskManager.TaskType.MEDICAL:
+			return ShipTypes.RoomType.MEDICAL
+		TaskManager.TaskType.EVA:
+			return ShipTypes.RoomType.CARGO_BAY
+		TaskManager.TaskType.RESEARCH:
+			return ShipTypes.RoomType.LIFE_SUPPORT
+		TaskManager.TaskType.CRISIS:
+			return ShipTypes.RoomType.BRIDGE
+		TaskManager.TaskType.MAINTENANCE:
+			return ShipTypes.RoomType.ENGINEERING
+		_:
+			return ShipTypes.RoomType.BRIDGE
+
+func _send_crew_to_work(crew_role: String, room_type: int, task_config: Dictionary) -> void:
+	## Send crew member to work location and start task
+	if not ship_view:
+		return
+
+	# Map TaskManager.TaskType to ShipTypes.TaskType for crew
+	var ship_task_type = ShipTypes.TaskType.REPAIR  # Default
+	var task_type = task_config.get("type", TaskManager.TaskType.CUSTOM)
+
+	match task_type:
+		TaskManager.TaskType.REPAIR:
+			ship_task_type = ShipTypes.TaskType.REPAIR
+		TaskManager.TaskType.MEDICAL:
+			ship_task_type = ShipTypes.TaskType.TREAT_PATIENT
+		TaskManager.TaskType.EVA:
+			ship_task_type = ShipTypes.TaskType.EVA_REPAIR
+		TaskManager.TaskType.CRISIS:
+			ship_task_type = ShipTypes.TaskType.REROUTE_POWER
+		_:
+			ship_task_type = ShipTypes.TaskType.REPAIR
+
+	# Send crew to room with callback to start working
+	ship_view.send_crew_to_room_with_task(crew_role, room_type, ship_task_type)
+	print("[TASK] Sent %s to %s to work on %s" % [crew_role, ShipTypes.RoomType.keys()[room_type], task_config.get("name", "task")])
 
 func _get_auto_task_config(event: Dictionary) -> Dictionary:
 	## Automatically generate task config for certain event types
@@ -300,8 +405,78 @@ func _get_auto_task_config(event: Dictionary) -> Dictionary:
 				"penalty": {"type": "health_damage", "amount": 40.0}
 			}
 
+		Phase2Types.EventType.CREW_CONFLICT:
+			return {
+				"name": "Mediate Crew Conflict",
+				"type": TaskManager.TaskType.CUSTOM,
+				"hours": 2,
+				"position": _get_event_task_position(event),
+				"color": Color(0.7, 0.5, 0.8),
+				"penalty": {"type": "morale_damage", "amount": 15.0}
+			}
+
+		Phase2Types.EventType.NAVIGATION_DRIFT:
+			return {
+				"name": "Course Correction",
+				"type": TaskManager.TaskType.MAINTENANCE,
+				"hours": 2,
+				"position": _get_event_task_position(event),
+				"color": Color(0.3, 0.5, 0.8),
+				"penalty": {"type": "resource_drain", "amount": 5.0}
+			}
+
+		Phase2Types.EventType.WATER_RECYCLER_ISSUE:
+			return {
+				"name": "Repair Water Recycler",
+				"type": TaskManager.TaskType.REPAIR,
+				"hours": 3,
+				"position": _get_event_task_position(event),
+				"color": Color(0.3, 0.6, 0.9),
+				"penalty": {"type": "resource_drain", "amount": 10.0}
+			}
+
+		Phase2Types.EventType.OXYGEN_FLUCTUATION:
+			return {
+				"name": "Stabilize O2 Systems",
+				"type": TaskManager.TaskType.REPAIR,
+				"hours": 2,
+				"position": _get_event_task_position(event),
+				"color": Color(0.4, 0.7, 0.9),
+				"penalty": {"type": "health_damage", "amount": 10.0}
+			}
+
+		Phase2Types.EventType.COMMUNICATION_STATIC:
+			return {
+				"name": "Fix Communications",
+				"type": TaskManager.TaskType.REPAIR,
+				"hours": 2,
+				"position": _get_event_task_position(event),
+				"color": Color(0.5, 0.5, 0.6),
+				"penalty": {"type": "morale_damage", "amount": 5.0}
+			}
+
+		Phase2Types.EventType.CARGO_LOOSE:
+			return {
+				"name": "Secure Loose Cargo",
+				"type": TaskManager.TaskType.MAINTENANCE,
+				"hours": 1,
+				"position": _get_event_task_position(event),
+				"color": Color(0.6, 0.5, 0.3),
+				"penalty": {"type": "system_damage", "amount": 10.0}
+			}
+
+		Phase2Types.EventType.SECTION_BLOCKAGE:
+			return {
+				"name": "Clear Blockage",
+				"type": TaskManager.TaskType.MAINTENANCE,
+				"hours": 2,
+				"position": _get_event_task_position(event),
+				"color": Color(0.5, 0.4, 0.3),
+				"penalty": {"type": "efficiency_loss", "amount": 0.2}
+			}
+
 		_:
-			# No automatic task for other event types
+			# No automatic task for other event types (MESSAGE_FROM_EARTH, MORALE_MILESTONE, etc.)
 			return {}
 
 func _get_event_task_position(event: Dictionary) -> Vector2:

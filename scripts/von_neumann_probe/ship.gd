@@ -2447,6 +2447,10 @@ func _fire_pdc_burst(target_pos: Vector2):
 
 
 func _intercept_missile(missile_node):
+	# Skip effects if recovering from alt-tab
+	if vnp_main != null and vnp_main.skip_effects_frames > 0:
+		missile_node.queue_free()
+		return
 	# Create interception explosion - simplified using Line2D ring
 	var intercept_pos = missile_node.global_position
 	var pdc_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.PDC)

@@ -31,7 +31,9 @@ enum ActionType {
 	# Life Support actions
 	SET_HYDROPONICS_POWER,    # Change hydroponics power level
 	DAMAGE_LIFE_SUPPORT,      # Damage a life support system
-	REPAIR_LIFE_SUPPORT       # Repair a life support system
+	REPAIR_LIFE_SUPPORT,      # Repair a life support system
+	# Task System actions
+	APPLY_TASK_PENALTY        # Apply penalty for failed/cancelled task
 }
 
 # ============================================================================
@@ -112,6 +114,12 @@ static func action_repair_life_support(system_name: String, amount: float) -> Di
 	## Repair a life support system
 	return {"type": ActionType.REPAIR_LIFE_SUPPORT, "system_name": system_name, "amount": amount}
 
+# Task System action creators
+static func action_apply_task_penalty(penalty: Dictionary) -> Dictionary:
+	## Apply penalty from failed/cancelled task
+	## penalty: {type, amount, task_name, task_type, target (optional)}
+	return {"type": ActionType.APPLY_TASK_PENALTY, "penalty": penalty}
+
 # ============================================================================
 # MAIN REDUCER
 # ============================================================================
@@ -160,6 +168,9 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_damage_life_support(state, action.system_name, action.amount)
 		ActionType.REPAIR_LIFE_SUPPORT:
 			return _reduce_repair_life_support(state, action.system_name, action.amount)
+		# Task System
+		ActionType.APPLY_TASK_PENALTY:
+			return _reduce_apply_task_penalty(state, action.penalty)
 		_:
 			return state
 
@@ -1328,47 +1339,75 @@ static func _reduce_set_hydroponics_power(state: Dictionary, level: int) -> Dict
 	return new_state
 
 static func _reduce_damage_life_support(state: Dictionary, system_name: String, amount: float) -> Dictionary:
-	## Damage a life support system
+	## Damage a life support system (hydroponics, water_reclaimer, solar_panels, co2_scrubber)
 	var new_state = state.duplicate(true)
 	var life_support = new_state.get("life_support", Phase2Types.create_life_support_state())
 	life_support = life_support.duplicate(true)
 
-	if system_name == "hydroponics":
-		life_support.hydroponics_health = max(0, life_support.hydroponics_health - amount)
-		if life_support.hydroponics_health <= 20:
-			new_state = _add_log_entry(new_state, "WARNING: Hydroponics bay critically damaged!")
-		else:
-			new_state = _add_log_entry(new_state, "Hydroponics bay damaged (%.0f%% health)" % life_support.hydroponics_health)
-	elif system_name == "water_reclaimer":
-		life_support.water_reclaimer_health = max(0, life_support.water_reclaimer_health - amount)
-		if life_support.water_reclaimer_health <= 50:
-			new_state = _add_log_entry(new_state, "WARNING: Water reclaimer efficiency critical!")
-		else:
-			new_state = _add_log_entry(new_state, "Water reclaimer damaged (%.0f%% health)" % life_support.water_reclaimer_health)
+	match system_name:
+		"hydroponics":
+			life_support.hydroponics_health = max(0, life_support.get("hydroponics_health", 100.0) - amount)
+			if life_support.hydroponics_health <= 20:
+				new_state = _add_log_entry(new_state, "WARNING: Hydroponics bay critically damaged!")
+			else:
+				new_state = _add_log_entry(new_state, "Hydroponics bay damaged (%.0f%% health)" % life_support.hydroponics_health)
+		"water_reclaimer":
+			life_support.water_reclaimer_health = max(0, life_support.get("water_reclaimer_health", 100.0) - amount)
+			if life_support.water_reclaimer_health <= 50:
+				new_state = _add_log_entry(new_state, "WARNING: Water reclaimer efficiency critical!")
+			else:
+				new_state = _add_log_entry(new_state, "Water reclaimer damaged (%.0f%% health)" % life_support.water_reclaimer_health)
+		"solar_panels":
+			life_support.solar_panels_health = max(0, life_support.get("solar_panels_health", 100.0) - amount)
+			if life_support.solar_panels_health <= 30:
+				new_state = _add_log_entry(new_state, "CRITICAL: Solar panels severely damaged! Power generation compromised!")
+			else:
+				new_state = _add_log_entry(new_state, "Solar panels damaged (%.0f%% health)" % life_support.solar_panels_health)
+		"co2_scrubber":
+			life_support.co2_scrubber_health = max(0, life_support.get("co2_scrubber_health", 100.0) - amount)
+			if life_support.co2_scrubber_health <= 40:
+				new_state = _add_log_entry(new_state, "WARNING: CO2 scrubber critically damaged! Oxygen regeneration failing!")
+			else:
+				new_state = _add_log_entry(new_state, "CO2 scrubber damaged (%.0f%% health)" % life_support.co2_scrubber_health)
 
 	new_state.life_support = life_support
 	return new_state
 
 static func _reduce_repair_life_support(state: Dictionary, system_name: String, amount: float) -> Dictionary:
-	## Repair a life support system
+	## Repair a life support system (hydroponics, water_reclaimer, solar_panels, co2_scrubber)
 	var new_state = state.duplicate(true)
 	var life_support = new_state.get("life_support", Phase2Types.create_life_support_state())
 	life_support = life_support.duplicate(true)
 
-	if system_name == "hydroponics":
-		var was_critical = life_support.hydroponics_health <= 20
-		life_support.hydroponics_health = min(100, life_support.hydroponics_health + amount)
-		if was_critical and life_support.hydroponics_health > 20:
-			new_state = _add_log_entry(new_state, "Hydroponics bay restored to operational status")
-		else:
-			new_state = _add_log_entry(new_state, "Hydroponics bay repaired (%.0f%% health)" % life_support.hydroponics_health)
-	elif system_name == "water_reclaimer":
-		var was_critical = life_support.water_reclaimer_health <= 50
-		life_support.water_reclaimer_health = min(100, life_support.water_reclaimer_health + amount)
-		if was_critical and life_support.water_reclaimer_health > 50:
-			new_state = _add_log_entry(new_state, "Water reclaimer restored to full efficiency")
-		else:
-			new_state = _add_log_entry(new_state, "Water reclaimer repaired (%.0f%% health)" % life_support.water_reclaimer_health)
+	match system_name:
+		"hydroponics":
+			var was_critical = life_support.get("hydroponics_health", 100.0) <= 20
+			life_support.hydroponics_health = min(100, life_support.get("hydroponics_health", 100.0) + amount)
+			if was_critical and life_support.hydroponics_health > 20:
+				new_state = _add_log_entry(new_state, "Hydroponics bay restored to operational status")
+			else:
+				new_state = _add_log_entry(new_state, "Hydroponics bay repaired (%.0f%% health)" % life_support.hydroponics_health)
+		"water_reclaimer":
+			var was_critical = life_support.get("water_reclaimer_health", 100.0) <= 50
+			life_support.water_reclaimer_health = min(100, life_support.get("water_reclaimer_health", 100.0) + amount)
+			if was_critical and life_support.water_reclaimer_health > 50:
+				new_state = _add_log_entry(new_state, "Water reclaimer restored to full efficiency")
+			else:
+				new_state = _add_log_entry(new_state, "Water reclaimer repaired (%.0f%% health)" % life_support.water_reclaimer_health)
+		"solar_panels":
+			var was_critical = life_support.get("solar_panels_health", 100.0) <= 30
+			life_support.solar_panels_health = min(100, life_support.get("solar_panels_health", 100.0) + amount)
+			if was_critical and life_support.solar_panels_health > 30:
+				new_state = _add_log_entry(new_state, "Solar panels restored! Power generation back to normal!")
+			else:
+				new_state = _add_log_entry(new_state, "Solar panels repaired (%.0f%% health)" % life_support.solar_panels_health)
+		"co2_scrubber":
+			var was_critical = life_support.get("co2_scrubber_health", 100.0) <= 40
+			life_support.co2_scrubber_health = min(100, life_support.get("co2_scrubber_health", 100.0) + amount)
+			if was_critical and life_support.co2_scrubber_health > 40:
+				new_state = _add_log_entry(new_state, "CO2 scrubber restored! Oxygen regeneration back online!")
+			else:
+				new_state = _add_log_entry(new_state, "CO2 scrubber repaired (%.0f%% health)" % life_support.co2_scrubber_health)
 
 	new_state.life_support = life_support
 	return new_state
@@ -1385,3 +1424,188 @@ static func _get_system_name(system_id: int) -> String:
 		5: return "Sensors"
 		6: return "Emergency Power"
 		_: return "Unknown System"
+
+# ============================================================================
+# TASK PENALTY REDUCERS
+# ============================================================================
+
+static func _reduce_apply_task_penalty(state: Dictionary, penalty: Dictionary) -> Dictionary:
+	## Apply a penalty from a failed/cancelled task
+	## penalty: {type, amount, task_name, task_type, target (optional)}
+	var new_state = state.duplicate(true)
+	var penalty_type = penalty.get("type", "none")
+	var amount = penalty.get("amount", 0.0)
+	var target = penalty.get("target", "random")
+	var task_name = penalty.get("task_name", "Unknown task")
+
+	match penalty_type:
+		"system_damage":
+			# Damage a life support system (random or specified)
+			new_state = _apply_system_damage_penalty(new_state, amount, target, task_name)
+
+		"health_damage":
+			# Damage crew health
+			new_state = _apply_health_damage_penalty(new_state, amount, target, task_name)
+
+		"morale_damage":
+			# Reduce crew morale
+			new_state = _apply_morale_damage_penalty(new_state, amount, target, task_name)
+
+		"resource_drain":
+			# Consume resources (power by default, or specified resource)
+			var resource = penalty.get("resource", "power")
+			new_state = _apply_resource_drain_penalty(new_state, resource, amount, task_name)
+
+		"efficiency_loss":
+			# Reduce system efficiency (damage multiple systems slightly)
+			new_state = _apply_efficiency_loss_penalty(new_state, amount, task_name)
+
+		"none":
+			pass  # No penalty
+
+	return new_state
+
+static func _apply_system_damage_penalty(state: Dictionary, amount: float, target: String, task_name: String) -> Dictionary:
+	## Damage a life support system as penalty
+	var new_state = state.duplicate(true)
+	var life_support = new_state.get("life_support", Phase2Types.create_life_support_state())
+	life_support = life_support.duplicate(true)
+
+	# Determine which system to damage
+	var systems = ["hydroponics", "water_reclaimer", "solar_panels", "co2_scrubber"]
+	var target_system = target
+
+	if target == "random" or target not in systems:
+		# Pick a random system
+		var idx = randi() % systems.size()
+		target_system = systems[idx]
+
+	# Apply damage
+	match target_system:
+		"hydroponics":
+			life_support.hydroponics_health = max(0, life_support.get("hydroponics_health", 100.0) - amount)
+		"water_reclaimer":
+			life_support.water_reclaimer_health = max(0, life_support.get("water_reclaimer_health", 100.0) - amount)
+		"solar_panels":
+			life_support.solar_panels_health = max(0, life_support.get("solar_panels_health", 100.0) - amount)
+		"co2_scrubber":
+			life_support.co2_scrubber_health = max(0, life_support.get("co2_scrubber_health", 100.0) - amount)
+
+	new_state.life_support = life_support
+	new_state = _add_log_entry(new_state, "TASK FAILED: %s - %s damaged (%.0f damage)" % [task_name, target_system.capitalize().replace("_", " "), amount])
+	return new_state
+
+static func _apply_health_damage_penalty(state: Dictionary, amount: float, target: String, task_name: String) -> Dictionary:
+	## Damage crew health as penalty
+	var new_state = state.duplicate(true)
+	var crew = new_state.crew.duplicate()
+
+	if crew.is_empty():
+		return new_state
+
+	var affected_names: Array = []
+
+	if target == "all":
+		for i in range(crew.size()):
+			var member = crew[i].duplicate()
+			member.health = max(0, member.health - amount)
+			crew[i] = member
+			affected_names.append(member.name)
+	elif target == "random":
+		var idx = randi() % crew.size()
+		var member = crew[idx].duplicate()
+		member.health = max(0, member.health - amount)
+		crew[idx] = member
+		affected_names.append(member.name)
+	else:
+		# Target by role name
+		var role_map = {
+			"commander": Phase2Types.CrewRole.COMMANDER,
+			"engineer": Phase2Types.CrewRole.ENGINEER,
+			"scientist": Phase2Types.CrewRole.SCIENTIST,
+			"medical": Phase2Types.CrewRole.MEDICAL
+		}
+		var target_role = role_map.get(target.to_lower(), -1)
+		for i in range(crew.size()):
+			if crew[i].role == target_role:
+				var member = crew[i].duplicate()
+				member.health = max(0, member.health - amount)
+				crew[i] = member
+				affected_names.append(member.name)
+				break
+
+	new_state.crew = crew
+	var names_str = ", ".join(affected_names) if affected_names.size() > 0 else "crew"
+	new_state = _add_log_entry(new_state, "TASK FAILED: %s - %s injured (%.0f damage)" % [task_name, names_str, amount])
+	return new_state
+
+static func _apply_morale_damage_penalty(state: Dictionary, amount: float, target: String, task_name: String) -> Dictionary:
+	## Reduce crew morale as penalty
+	var new_state = state.duplicate(true)
+	var crew = new_state.crew.duplicate()
+
+	if crew.is_empty():
+		return new_state
+
+	if target == "all" or target == "random":
+		# Morale loss typically affects everyone
+		for i in range(crew.size()):
+			var member = crew[i].duplicate()
+			member.morale = max(0, member.morale - amount)
+			crew[i] = member
+	else:
+		# Target by role
+		var role_map = {
+			"commander": Phase2Types.CrewRole.COMMANDER,
+			"engineer": Phase2Types.CrewRole.ENGINEER,
+			"scientist": Phase2Types.CrewRole.SCIENTIST,
+			"medical": Phase2Types.CrewRole.MEDICAL
+		}
+		var target_role = role_map.get(target.to_lower(), -1)
+		for i in range(crew.size()):
+			if crew[i].role == target_role:
+				var member = crew[i].duplicate()
+				member.morale = max(0, member.morale - amount)
+				crew[i] = member
+				break
+
+	new_state.crew = crew
+	new_state = _add_log_entry(new_state, "TASK FAILED: %s - Crew morale decreased" % task_name)
+	return new_state
+
+static func _apply_resource_drain_penalty(state: Dictionary, resource: String, amount: float, task_name: String) -> Dictionary:
+	## Drain resources as penalty
+	var new_state = state.duplicate(true)
+
+	if resource == "food" or resource == "water":
+		# Container-based resources
+		new_state = _consume_from_containers(new_state, resource, amount)
+		new_state.resources = Phase2Types.compute_resource_totals(new_state)
+	else:
+		# Direct resources (power, oxygen, fuel)
+		var resources = new_state.resources.duplicate(true)
+		if resources.has(resource):
+			var res = resources[resource].duplicate()
+			res.current = max(0, res.current - amount)
+			resources[resource] = res
+			new_state.resources = resources
+
+	new_state = _add_log_entry(new_state, "TASK FAILED: %s - Lost %.1f %s" % [task_name, amount, resource])
+	return new_state
+
+static func _apply_efficiency_loss_penalty(state: Dictionary, amount: float, task_name: String) -> Dictionary:
+	## Reduce overall system efficiency (slight damage to multiple systems)
+	var new_state = state.duplicate(true)
+	var life_support = new_state.get("life_support", Phase2Types.create_life_support_state())
+	life_support = life_support.duplicate(true)
+
+	# Small damage spread across systems
+	var per_system = amount / 4.0  # Divide among 4 systems
+	life_support.hydroponics_health = max(0, life_support.get("hydroponics_health", 100.0) - per_system)
+	life_support.water_reclaimer_health = max(0, life_support.get("water_reclaimer_health", 100.0) - per_system)
+	life_support.solar_panels_health = max(0, life_support.get("solar_panels_health", 100.0) - per_system)
+	life_support.co2_scrubber_health = max(0, life_support.get("co2_scrubber_health", 100.0) - per_system)
+
+	new_state.life_support = life_support
+	new_state = _add_log_entry(new_state, "TASK FAILED: %s - Ship systems degraded" % task_name)
+	return new_state

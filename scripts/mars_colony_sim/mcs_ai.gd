@@ -388,11 +388,50 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 			"priority": 55
 		})
 
-	# Recreation and social buildings (mid-game comfort)
-	if pop_count > 40 and current_year >= 10:
+	# === LIFESTYLE BUILDINGS - Enable Visual Spectacle ===
+	# These must be built for stadium and skyscraper visuals to appear
+	# Give them HIGH priority for the first one once colony is established
+
+	# RECREATION - VISUAL: Stadium at T3+
+	var has_recreation = false
+	for b in buildings:
+		if b.type == _MCSTypes.BuildingType.RECREATION:
+			has_recreation = true
+			break
+
+	# First RECREATION gets VERY HIGH priority after basic colony is established
+	# Building count > 15 means we have essential infrastructure covered
+	if not has_recreation and building_count >= 15 and current_year >= 8:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.RECREATION,
-			"priority": 50
+			"priority": 93  # VERY HIGH - only housing/power emergencies take precedence
+		})
+	elif pop_count > 40 and current_year >= 10:
+		# Additional RECREATION buildings at lower priority
+		priorities.append({
+			"type": _MCSTypes.BuildingType.RECREATION,
+			"priority": 65
+		})
+
+	# QUARTERS - VISUAL: Procedural skyscrapers at T4+
+	var has_quarters = false
+	for b in buildings:
+		if b.type == _MCSTypes.BuildingType.QUARTERS:
+			has_quarters = true
+			break
+
+	# First QUARTERS gets HIGHEST priority once colony is established
+	# This ensures skyscraper visuals will eventually appear
+	if not has_quarters and building_count >= 15 and current_year >= 10:
+		priorities.append({
+			"type": _MCSTypes.BuildingType.QUARTERS,
+			"priority": 99  # EXTREMELY HIGH - only HABITAT emergency (100) takes precedence
+		})
+	elif pop_count > 60 and current_year >= 12:
+		# Additional QUARTERS at lower priority
+		priorities.append({
+			"type": _MCSTypes.BuildingType.QUARTERS,
+			"priority": 70
 		})
 
 	# Personality adjustments - add variety
@@ -1178,6 +1217,29 @@ static func _calculate_upgrade_roi(building: Dictionary, state: Dictionary) -> f
 		var next_val = next_stats.get(stat_name, 0)
 		if next_val > current_val:
 			value_score += (next_val - current_val) * 3.0
+
+	# MORALE BOOST - Critical for lifestyle buildings (RECREATION, QUARTERS)
+	# Morale affects overall colony happiness and stability
+	var current_morale = current_stats.get("morale_boost", 0)
+	var next_morale = next_stats.get("morale_boost", 0)
+	if next_morale > current_morale:
+		# VERY high weight: morale buildings enable visual spectacle (stadiums, skyscrapers)
+		# Must compete with production buildings that have ROI of 10-20
+		var morale_weight = 25.0  # High value - makes lifestyle upgrades competitive
+		value_score += (next_morale - current_morale) * morale_weight
+
+	# LIFESTYLE BUILDING BONUS - These buildings enable visual progression
+	# Give them significant baseline ROI to ensure they get upgraded
+	var is_lifestyle_building = building_type in [
+		_MCSTypes.BuildingType.RECREATION,
+		_MCSTypes.BuildingType.QUARTERS
+	]
+	if is_lifestyle_building:
+		# Add flat bonus: 200 value to ensure lifestyle upgrades happen
+		value_score += 200.0
+		# T3+ unlocks major visual effects (stadiums, skyscrapers)
+		if tier >= 2:
+			value_score += 150.0  # Extra bonus to reach visual-triggering tiers
 
 	# BONUS: Higher tier upgrades are more impactful (T4, T5 unlocks automation)
 	var tier_bonus = [1.0, 1.0, 1.2, 1.5, 2.0]  # T5 upgrades double value

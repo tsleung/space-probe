@@ -349,6 +349,17 @@ var _skirmishes: Array = []  # Active skirmish zones
 var _attack_waves: Array = []  # Incoming Herald attack waves
 var _herald_ships: Array = []  # Herald ships (red, menacing)
 
+# Map zoom and pan
+var _map_zoom: float = 1.0  # Current zoom level (1.0 = default)
+var _map_zoom_target: float = 1.0  # Target zoom for smooth animation
+var _map_offset: Vector2 = Vector2.ZERO  # Pan offset in screen coordinates
+var _map_offset_target: Vector2 = Vector2.ZERO  # Target offset for smooth animation
+var _zoom_pivot: Vector2 = Vector2.ZERO  # Point to zoom toward (cursor position)
+const ZOOM_MIN: float = 1.0  # Minimum zoom (default view)
+const ZOOM_MAX: float = 4.0  # Maximum zoom
+const ZOOM_SPEED: float = 0.15  # Zoom increment per scroll
+const ZOOM_SMOOTHING: float = 12.0  # Animation smoothness
+
 # Civilian/Narrative systems
 var _civilian_ships: Array = []  # Peaceful traffic
 var _transmissions: Array = []  # Radio comms overlay
@@ -1835,13 +1846,35 @@ func _update_zoom(delta: float) -> void:
 	# Update galaxy Sol pulse
 	_galaxy_sol_pulse += delta
 
+	# Update map zoom/pan smoothly
+	var lerp_factor = 1.0 - exp(-ZOOM_SMOOTHING * delta)
+	_map_zoom = lerpf(_map_zoom, _map_zoom_target, lerp_factor)
+	_map_offset = _map_offset.lerp(_map_offset_target, lerp_factor)
+
+	# Snap to target when close enough
+	if abs(_map_zoom - _map_zoom_target) < 0.001:
+		_map_zoom = _map_zoom_target
+	if _map_offset.distance_to(_map_offset_target) < 0.5:
+		_map_offset = _map_offset_target
+
 # ============================================================================
 # POSITIONING
 # ============================================================================
 
 func _get_zone_pixel_pos(zone_id: int) -> Vector2:
 	var normalized_pos = ZONE_POSITIONS.get(zone_id, Vector2(0.5, 0.5))
-	return normalized_pos * size
+	var world_pos = normalized_pos * size
+	return _apply_map_zoom(world_pos)
+
+func _apply_map_zoom(world_pos: Vector2) -> Vector2:
+	## Transform world position to screen position with zoom applied
+	var center = size * 0.5
+	return (world_pos - center) * _map_zoom + center + _map_offset
+
+func _inverse_map_zoom(screen_pos: Vector2) -> Vector2:
+	## Transform screen position back to world position (for input handling)
+	var center = size * 0.5
+	return (screen_pos - center - _map_offset) / _map_zoom + center
 
 func get_zone_screen_position(zone_id: int) -> Vector2:
 	## Returns the global screen position of a zone (for positioning UI elements near it)
@@ -3219,6 +3252,7 @@ func _gui_input(event: InputEvent) -> void:
 				return
 
 			# Check for roster panel click (select capital ship from menu)
+			# This is the ONLY way to select/deselect ships
 			var roster_index = _get_roster_item_at_position(mouse_pos)
 			if roster_index >= 0:
 				var entity_id = _find_entity_for_roster_item(roster_index)
@@ -3232,19 +3266,20 @@ func _gui_input(event: InputEvent) -> void:
 						_select_entity(entity_id)
 				return
 
-			# ALWAYS check for entity click first (with cycling for stacked ships)
-			# This ensures ships at planets can be selected
-			var clicked_entity = _select_entity_with_cycling(mouse_pos, offset)
-			if clicked_entity != "":
-				_select_entity(clicked_entity)
-				return
-
-			# If in route selection mode, left-click on zone uses default route (stealth coast)
+			# If in route selection mode, left-click ONLY selects destinations (zones)
+			# Entity clicks are ignored to prevent accidentally clicking ships at planets
 			if _route_selection_mode and _selected_entity_id != "":
 				var clicked_zone = _get_zone_at_position(mouse_pos)
 				if clicked_zone >= 0:
 					_select_default_route(_selected_entity_id, clicked_zone)
-					return
+				# Clicks that miss zones do nothing (selection stays active)
+				return
+
+			# When NOT in route selection mode, check for entity click (with cycling)
+			var clicked_entity = _select_entity_with_cycling(mouse_pos, offset)
+			if clicked_entity != "":
+				_select_entity(clicked_entity)
+				return
 
 			# Normal zone click (when not in route selection mode)
 			var clicked_zone = _get_zone_at_position(mouse_pos)
@@ -3262,17 +3297,66 @@ func _gui_input(event: InputEvent) -> void:
 				var clicked_zone = _get_zone_at_position(mouse_pos)
 				if clicked_zone >= 0:
 					_show_route_options(_selected_entity_id, clicked_zone)
-					return
-			# Otherwise, right-click cancels selection
-			_selected_entity_id = ""
-			_route_selection_mode = false
-			_route_options_visible = false
-			queue_redraw()
+				# Right-click does NOT cancel selection - only roster re-click does
+				return
+			# When not in route selection mode, right-click does nothing special
+			# (Could be used for context menus in the future)
+
+		# Mouse wheel zoom
+		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			_handle_zoom_in(event.position)
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			_handle_zoom_out(event.position)
+
+	# Trackpad pinch zoom (magnify gesture)
+	elif event is InputEventMagnifyGesture:
+		var zoom_delta = (event.factor - 1.0) * 0.5
+		if zoom_delta > 0:
+			_handle_zoom_in(event.position, zoom_delta)
+		else:
+			_handle_zoom_out(event.position, -zoom_delta)
+
+func _handle_zoom_in(cursor_pos: Vector2, amount: float = ZOOM_SPEED) -> void:
+	## Zoom in toward cursor position
+	var old_zoom = _map_zoom_target
+	_map_zoom_target = clampf(_map_zoom_target + amount, ZOOM_MIN, ZOOM_MAX)
+
+	if _map_zoom_target > old_zoom:
+		# Calculate offset to keep cursor position stable
+		var center = size * 0.5
+		var cursor_world = _inverse_map_zoom(cursor_pos)
+		var new_cursor_screen = (cursor_world - center) * _map_zoom_target + center + _map_offset_target
+
+		# Adjust offset so cursor stays at same screen position
+		_map_offset_target += cursor_pos - new_cursor_screen
+		queue_redraw()
+
+func _handle_zoom_out(cursor_pos: Vector2, amount: float = ZOOM_SPEED) -> void:
+	## Zoom out - returns to original view when at minimum zoom
+	var old_zoom = _map_zoom_target
+	_map_zoom_target = clampf(_map_zoom_target - amount, ZOOM_MIN, ZOOM_MAX)
+
+	if _map_zoom_target <= ZOOM_MIN:
+		# Reset to original view
+		_map_zoom_target = ZOOM_MIN
+		_map_offset_target = Vector2.ZERO
+	elif _map_zoom_target < old_zoom:
+		# Zoom out from cursor, but also pull toward center
+		var center = size * 0.5
+		var cursor_world = _inverse_map_zoom(cursor_pos)
+		var new_cursor_screen = (cursor_world - center) * _map_zoom_target + center + _map_offset_target
+		_map_offset_target += cursor_pos - new_cursor_screen
+
+		# Also pull offset toward zero as we zoom out
+		var zoom_ratio = (_map_zoom_target - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)
+		_map_offset_target = _map_offset_target * zoom_ratio
+
+	queue_redraw()
 
 func _get_zone_at_position(pos: Vector2) -> int:
 	for zone_id in FCWTypes.ZoneId.values():
 		var zone_pos = _get_zone_pixel_pos(zone_id)
-		var zone_size = ZONE_SIZES.get(zone_id, 20.0) + 10  # Some padding
+		var zone_size = (ZONE_SIZES.get(zone_id, 20.0) + 10) * _map_zoom  # Scale with zoom
 		if pos.distance_to(zone_pos) <= zone_size:
 			return zone_id
 	return -1
@@ -3301,8 +3385,8 @@ func _get_all_entities_at_position(pos: Vector2, offset: Vector2) -> Array:
 		# Get entity screen position
 		var entity_pos = _get_entity_screen_pos(entity, game_time) + offset
 
-		# Check distance
-		if pos.distance_to(entity_pos) <= ENTITY_CLICK_RADIUS:
+		# Check distance (scale with zoom for consistent feel)
+		if pos.distance_to(entity_pos) <= ENTITY_CLICK_RADIUS * _map_zoom:
 			found.append(entity.id)
 
 	return found
@@ -3339,7 +3423,7 @@ func _get_entity_screen_pos(entity: Dictionary, game_time: float) -> Vector2:
 			var entity_index = hash(entity.id) % 8
 			var angle = entity_index * TAU / 8.0
 			var zone_size = ZONE_SIZES.get(zone_id, 20.0)
-			var orbit_radius = zone_size * 0.7  # Stay within zone visual
+			var orbit_radius = zone_size * 0.7 * _map_zoom  # Scale with zoom
 			return zone_pos + Vector2(cos(angle), sin(angle)) * orbit_radius
 
 	# For moving entities, interpolate between zones
@@ -3412,7 +3496,7 @@ func _get_roster_item_at_position(pos: Vector2) -> int:
 			return item.index
 	return -1
 
-## Find entity matching a roster ship (by type and availability)
+## Find entity matching a roster ship (direct lookup - entity_id is stored at init)
 func _find_entity_for_roster_item(roster_index: int) -> String:
 	if roster_index < 0 or roster_index >= _capital_ship_states.size():
 		return ""
@@ -3421,53 +3505,12 @@ func _find_entity_for_roster_item(roster_index: int) -> String:
 	if not roster_ship.alive:
 		return ""
 
-	# If we already have an entity_id cached, use it
-	if roster_ship.get("entity_id", "") != "":
-		var entity = _get_entity_by_id(roster_ship.entity_id)
+	# Direct lookup - entity_id is stored when grid is initialized
+	var entity_id = roster_ship.get("entity_id", "")
+	if entity_id != "":
+		var entity = _get_entity_by_id(entity_id)
 		if not entity.is_empty() and entity.movement_state != FCWTypes.MovementState.DESTROYED:
-			return roster_ship.entity_id
-
-	# Find a warship entity of this type
-	var target_type = roster_ship.type
-	var entities = _state.get("entities", [])
-
-	# Collect all candidate entities matching this ship type
-	var candidates: Array = []
-	for entity in entities:
-		if entity.get("entity_type") != FCWTypes.EntityType.WARSHIP:
-			continue
-		if entity.get("faction") != FCWTypes.Faction.HUMAN:
-			continue
-		if entity.get("ship_type") != target_type:
-			continue
-		if entity.get("movement_state") == FCWTypes.MovementState.DESTROYED:
-			continue
-		candidates.append(entity)
-
-	# If we found any candidates, prefer ones that are orbiting (available)
-	if candidates.size() > 0:
-		# Sort: orbiting entities first, then by ID for consistency
-		candidates.sort_custom(func(a, b):
-			var a_orbiting = a.movement_state == FCWTypes.MovementState.ORBITING
-			var b_orbiting = b.movement_state == FCWTypes.MovementState.ORBITING
-			if a_orbiting != b_orbiting:
-				return a_orbiting  # Orbiting comes first
-			return a.id < b.id
-		)
-
-		# Find one that's not already mapped to another roster item
-		var used_ids: Array = []
-		for i in range(_capital_ship_states.size()):
-			if i != roster_index:
-				var other_id = _capital_ship_states[i].get("entity_id", "")
-				if other_id != "":
-					used_ids.append(other_id)
-
-		for candidate in candidates:
-			if candidate.id not in used_ids:
-				# Cache this mapping
-				_capital_ship_states[roster_index]["entity_id"] = candidate.id
-				return candidate.id
+			return entity_id
 
 	return ""
 
@@ -3867,10 +3910,20 @@ func _draw_route_cost_previews(offset: Vector2) -> void:
 			var pulse = sin(_global_time * 5.0) * 0.3 + 0.7
 			draw_string(font, click_pos, "CLICK", HORIZONTAL_ALIGNMENT_LEFT, 40, 9, Color(0.3, 1.0, 0.8, pulse))
 
+## Get display name for entity - uses roster name if mapped, otherwise entity name
+func _get_entity_display_name(entity: Dictionary) -> String:
+	var entity_id = entity.get("id", "")
+	# Look up in roster mapping
+	for roster_ship in _capital_ship_states:
+		if roster_ship.get("entity_id", "") == entity_id:
+			return roster_ship.get("name", "UNN Fleet")
+	# Fallback to entity's own name or default
+	return entity.get("name", "UNN Fleet")
+
 ## Draw capital ship callout with line and name label
 func _draw_capital_ship_callout(ship_pos: Vector2, entity: Dictionary, ship_size: float, base_color: Color, is_selected: bool) -> void:
 	var font = ThemeDB.fallback_font
-	var ship_name = entity.get("name", "UNN Fleet")
+	var ship_name = _get_entity_display_name(entity)
 	var combat_power = entity.get("combat_power", 0)
 
 	# Determine callout direction based on position on screen to avoid overlaps
@@ -4066,12 +4119,14 @@ func update_state(state: Dictionary, zone_defenses: Dictionary, fleets_in_transi
 
 	# Update fleet tracking for roster display
 	_current_fleet = state.get("fleet", {}).duplicate()
-	if _starting_fleet.is_empty() and not _current_fleet.is_empty():
-		# Initialize starting fleet on first update
+	var entities = state.get("entities", [])
+
+	# Initialize roster if empty and we have entities
+	if _capital_ship_states.is_empty() and not entities.is_empty():
 		_starting_fleet = _current_fleet.duplicate()
 		_init_capital_ship_grid()
-	elif not _current_fleet.is_empty():
-		# Update capital ship states based on losses
+	elif not _capital_ship_states.is_empty():
+		# Update capital ship states based on entity status
 		_update_capital_ship_states()
 
 	# Update herald from entity system
@@ -5025,32 +5080,61 @@ func _draw_traffic_patterns(offset: Vector2) -> void:
 # ============================================================================
 
 func _init_capital_ship_grid() -> void:
-	## Initialize the capital ship grid from starting fleet
+	## Initialize the capital ship grid from actual entities in state
 	_capital_ship_states.clear()
 
-	# Add capital ships (Cruisers, Carriers, Dreadnoughts) to grid
-	# Frigates are too numerous to show individually
-	for ship_type in [FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.DREADNOUGHT]:
-		var count = _starting_fleet.get(ship_type, 0)
-		for i in range(count):
-			_capital_ship_states.append({"type": ship_type, "alive": true})
+	# Collect all capital ship entities (Cruisers, Carriers, Dreadnoughts)
+	# Build roster directly from entities, not fleet counts
+	var capital_ships: Array = []
+	var entities = _state.get("entities", [])
+	for entity in entities:
+		if entity.get("entity_type") != FCWTypes.EntityType.WARSHIP:
+			continue
+		if entity.get("faction") != FCWTypes.Faction.HUMAN:
+			continue
+		var ship_type = entity.get("ship_type", FCWTypes.ShipType.FRIGATE)
+		# Only include capital ships (Cruiser, Carrier, Dreadnought)
+		if ship_type in [FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.DREADNOUGHT]:
+			capital_ships.append(entity)
+
+	# Sort by ship type (Cruiser, Carrier, Dreadnought) then by ID for consistency
+	capital_ships.sort_custom(func(a, b):
+		if a.ship_type != b.ship_type:
+			return a.ship_type < b.ship_type
+		return a.id < b.id
+	)
+
+	# Create roster entries with entity mapping
+	for i in range(capital_ships.size()):
+		var entity = capital_ships[i]
+		var ship_name = _get_capital_ship_name(i, entity.ship_type)
+		var is_alive = entity.get("movement_state") != FCWTypes.MovementState.DESTROYED
+		_capital_ship_states.append({
+			"type": entity.ship_type,
+			"alive": is_alive,
+			"name": ship_name,
+			"entity_id": entity.id  # Direct mapping to entity
+		})
 
 func _update_capital_ship_states() -> void:
-	## Update ship states based on current vs starting counts
-	# Count how many of each type should be alive
-	var alive_counts = {}
-	for ship_type in [FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.DREADNOUGHT]:
-		alive_counts[ship_type] = _current_fleet.get(ship_type, 0)
+	## Update ship states based on entity status
+	var entities = _state.get("entities", [])
 
-	# Mark ships as dead from the end (most recently lost)
-	for i in range(_capital_ship_states.size() - 1, -1, -1):
-		var ship = _capital_ship_states[i]
-		var ship_type = ship.type
-		if alive_counts.get(ship_type, 0) > 0:
-			ship.alive = true
-			alive_counts[ship_type] -= 1
+	# Build entity lookup for quick access
+	var entity_lookup: Dictionary = {}
+	for entity in entities:
+		entity_lookup[entity.id] = entity
+
+	# Update alive status from entity movement state
+	for ship in _capital_ship_states:
+		var entity_id = ship.get("entity_id", "")
+		if entity_id != "" and entity_lookup.has(entity_id):
+			var entity = entity_lookup[entity_id]
+			ship.alive = entity.get("movement_state") != FCWTypes.MovementState.DESTROYED
 		else:
-			ship.alive = false
+			# Entity not found - check if we need to re-init the grid
+			# This handles new game starts
+			pass
 
 func _draw_fleet_roster(rect: Rect2) -> void:
 	## Draw fleet status panel in top-right corner with ship outlines and names
@@ -5111,8 +5195,8 @@ func _draw_fleet_roster(rect: Rect2) -> void:
 				base_color = Color(0.5, 0.5, 0.5)
 				type_prefix = "SHP"
 
-		# Generate consistent name from index
-		var ship_name = _get_capital_ship_name(i, ship.type)
+		# Use stored name from roster state
+		var ship_name = ship.get("name", _get_capital_ship_name(i, ship.type))
 
 		# Get entity location and escort fleet info for alive ships
 		var location_text = ""

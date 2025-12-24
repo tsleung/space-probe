@@ -30,6 +30,12 @@ var crisis_controller: Node = null
 var effects: Node = null
 
 # ============================================================================
+# TASK SYSTEM INTEGRATION
+# ============================================================================
+
+var task_manager: Node = null  # Reference to TaskManager for crew availability checks
+
+# ============================================================================
 # TIMING
 # ============================================================================
 
@@ -85,6 +91,11 @@ func setup_ship_systems(p_ship_systems: Node, p_crisis_controller: Node, p_effec
 		ship_systems.surface_manager.reactor_exploded.connect(_on_reactor_explosion)
 
 	print("[CONTROLLER] Ship systems integration complete")
+
+func setup_task_manager(p_task_manager: Node) -> void:
+	## Wire up TaskManager for crew availability checks in AI decisions
+	task_manager = p_task_manager
+	print("[CONTROLLER] Task manager connected for crew-aware AI")
 
 # ============================================================================
 # PROCESS LOOP
@@ -303,9 +314,9 @@ func _ai_pick_choice(event: Dictionary, options: Array) -> int:
 	return best_choice
 
 func _get_resource_context() -> Dictionary:
-	## Get current resource levels to inform decisions
+	## Get current resource levels AND time context to inform decisions
 	if not store:
-		return {"power_critical": false, "food_critical": false, "water_critical": false, "health_critical": false}
+		return {"power_critical": false, "food_critical": false, "water_critical": false, "health_critical": false, "hours_remaining": 4392, "journey_progress": 0.0, "urgency": 1.0}
 
 	var resources = store.get_resources()
 	var crew = store.get_crew()
@@ -338,6 +349,42 @@ func _get_resource_context() -> Dictionary:
 	var oxygen = resources.get("oxygen", {})
 	var oxygen_current = oxygen.get("current", 100.0) if oxygen is Dictionary else oxygen
 
+	# TIME AWARENESS - key for Phase 2 AI improvements
+	var hours_remaining = store.get_hours_remaining() if store.has_method("get_hours_remaining") else 4392
+	var days_remaining = store.get_days_remaining() if store.has_method("get_days_remaining") else 183
+	var journey_progress = store.get_journey_progress() if store.has_method("get_journey_progress") else 0.0
+
+	# Calculate urgency multiplier based on journey progress
+	# Early journey (< 20%): Conservative play (urgency 0.8)
+	# Mid journey (20-80%): Normal play (urgency 1.0)
+	# Late journey (> 80%): Desperate play (urgency 1.5-2.0)
+	var urgency = 1.0
+	if journey_progress < 0.2:
+		urgency = 0.8  # Early game - play safe
+	elif journey_progress > 0.8:
+		urgency = 1.5 + (journey_progress - 0.8) * 2.5  # Late game - take more risks
+	elif journey_progress > 0.9:
+		urgency = 2.0  # Final stretch - maximum desperation
+
+	# CREW AVAILABILITY - check who's busy with tasks
+	var crew_busy = {}
+	var crew_fatigue = {}
+	var active_task_count = 0
+	if task_manager and task_manager.has_method("get_active_tasks"):
+		active_task_count = task_manager.get_task_count()
+		# Track which crew roles are busy
+		if task_manager.has_method("is_crew_busy"):
+			crew_busy["engineer"] = task_manager.is_crew_busy("engineer")
+			crew_busy["medical"] = task_manager.is_crew_busy("medical")
+			crew_busy["scientist"] = task_manager.is_crew_busy("scientist")
+			crew_busy["commander"] = task_manager.is_crew_busy("commander")
+
+	# Build crew fatigue map from crew array
+	for member in crew:
+		var role_name = _get_role_name(member.get("role", -1))
+		if role_name:
+			crew_fatigue[role_name] = member.get("fatigue", 0)
+
 	return {
 		"power_critical": power_current < power_max * 0.2,
 		"power_low": power_current < power_max * 0.4,
@@ -353,10 +400,33 @@ func _get_resource_context() -> Dictionary:
 		"power_percent": power_current / max(power_max, 1.0),
 		"food_percent": food_current / max(food_max, 1.0),
 		"water_percent": water_current / max(water_max, 1.0),
+		# TIME CONTEXT
+		"hours_remaining": hours_remaining,
+		"days_remaining": days_remaining,
+		"journey_progress": journey_progress,
+		"urgency": urgency,
+		"is_early_game": journey_progress < 0.2,
+		"is_late_game": journey_progress > 0.8,
+		"is_final_stretch": journey_progress > 0.9,
+		# CREW AVAILABILITY
+		"crew_busy": crew_busy,
+		"crew_fatigue": crew_fatigue,
+		"active_task_count": active_task_count,
+		"task_overload": active_task_count >= 3,  # Too many tasks already
 	}
+
+func _get_role_name(role: int) -> String:
+	## Convert role enum to string name
+	match role:
+		0: return "commander"
+		1: return "engineer"
+		2: return "scientist"
+		3: return "medical"
+		_: return ""
 
 func _calculate_option_expected_value(option: Dictionary, event: Dictionary, context: Dictionary) -> float:
 	## Calculate the expected value of an option considering weighted outcomes
+	## NOW WITH TIME AWARENESS - adjusts risk tolerance based on journey progress
 
 	var score = 0.0
 	var outcomes = option.get("outcomes", [])
@@ -371,20 +441,94 @@ func _calculate_option_expected_value(option: Dictionary, event: Dictionary, con
 		# Fallback to simple effect analysis for options without outcomes
 		score = _score_simple_option(option, event, context)
 
+	# =========================================================================
+	# TIME-AWARE RISK ADJUSTMENTS
+	# =========================================================================
+
+	var label = option.get("label", "").to_lower()
+	var risk = option.get("risk", "medium")
+
+	# Early game (< 20% journey): Prefer safe options
+	if context.get("is_early_game", false):
+		if risk == "low":
+			score += 10.0  # Bonus for safe options early
+		elif risk == "high":
+			score -= 15.0  # Penalty for risky options early
+
+	# Late game (> 80% journey): Accept more risks
+	if context.get("is_late_game", false):
+		if risk == "high":
+			score += 20.0  # Desperation bonus for risky options
+		if label.contains("repair") or label.contains("fix"):
+			# Check if there's time for repairs
+			var repair_hours = _estimate_repair_hours(option, event)
+			var hours_remaining = context.get("hours_remaining", 4392)
+			if repair_hours > hours_remaining * 0.3:
+				score -= 40.0  # Too late for long repairs
+				print("[AI TIME] Repair option penalized - %d hours vs %.0f remaining" % [repair_hours, hours_remaining])
+
+	# Final stretch (> 90% journey): Maximum desperation
+	if context.get("is_final_stretch", false):
+		# Any option that keeps us alive is valuable
+		if label.contains("emergency") or label.contains("desperate"):
+			score += 30.0
+		# Penalize slow options heavily
+		if label.contains("wait") or label.contains("delay"):
+			score -= 25.0
+
+	# Apply urgency multiplier to resource-critical decisions
+	var urgency = context.get("urgency", 1.0)
+
+	# =========================================================================
+	# CREW AVAILABILITY ADJUSTMENTS
+	# =========================================================================
+
+	var crew_busy = context.get("crew_busy", {})
+	var crew_fatigue = context.get("crew_fatigue", {})
+
+	# Check if this option requires a specific crew member
+	var requires_crew = option.get("requires_crew", "")
+	if requires_crew != "":
+		# Check if required crew is busy
+		if crew_busy.get(requires_crew, false):
+			score -= 30.0  # Heavy penalty - crew already assigned to task
+			print("[AI CREW] %s is busy, option penalized by 30" % requires_crew)
+
+		# Check if required crew is fatigued
+		var fatigue = crew_fatigue.get(requires_crew, 0)
+		if fatigue > 70:
+			score -= 15.0  # Penalty for using exhausted crew
+			print("[AI CREW] %s is fatigued (%.0f), option penalized by 15" % [requires_crew, fatigue])
+		elif fatigue > 90:
+			score -= 30.0  # Severe penalty for exhausted crew
+			print("[AI CREW] %s is exhausted (%.0f), option penalized by 30" % [requires_crew, fatigue])
+
+	# Penalize options that would create too many active tasks
+	if context.get("task_overload", false):
+		# If we already have 3+ tasks, avoid creating more
+		if label.contains("repair") or label.contains("eva") or label.contains("treat"):
+			score -= 20.0
+			print("[AI CREW] Task overload, task-creating option penalized")
+
+	# =========================================================================
+	# STANDARD OPTION SCORING (with urgency adjustments)
+	# =========================================================================
+
 	# Blue options (specialist required) are usually better
 	if option.get("is_blue_option", false):
 		score += 25.0
-		# But only if we have the required crew and they're healthy
-		var requires_crew = option.get("requires_crew", "")
-		if requires_crew and context.health_critical:
-			score -= 15.0  # Don't push exhausted specialists
+		# But only if we have the required crew and they're healthy AND available
+		if requires_crew:
+			if context.health_critical:
+				score -= 15.0  # Don't push exhausted specialists
+			if crew_busy.get(requires_crew, false):
+				score -= 20.0  # Blue option loses value if crew is busy
 
 	# EVA events - repair is critical but consider risks
 	if event.get("is_eva_event", false):
-		var label = option.get("label", "").to_lower()
 		if label.contains("eva"):
 			# EVA repairs are valuable, especially when power is low (solar panels!)
-			score += 30.0
+			score += 30.0 * urgency  # Scale with urgency
 			if context.power_critical:
 				score += 40.0  # MUST fix solar panels!
 		elif not label.contains("eva"):
@@ -392,11 +536,10 @@ func _calculate_option_expected_value(option: Dictionary, event: Dictionary, con
 			score -= 30.0
 
 	# Repair options are valuable when systems are damaged
-	var label = option.get("label", "").to_lower()
 	if label.contains("repair") or label.contains("fix"):
 		score += 15.0
 		if context.power_critical:
-			score += 30.0  # Repair is critical when power is low
+			score += 30.0 * urgency  # Repair urgency scales with journey progress
 
 	# Shelter/safety options when health is low
 	if label.contains("shelter") or label.contains("hide"):
@@ -405,15 +548,42 @@ func _calculate_option_expected_value(option: Dictionary, event: Dictionary, con
 		elif context.health_low:
 			score += 20.0
 
-	# Conservative options when resources are critically low
+	# Conservative options - good early, bad late
 	if label.contains("conserv") or label.contains("wait"):
-		if context.power_critical or context.food_critical:
+		if context.get("is_early_game", false):
+			score += 15.0  # Good to conserve early
+		elif context.get("is_late_game", false):
+			score -= 20.0  # No time to wait late game
+		elif context.power_critical or context.food_critical:
 			score += 15.0
 
 	# Add tiny random factor for tie-breaking
 	score += randf() * 2.0
 
 	return score
+
+func _estimate_repair_hours(option: Dictionary, event: Dictionary) -> int:
+	## Estimate how long a repair option will take
+	## Used to determine if there's time for repairs late in the journey
+
+	var label = option.get("label", "").to_lower()
+
+	# Extract hours from label if present (e.g., "Repair (4 hours)")
+	var regex = RegEx.new()
+	regex.compile("(\\d+)\\s*(?:hour|hr)")
+	var result = regex.search(label)
+	if result:
+		return int(result.get_string(1))
+
+	# Default estimates based on task type
+	if label.contains("eva"):
+		return 6  # EVA tasks take longer
+	elif label.contains("quick") or label.contains("fast"):
+		return 2
+	elif label.contains("careful") or label.contains("thorough"):
+		return 4
+	else:
+		return 3  # Default repair time
 
 func _score_outcome_effects(effects: Array, context: Dictionary) -> float:
 	## Score the effects of an outcome based on current resource needs

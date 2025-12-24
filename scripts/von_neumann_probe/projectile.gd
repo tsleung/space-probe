@@ -694,6 +694,9 @@ func _explode():
 
 
 func _spawn_explosion_particles(parent, amount, life, vel_min, vel_max, scale_min, scale_max, color_start, color_end):
+	# Skip effects if vnp_main is in skip mode (post alt-tab)
+	if vnp_main != null and vnp_main.skip_effects_frames > 0:
+		return
 	# Rate limit particle effects to prevent performance issues
 	if _active_particle_count >= MAX_ACTIVE_PARTICLES:
 		return  # Skip this effect

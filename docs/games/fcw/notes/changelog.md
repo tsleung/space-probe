@@ -13,6 +13,7 @@ Append-only log of changes to the FCW game.
 - Added: Detection probability zone visualization (concentric rings around Herald)
 - Changed: Ships now orbit within zone visual (0.7x radius instead of outside)
 - Fixed: Speed label width prevents UI layout shift
+- Fixed: Zone signature calculation bug - was accumulating unbounded (showed 7699%), now clamped 0-100%
 - Removed: "Assign" buttons - ships now travel with capital ships instead of teleporting
 - Updated: GUT tests for combat, evacuation, and victory tier systems
 - Updated: balance.json aligned with design doc victory tiers

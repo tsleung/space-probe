@@ -346,7 +346,20 @@ These areas may need revisiting:
 - Fixed count provides predictable expansion pace
 - 3 bodies evenly distributed looks cleaner
 
+### Decision: Factory Energy Bonus
+
+**Choice**: Each completed factory provides +15 energy/second (linear scaling)
+
+**Rationale**:
+- Rewards expansion beyond just Arc Storm coverage and ship spawn points
+- Creates economic snowball - more factories = faster production = more factories
+- Encourages aggressive harvester play to outpace enemy economy
+- Gives meaningful reason to protect factories (not just production locations)
+- Linear scaling (not exponential) keeps it predictable and balanced
+
+**Implementation**: `_on_energy_regen()` in `vnp_main.gd` counts completed factories per team
+
 ---
 
-*Document Version: 1.2*
+*Document Version: 1.3*
 *Last Updated: December 2024*

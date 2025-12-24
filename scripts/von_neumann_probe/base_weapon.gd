@@ -313,6 +313,9 @@ func _create_jagged_line(start: Vector2, end: Vector2, width: float, segments: i
 
 
 func _spawn_arc_impact(pos: Vector2):
+	# Skip effects if recovering from alt-tab
+	if vnp_main != null and vnp_main.skip_effects_frames > 0:
+		return
 	# SPECTACULAR IMPACT - Electric burst with EMP rings and residual static
 
 	# Central flash
@@ -600,6 +603,9 @@ func _spawn_hellstorm_meteor(impact_pos: Vector2, delay: float, damage: float, h
 
 
 func _spawn_hellstorm_impact(pos: Vector2):
+	# Skip effects if recovering from alt-tab
+	if vnp_main != null and vnp_main.skip_effects_frames > 0:
+		return
 	# SPECTACULAR IMPACT - Multi-layer fiery explosion with ground fire
 
 	# Initial blinding flash
@@ -971,6 +977,9 @@ func _create_rift_edge(width: float, height: float, side: int) -> Line2D:
 
 
 func _spawn_void_particles(container: Node2D, height: float, radius: float):
+	# Skip effects if recovering from alt-tab
+	if vnp_main != null and vnp_main.skip_effects_frames > 0:
+		return
 	# DENSE particle field spiraling into the void
 	var particle_count = 30 + charge_count * 10  # Doubled density
 

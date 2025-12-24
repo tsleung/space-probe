@@ -15,6 +15,7 @@ signal task_started(task: Dictionary)
 signal task_progress(task_id: String, progress: float)
 signal task_completed(task_id: String, success: bool)
 signal task_failed(task_id: String, penalty: Dictionary)
+signal task_penalty_applied(penalty: Dictionary)  # New: dispatched to Store for state changes
 
 # ============================================================================
 # TASK TYPES
@@ -251,30 +252,24 @@ func resume_task(task_id: String) -> void:
 
 func _apply_penalty(task: Dictionary) -> void:
 	## Apply the penalty for a failed/cancelled task
-	var penalty = task.penalty
+	## Emits task_penalty_applied signal for Store to dispatch action
+	var penalty = task.penalty.duplicate()
 	var penalty_type = penalty.get("type", "none")
 	var amount = penalty.get("amount", 0.0)
 
-	match penalty_type:
-		"system_damage":
-			# Emitted for store to handle
-			pass
-		"health_damage":
-			# Emitted for store to handle
-			pass
-		"morale_damage":
-			# Emitted for store to handle
-			pass
-		"resource_drain":
-			# Emitted for store to handle
-			pass
-		"efficiency_loss":
-			# Emitted for store to handle
-			pass
-		"none":
-			pass
+	if penalty_type == "none" or amount == 0.0:
+		print("[TASK] No penalty for task '%s'" % task.name)
+		return
 
-	print("[TASK] Penalty applied: %s (%.1f) for task '%s'" % [penalty_type, amount, task.name])
+	# Add task context to penalty for logging
+	penalty["task_name"] = task.name
+	penalty["task_type"] = task.type
+
+	# Emit signal for Store to handle - this is the key change!
+	# Store will dispatch APPLY_TASK_PENALTY action to reducer
+	task_penalty_applied.emit(penalty)
+
+	print("[TASK] Penalty emitted: %s (%.1f) for task '%s'" % [penalty_type, amount, task.name])
 
 # ============================================================================
 # QUERIES
