@@ -6,22 +6,46 @@
     "fuel_per_gas_zone": 150
   },
 
+  "ships": {
+    "carrier_evacuation_multiplier": 8.0,
+    "carrier_defense_bonus": 0.5,
+    "evacuation_base_rate": 100000,
+    "combat_variance_min": 0.8,
+    "combat_variance_max": 1.2
+  },
+
   "herald": {
     "initial_strength": 50,
-    "strength_growth_per_turn": 5,
+    "max_strength": 2500,
+    "strength_growth_per_turn": 100,
+    "peace_period_turns": 3,
     "attack_damage_multiplier": 1.5,
     "expansion_rate": 1,
-    "target_priority": ["frontier", "mining", "colony", "research", "military", "home"]
+    "target_priority": ["weakest_adjacent", "highest_population", "closest"]
   },
 
   "combat": {
     "defender_bonus": 1.3,
     "zone_fortification_bonus": 0.1,
     "fleet_cohesion_bonus": 0.05,
-    "retreat_threshold": 0.3
+    "retreat_threshold": 0.3,
+    "loss_ratio_on_hold_min": 0.3,
+    "loss_ratio_on_hold_max": 0.5
+  },
+
+  "detection": {
+    "observation_radius_au": 5.0,
+    "burn_detection_radius_au": 10.0,
+    "idle_detection_rate": 0.001,
+    "low_detection_rate": 0.01,
+    "medium_detection_rate": 0.05,
+    "high_detection_rate": 0.10,
+    "burn_detection_rate": 0.50,
+    "signature_decay_per_week": 0.4
   },
 
   "evacuation": {
+    "souls_per_transport": 500000,
     "transport_capacity": 100000,
     "evacuation_time_turns": 2,
     "panic_morale_loss": 10,
@@ -38,26 +62,25 @@
   },
 
   "victory_tiers": {
+    "legendary": {
+      "min_evacuated": 80000000,
+      "description": "They will remember what we did here"
+    },
+    "heroic": {
+      "min_evacuated": 40000000,
+      "description": "Enough to rebuild"
+    },
     "pyrrhic": {
-      "min_evacuated": 100000,
-      "earth_survives": false,
-      "description": "Humanity survives, but barely. Earth is lost."
+      "min_evacuated": 15000000,
+      "description": "A remnant survives"
     },
-    "bronze": {
-      "min_evacuated": 1000000,
-      "earth_survives": false,
-      "description": "Millions escaped. Earth fell, but hope lives on."
+    "tragic": {
+      "min_evacuated": 5000000,
+      "description": "Scattered survivors"
     },
-    "silver": {
-      "min_evacuated": 10000000,
-      "earth_survives": true,
-      "description": "Earth defended. The Heralds are pushed back."
-    },
-    "gold": {
-      "min_evacuated": 100000000,
-      "earth_survives": true,
-      "herald_destroyed": true,
-      "description": "Total victory. The Herald threat is ended."
+    "annihilation": {
+      "min_evacuated": 0,
+      "description": "Humanity's light flickers"
     }
   },
 
@@ -66,5 +89,14 @@
     "military_zone_bonus_slots": 1,
     "rush_cost_multiplier": 2.0,
     "repair_cost_per_turn": 0.1
+  },
+
+  "travel_times": {
+    "earth_mars": 2,
+    "mars_jupiter": 3,
+    "mars_saturn": 3,
+    "mars_asteroid": 3,
+    "outer_kuiper": 2,
+    "max_transit": 7
   }
 }

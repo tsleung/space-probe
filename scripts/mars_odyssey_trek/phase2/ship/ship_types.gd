@@ -14,6 +14,7 @@ enum RoomType {
 	MEDICAL,
 	QUARTERS,
 	CARGO_BAY,
+	HYDROPONICS,  # Potato farm / food production
 	CORRIDOR
 }
 
@@ -109,6 +110,7 @@ static func get_room_name(room_type: RoomType) -> String:
 		RoomType.MEDICAL: return "Medical Bay"
 		RoomType.QUARTERS: return "Crew Quarters"
 		RoomType.CARGO_BAY: return "Cargo Bay"
+		RoomType.HYDROPONICS: return "Hydroponics"
 		RoomType.CORRIDOR: return "Corridor"
 		_: return "Unknown"
 
@@ -120,6 +122,7 @@ static func get_room_color(room_type: RoomType) -> Color:
 		RoomType.MEDICAL: return Color(0.5, 0.5, 0.5)       # White-ish
 		RoomType.QUARTERS: return Color(0.4, 0.35, 0.45)    # Purple-ish
 		RoomType.CARGO_BAY: return Color(0.4, 0.4, 0.35)    # Tan
+		RoomType.HYDROPONICS: return Color(0.35, 0.5, 0.3)  # Green-ish (plants!)
 		RoomType.CORRIDOR: return Color(0.25, 0.25, 0.3)    # Dark gray
 		_: return Color(0.3, 0.3, 0.3)
 

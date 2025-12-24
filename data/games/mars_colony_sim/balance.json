@@ -65,6 +65,31 @@
     "housing_required": true
   },
 
+  "transport": {
+    "_comment": "Sustainable transport progression - non-chemical propulsion",
+    "starport_base_immigration": 3,
+    "skyhook_immigration_bonus": 0.25,
+    "skyhook_trade_efficiency": 1.30,
+    "orbital_immigration_multiplier": 1.5,
+    "elevator_immigration_capacity": 80,
+    "mass_driver_export_credits_per_unit": 2.0,
+    "skyhook_fuel_reduction": 0.60,
+    "transport_prerequisites": {
+      "_comment": "Building type -> required building type before construction",
+      "MASS_DRIVER": "STARPORT",
+      "SKYHOOK": "MASS_DRIVER",
+      "ORBITAL": "SKYHOOK",
+      "SPACE_ELEVATOR": ["SKYHOOK", "ORBITAL"]
+    },
+    "transport_unlock_years": {
+      "STARPORT": 3,
+      "MASS_DRIVER": 10,
+      "SKYHOOK": 20,
+      "ORBITAL": 25,
+      "SPACE_ELEVATOR": 40
+    }
+  },
+
   "buildings": {
     "degradation_min_per_year": 1.5,
     "degradation_max_per_year": 4.0,

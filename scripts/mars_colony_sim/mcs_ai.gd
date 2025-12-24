@@ -153,6 +153,14 @@ static func _score_choice(choice: Dictionary, state: Dictionary, personality: Pe
 # BUILDING DECISIONS
 # ============================================================================
 
+## Get the maximum tier of a specific building type in the colony
+static func _get_max_building_tier(buildings: Array, building_type: int) -> int:
+	var max_tier = 0
+	for b in buildings:
+		if b.get("type", -1) == building_type and b.get("is_operational", false):
+			max_tier = maxi(max_tier, b.get("tier", 1))
+	return max_tier
+
 ## Decide what building to construct (if any)
 ## Returns building type or -1 for none
 static func choose_building(state: Dictionary, personality: Personality, random_value: float) -> int:
@@ -168,6 +176,11 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 	# YEAR 1 SPECIAL: Only build a habitat! Survival basics only.
 	if current_year == 1 and building_count == 0:
 		return _MCSTypes.BuildingType.HABITAT
+
+	# === RESOURCE TREND ANALYSIS ===
+	# Analyze production vs consumption to detect deficits
+	var resource_trends = analyze_resource_trends(state)
+	var deficit_boosts = calc_deficit_priority_boosts(resource_trends, current_year)
 
 	# Calculate current capacities
 	var housing_balance = _MCSEconomy.calc_housing_balance(buildings, colonists)
@@ -279,16 +292,57 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 				"priority": 82  # High priority - unlocks massive material production
 			})
 
-	# ORBITAL (Space Station) - mass immigration (late game)
+	# === TRANSPORT PROGRESSION (sustainable non-chemical transport) ===
+	# Order: STARPORT (Year 3) -> MASS_DRIVER (Year 10) -> SKYHOOK (Year 20) -> ORBITAL (Year 25) -> SPACE_ELEVATOR (Year 40)
+
+	# MASS_DRIVER - electromagnetic cargo launch (requires Starport for coordination)
+	var has_mass_driver = false
+	for b in buildings:
+		if b.type == _MCSTypes.BuildingType.MASS_DRIVER:
+			has_mass_driver = true
+			break
+	if not has_mass_driver and has_starport and current_year >= 10:
+		# Check if we have T3 fabrication (required for precision components)
+		var fab_tier = _get_max_building_tier(buildings, _MCSTypes.BuildingType.FABRICATOR)
+		var precision_tier = _get_max_building_tier(buildings, _MCSTypes.BuildingType.PRECISION)
+		if fab_tier >= 2 or precision_tier >= 3:
+			priorities.append({
+				"type": _MCSTypes.BuildingType.MASS_DRIVER,
+				"priority": 80  # High - enables efficient cargo launches
+			})
+
+	# SKYHOOK - rotating momentum-exchange tether (requires Mass Driver for launch coordination)
+	# Physics: Catches hypersonic payloads from mass driver, reduces fuel needs 60%+
+	var has_skyhook = false
+	for b in buildings:
+		if b.type == _MCSTypes.BuildingType.SKYHOOK:
+			has_skyhook = true
+			break
+	if not has_skyhook and has_mass_driver and current_year >= 20:
+		# Check if we have Research T3 (advanced materials science for tethers)
+		var research_tier = _get_max_building_tier(buildings, _MCSTypes.BuildingType.RESEARCH)
+		if research_tier >= 3:
+			priorities.append({
+				"type": _MCSTypes.BuildingType.SKYHOOK,
+				"priority": 78  # High - enables efficient passenger/cargo transfers
+			})
+
+	# ORBITAL (Space Station) - mass immigration (requires Skyhook for efficient access)
 	var has_orbital = false
 	for b in buildings:
 		if b.type == _MCSTypes.BuildingType.ORBITAL:
 			has_orbital = true
 			break
-	if not has_orbital and current_year >= 25 and pop_count >= 50 and has_starport:
+	if not has_orbital and has_skyhook and current_year >= 25 and pop_count >= 80:
 		priorities.append({
 			"type": _MCSTypes.BuildingType.ORBITAL,
-			"priority": 78
+			"priority": 76
+		})
+	# Fallback: Build orbital without skyhook if very late game and desperate for immigration
+	elif not has_orbital and has_starport and current_year >= 35 and pop_count >= 100:
+		priorities.append({
+			"type": _MCSTypes.BuildingType.ORBITAL,
+			"priority": 70
 		})
 
 	# Medical facilities - HIGH priority for birth capacity!
@@ -382,6 +436,13 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 				"priority": 45 + random_value * 20
 			})
 
+	# === APPLY DEFICIT PRIORITY BOOSTS ===
+	# Buildings that address resource deficits get priority boost
+	for i in range(priorities.size()):
+		var building_type = priorities[i].type
+		if deficit_boosts.has(building_type):
+			priorities[i].priority += deficit_boosts[building_type]
+
 	# Sort by priority
 	priorities.sort_custom(func(a, b): return a.priority > b.priority)
 
@@ -456,6 +517,8 @@ static func _get_building_cost(building_type: int) -> Dictionary:
 			return {"building_materials": 600, "machine_parts": 150}
 		_MCSTypes.BuildingType.CATCHER:
 			return {"building_materials": 800, "machine_parts": 200}
+		_MCSTypes.BuildingType.SKYHOOK:
+			return {"building_materials": 600, "machine_parts": 180}
 		# === MEGASTRUCTURES ===
 		_MCSTypes.BuildingType.MASS_DRIVER:
 			return {"building_materials": 500, "machine_parts": 200}
@@ -465,6 +528,227 @@ static func _get_building_cost(building_type: int) -> Dictionary:
 			return {"building_materials": 800, "machine_parts": 350}
 		_:
 			return {"building_materials": 80, "machine_parts": 18}
+
+# ============================================================================
+# RESOURCE TREND ANALYSIS
+# ============================================================================
+# Analyzes production vs consumption to detect deficits and urgency
+
+## Calculate resource trends: production, consumption, net flow, urgency
+## Returns: {resource_name: {production, consumption, net, current, years_until_depleted, urgency}}
+static func analyze_resource_trends(state: Dictionary, balance: Dictionary = {}) -> Dictionary:
+	var buildings = state.get("buildings", [])
+	var colonists = state.get("colonists", [])
+	var resources = state.get("resources", {})
+
+	# Get yearly rates
+	var production = _MCSEconomy.calc_yearly_production(buildings, colonists, resources)
+	var consumption = _MCSEconomy.calc_yearly_consumption(colonists, buildings, balance)
+
+	var trends: Dictionary = {}
+
+	# Core resources to track
+	var tracked_resources = ["food", "water", "oxygen", "building_materials", "machine_parts", "fuel", "medicine"]
+
+	for resource_name in tracked_resources:
+		var prod = production.get(resource_name, 0.0)
+		var cons = consumption.get(resource_name, 0.0)
+		var net = prod - cons
+		var current = resources.get(resource_name, 0.0)
+
+		# Calculate years until depleted (if in deficit)
+		var years_until_depleted = INF
+		if net < 0 and current > 0:
+			years_until_depleted = current / absf(net)
+		elif net < 0 and current <= 0:
+			years_until_depleted = 0  # Already depleted!
+
+		# Calculate urgency level (0 = none, 1 = low, 2 = moderate, 3 = high, 4 = critical)
+		var urgency = _calculate_resource_urgency(current, net, years_until_depleted)
+
+		trends[resource_name] = {
+			"production": prod,
+			"consumption": cons,
+			"net": net,
+			"current": current,
+			"years_until_depleted": years_until_depleted,
+			"urgency": urgency
+		}
+
+	return trends
+
+## Calculate urgency level for a resource
+## Returns: 0 (none), 1 (low), 2 (moderate), 3 (high), 4 (critical)
+static func _calculate_resource_urgency(current: float, net: float, years_until_depleted: float) -> int:
+	# Surplus - no urgency
+	if net >= 0:
+		# But check if current stock is dangerously low despite positive production
+		if current < 100:
+			return 1  # Low - rebuilding reserves
+		return 0  # None - healthy
+
+	# In deficit - calculate urgency based on time to depletion
+	if years_until_depleted <= 1:
+		return 4  # CRITICAL - will run out this year!
+	elif years_until_depleted <= 2:
+		return 3  # HIGH - serious problem
+	elif years_until_depleted <= 5:
+		return 2  # MODERATE - needs attention
+	elif years_until_depleted <= 10:
+		return 1  # LOW - should plan ahead
+	else:
+		return 0  # None - distant problem
+
+## Get building types that produce a specific resource
+static func _get_producers_for_resource(resource_name: String) -> Array:
+	match resource_name:
+		"food":
+			return [
+				_MCSTypes.BuildingType.AGRIDOME,
+				_MCSTypes.BuildingType.HYDROPONICS,
+				_MCSTypes.BuildingType.PROTEIN_VATS
+			]
+		"water":
+			return [
+				_MCSTypes.BuildingType.EXTRACTOR,
+				_MCSTypes.BuildingType.ICE_MINER
+			]
+		"oxygen":
+			return [
+				_MCSTypes.BuildingType.EXTRACTOR,
+				_MCSTypes.BuildingType.ATMO_PROCESSOR
+			]
+		"building_materials":
+			return [
+				_MCSTypes.BuildingType.FABRICATOR,
+				_MCSTypes.BuildingType.FOUNDRY,
+				_MCSTypes.BuildingType.CATCHER
+			]
+		"machine_parts":
+			return [
+				_MCSTypes.BuildingType.FABRICATOR,
+				_MCSTypes.BuildingType.PRECISION,
+				_MCSTypes.BuildingType.CATCHER
+			]
+		"fuel":
+			return [
+				_MCSTypes.BuildingType.EXTRACTOR,
+				_MCSTypes.BuildingType.ATMO_PROCESSOR
+			]
+		"medicine":
+			return [
+				_MCSTypes.BuildingType.MEDICAL
+			]
+		_:
+			return []
+
+## Calculate priority boost for addressing resource deficits
+## Returns: Dictionary mapping building_type -> priority_boost
+static func calc_deficit_priority_boosts(trends: Dictionary, current_year: int) -> Dictionary:
+	var boosts: Dictionary = {}
+
+	for resource_name in trends:
+		var trend = trends[resource_name]
+		var urgency = trend.urgency
+
+		if urgency == 0:
+			continue
+
+		# Calculate boost based on urgency (higher urgency = higher priority boost)
+		var base_boost = urgency * 15  # 15, 30, 45, 60 for urgency 1-4
+
+		# Extra boost if we're actually depleted
+		if trend.current <= 0:
+			base_boost += 20
+
+		# Get buildings that produce this resource
+		var producers = _get_producers_for_resource(resource_name)
+		for building_type in producers:
+			var existing_boost = boosts.get(building_type, 0)
+			boosts[building_type] = maxi(existing_boost, base_boost)
+
+	return boosts
+
+# ============================================================================
+# DYNAMIC OPERATING LEVELS
+# ============================================================================
+# Adjusts building operating levels to balance power budget
+
+## Calculate optimal operating levels for all buildings given power constraints
+## Returns: Array of {building_id, operating_level} adjustments
+static func calc_operating_level_adjustments(state: Dictionary) -> Array:
+	var buildings = state.get("buildings", [])
+	var colonists = state.get("colonists", [])
+	var adjustments: Array = []
+
+	# First, calculate power balance at full operation
+	var power = _MCSEconomy.calc_power_balance(buildings, colonists)
+	var power_deficit = power.consumption - power.generation
+
+	# If we have surplus power, ensure all buildings are at 100%
+	if power_deficit <= 0:
+		for building in buildings:
+			if building.get("operating_level", 1.0) < 1.0:
+				adjustments.append({
+					"building_id": building.get("id", ""),
+					"operating_level": 1.0
+				})
+		return adjustments
+
+	# We have a power deficit - need to reduce some buildings
+	# Sort buildings by priority (optional first, then standard, etc.)
+	var reducible_buildings: Array = []
+	for building in buildings:
+		if not building.get("is_operational", false):
+			continue
+		var btype = building.get("type", 0)
+		var priority = _MCSTypes.get_building_priority(btype)
+		var min_level = _MCSTypes.get_min_operating_level(priority)
+
+		# Only consider buildings that can be reduced
+		if min_level < 1.0:
+			var tier_stats = _MCSTypes.get_tier_stats(btype, building.get("tier", 1))
+			var building_def = _MCSTypes.get_building_definition(btype)
+			var power_use = tier_stats.get("power", building_def.get("power_consumption", 0.0))
+
+			reducible_buildings.append({
+				"building": building,
+				"priority": priority,
+				"min_level": min_level,
+				"power_use": power_use
+			})
+
+	# Sort by priority (highest enum value = lowest priority = reduce first)
+	reducible_buildings.sort_custom(func(a, b):
+		return a.priority > b.priority)
+
+	# Reduce buildings starting from lowest priority until power balanced
+	var remaining_deficit = power_deficit
+	for rb in reducible_buildings:
+		if remaining_deficit <= 0:
+			break
+
+		var building = rb.building
+		var min_level = rb.min_level
+		var power_use = rb.power_use
+		var current_level = building.get("operating_level", 1.0)
+
+		# Calculate how much power we can save by reducing this building
+		var max_reduction = (current_level - min_level) * power_use
+		var needed_reduction = minf(max_reduction, remaining_deficit)
+		var new_level = current_level - (needed_reduction / power_use) if power_use > 0 else min_level
+
+		# Clamp to minimum level
+		new_level = maxf(new_level, min_level)
+
+		if new_level < current_level:
+			adjustments.append({
+				"building_id": building.get("id", ""),
+				"operating_level": new_level
+			})
+			remaining_deficit -= (current_level - new_level) * power_use
+
+	return adjustments
 
 # ============================================================================
 # FULL TURN AI
@@ -828,6 +1112,10 @@ static func _calculate_upgrade_roi(building: Dictionary, state: Dictionary) -> f
 	var current_stats = _MCSTypes.get_tier_stats(building_type, tier)
 	var next_stats = _MCSTypes.get_tier_stats(building_type, target_tier)
 
+	# === DEFICIT-AWARE UPGRADE SCORING ===
+	# Analyze resource trends to boost upgrades that address deficits
+	var resource_trends = analyze_resource_trends(state)
+
 	var value_score = 0.0
 
 	# Production increase value - HIGH WEIGHTS (upgrades boost existing production!)
@@ -838,14 +1126,21 @@ static func _calculate_upgrade_roi(building: Dictionary, state: Dictionary) -> f
 		var next_val = next_prod[resource_name]
 		var increase = next_val - current_val
 
-		# Weight production by resource importance - ALL BOOSTED
+		# Base weights by resource importance
+		var base_weight = 2.0
 		match resource_name:
-			"food": value_score += increase * 3.0       # Was 1.0
-			"water": value_score += increase * 3.5      # Was 1.2
-			"oxygen": value_score += increase * 3.0     # Was 1.0
-			"machine_parts": value_score += increase * 5.0   # Was 2.0 - critical!
-			"building_materials": value_score += increase * 4.0  # Was 1.5
-			_: value_score += increase * 2.0            # Was 0.5
+			"food": base_weight = 3.0
+			"water": base_weight = 3.5
+			"oxygen": base_weight = 3.0
+			"machine_parts": base_weight = 5.0
+			"building_materials": base_weight = 4.0
+
+		# DEFICIT BOOST: If resource is in deficit, multiply weight by urgency
+		var urgency = resource_trends.get(resource_name, {}).get("urgency", 0)
+		if urgency > 0:
+			base_weight *= (1.0 + urgency * 0.5)  # +50% per urgency level
+
+		value_score += increase * base_weight
 
 	# Power generation increase - MUCH MORE VALUABLE
 	var current_power = current_stats.get("power_gen", 0)

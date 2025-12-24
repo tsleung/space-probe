@@ -129,16 +129,9 @@ func _choose_ship_type(team: int, energy: int, state: Dictionary) -> int:
 	var harvester_mass = harvester_stats.get("mass_cost", 0)
 	var can_afford_harvester = energy >= harvester_energy and mass >= harvester_mass
 
-	if can_afford_harvester:
-		# Always ensure at least 2 harvesters for expansion
-		if harvester_count < 2:
-			return VnpTypes.ShipType.HARVESTER
-
-		# Build more harvesters if there are unclaimed points and we don't have enough
-		# Want at least 1 harvester per 2 unclaimed points (up to a max of 5 harvesters)
-		var desired_harvesters = mini(2 + ceili(unclaimed_points / 2.0), 5)
-		if harvester_count < desired_harvesters and unclaimed_points > 0:
-			return VnpTypes.ShipType.HARVESTER
+	# Build up to 2 harvesters if there are expansion opportunities
+	if can_afford_harvester and unclaimed_points > 0 and harvester_count < 2:
+		return VnpTypes.ShipType.HARVESTER
 
 	# === COMPOSITION-BASED BUILDING ===
 	# Build whatever ship type is furthest below target composition
@@ -207,17 +200,38 @@ func _get_fleet_composition(team: int, state: Dictionary) -> Dictionary:
 
 
 func _count_unclaimed_strategic_points(team: int, state: Dictionary) -> int:
-	"""Count strategic points that are unclaimed (no factory built)"""
+	"""Count strategic points that need harvester attention:
+	- Unclaimed points (owner == null)
+	- Our team's points without nearby factories"""
 	var count = 0
 	if not state.has("strategic_points"):
 		return 0
 
+	# Get COMPLETE factory positions for our team (ignore ones being built)
+	var our_factory_positions = []
+	if state.has("factories"):
+		for factory_id in state.factories:
+			var factory = state.factories[factory_id]
+			if factory.get("team", -1) == team and factory.get("complete", false):
+				our_factory_positions.append(factory["position"])
+
 	for point_id in state.strategic_points:
 		var point = state.strategic_points[point_id]
 		var owner = point.get("owner", null)
-		# Count points that are unclaimed OR owned by enemies (potential targets)
+		var point_pos = point["position"]
+
 		if owner == null:
+			# Unclaimed - needs harvester
 			count += 1
+		elif owner == team:
+			# Our point - check if it has a factory
+			var has_factory = false
+			for fac_pos in our_factory_positions:
+				if point_pos.distance_to(fac_pos) < 150:
+					has_factory = true
+					break
+			if not has_factory:
+				count += 1
 	return count
 
 

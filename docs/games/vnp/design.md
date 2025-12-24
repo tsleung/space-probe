@@ -37,9 +37,9 @@ Von Neumann Probe is an automated real-time space battle spectacle built in Godo
 
 | Ship | Weapon | Cost | Mass | Speed | Health | Damage | Range | Role |
 |------|--------|------|------|-------|--------|--------|-------|------|
-| **Frigate** | Railgun (GUN) | 50 | 0 | 280 | 70 | 18 | 200 | Fast assault, swarm |
-| **Destroyer** | Laser (LASER) | 75 | 0 | 180 | 130 | 40 | 400 | Sniper, mid-range |
-| **Cruiser** | Missile (MISSILE) | 100 | 25 | 100 | 220 | 50 | 500 | Artillery, area damage |
+| **Frigate** | Railgun (GUN) | 50 | 0 | 280 | 70 | 14 | 200 | Fast assault, swarm |
+| **Destroyer** | Laser (LASER) | 75 | 0 | 180 | 130 | 40 | 400 | Sniper, kiting |
+| **Cruiser** | Missile (MISSILE) | 75 | 20 | 100 | 220 | 50 | 1000 | Artillery, area damage |
 | **Star Base** | Turbolaser | 400 | 100 | 0 | 800 | 120 | 600 | Immobile fortress |
 
 ### Support Ships
@@ -47,8 +47,8 @@ Von Neumann Probe is an automated real-time space battle spectacle built in Godo
 | Ship | Ability | Cost | Mass | Speed | Health | Role |
 |------|---------|------|------|-------|--------|------|
 | **Defender** | PDC Interception | 80 | 0 | 160 | 100 | Shoots down missiles (40% intercept) |
-| **Shielder** | Shield Bubble | 90 | 10 | 140 | 80 | Protects nearby allies |
-| **Graviton** | Gravity Well | 120 | 40 | 80 | 180 | Deflects railguns (90% deflect) |
+| **Shielder** | Shield Bubble | 75 | 5 | 140 | 80 | Protects nearby allies |
+| **Graviton** | Gravity Well | 100 | 30 | 80 | 180 | Deflects railguns (85% deflect) |
 
 ### Defense Structures
 
@@ -123,7 +123,7 @@ The number of charges fired dramatically affects range, damage, and visual spect
 
 ### Weapon Types
 
-1. **Arc Storm** (Player): Chain lightning beam toward enemy cluster
+1. **Arc Storm** (Player): Chain lightning beam toward enemy cluster. **Fires from home base AND all completed factories** - expanding gives more coverage!
 2. **Hellstorm** (Enemy): Volley of homing missiles (scales from 8 to 24)
 3. **Void Tear** (Nemesis): Gravity well with scaling radius and pull strength
 
@@ -687,8 +687,8 @@ The map expands symmetrically around a fixed `gameplay_center` point. This ensur
 | Element | Value | Description |
 |---------|-------|-------------|
 | **Interval** | 10 seconds | Time between expansion phases |
-| **Scale Increase** | +0.3x per phase | Map grows 30% larger each expansion |
-| **Max Phases** | 10 | Final scale is WORLD_SCALE + 3.0 |
+| **Scale Increase** | +0.15x per phase | Map grows 15% larger each expansion |
+| **Max Phases** | 15 | More phases for gradual growth |
 | **Countdown** | 3 seconds | Visual warning before expansion |
 
 ### Camera Limits
@@ -705,8 +705,8 @@ limit_bottom = gameplay_center.y + world_size.y / 2
 ### Expansion Points
 
 New asteroid fields spawn at fixed angles from `gameplay_center`:
-- 2 new points per expansion phase
-- Positioned at opposite sides of the map
+- 3 new points per expansion phase
+- Evenly distributed around the expansion ring
 - Angle rotates slightly each phase for variety
 
 ### Visual Effects
@@ -728,11 +728,20 @@ Factories are the core production facilities that each team can build. They are 
 
 | Element | Description |
 |---------|-------------|
-| **Builder** | Harvester ship builds factories anywhere on the map |
+| **Builder** | Harvester ships (max 2 per team) build factories at strategic points |
 | **Build Time** | 2.0 seconds (fast - limiting factor is resources, not time) |
 | **Production** | Ships spawn from factories based on AI build decisions |
 | **Health** | Factories are destructible by enemy ships |
 | **Targeting** | Combat ships prioritize enemy factories when no ships in range |
+| **Arc Storm** | Player's Arc Storm fires from ALL completed factories! |
+
+### Harvester Behavior
+
+Harvesters are dedicated expansion ships:
+- AI builds up to **2 harvesters** when expansion opportunities exist
+- Target unclaimed points OR owned points without factories
+- Move to strategic point, stop, and build factory
+- Once factory completes, move to next expansion target
 
 ### Elimination Mechanics
 

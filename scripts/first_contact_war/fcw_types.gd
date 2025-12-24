@@ -423,6 +423,8 @@ static func create_entity(overrides: Dictionary = {}) -> Dictionary:
 		# Orders
 		"destination": -1,              # Target zone/body (-1 = none)
 		"route": [],                    # Waypoints (gravity assists)
+		"route_type": "direct",         # Route type: "direct", "coast", "gravity_assist"
+		"waypoint_zone": -1,            # Zone ID for gravity assist control point
 		"eta": 0.0,                     # Time to arrival (weeks)
 		"origin": -1                    # Where this entity came from
 	}

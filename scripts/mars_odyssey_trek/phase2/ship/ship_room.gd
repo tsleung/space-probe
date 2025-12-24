@@ -261,3 +261,13 @@ func flash(color: Color, duration: float = 0.8) -> void:
 	var mod_tween = create_tween()
 	mod_tween.tween_property(floor_rect, "modulate", flash_modulate, duration * 0.15)
 	mod_tween.tween_property(floor_rect, "modulate", Color.WHITE, duration * 0.85)
+
+func hide_label() -> void:
+	## Hide the room label (for junction corridors, etc.)
+	if label:
+		label.visible = false
+
+func show_label() -> void:
+	## Show the room label
+	if label:
+		label.visible = true

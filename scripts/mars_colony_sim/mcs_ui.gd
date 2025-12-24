@@ -28,7 +28,13 @@ const _MCSAI = preload("res://scripts/mars_colony_sim/mcs_ai.gd")
 @onready var repair_button: Button = $MainContent/LeftPanel/BuildingPanel/RepairButton
 @onready var auto_repair_button: Button = $MainContent/LeftPanel/BuildingPanel/AutoRepairButton
 
-# Center panel - Population
+# Center panel - Tab bar for switching views
+@onready var center_tab_bar: TabBar = $MainContent/CenterPanel/CenterTabBar
+@onready var mcs_view_panel: Panel = $MainContent/CenterPanel/MCSViewPanel
+@onready var population_panel: Panel = $MainContent/CenterPanel/PopulationPanel
+@onready var projection_panel: Panel = $MainContent/CenterPanel/ProjectionPanel
+
+# Center panel - Population (inside PopulationPanel)
 @onready var tab_container: TabContainer = $MainContent/CenterPanel/PopulationPanel/TabContainer
 @onready var colonist_container: VBoxContainer = $MainContent/CenterPanel/PopulationPanel/TabContainer/Colonists/ColonistScroll/ColonistContainer
 @onready var stats_label: RichTextLabel = $MainContent/CenterPanel/PopulationPanel/TabContainer/Statistics/StatsLabel
@@ -174,6 +180,12 @@ func _connect_store_signals():
 		_colony_store.log_entry_added.connect(_on_log_entry)
 
 func _connect_ui_signals():
+	# Center tab bar for switching views
+	if center_tab_bar:
+		center_tab_bar.tab_changed.connect(_on_center_tab_changed)
+		# Initialize tab view (Colony view visible by default)
+		_on_center_tab_changed(0)
+
 	# UI button signals - use safe connection pattern
 	if auto_button:
 		auto_button.toggled.connect(_on_auto_toggled)
@@ -991,6 +1003,24 @@ func _trigger_visual_for_log(entry: Dictionary):
 		"milestone":
 			# Achievement - lots of activity
 			colony_view.trigger_event_effect("construction", 5.0)
+
+func _on_center_tab_changed(tab_index: int):
+	"""Switch between Colony View (0), Population (1), and Forecast (2) panels"""
+	if mcs_view_panel:
+		mcs_view_panel.visible = (tab_index == 0)
+	if population_panel:
+		population_panel.visible = (tab_index == 1)
+	if projection_panel:
+		projection_panel.visible = (tab_index == 2)
+
+	# Refresh data for the selected panel
+	if tab_index == 1 and _colony_store:
+		var state = _colony_store.get_state()
+		_update_colonists(state.get("colonists", []))
+		_update_statistics(state)
+		_update_politics(state)
+	elif tab_index == 2:
+		_update_projections()
 
 func _on_auto_toggled(toggled: bool):
 	_auto_advance = toggled

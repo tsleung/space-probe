@@ -114,6 +114,7 @@ const BUILDING_HEIGHTS = {
 	"space_elevator": 800.0,  # Goes to orbit - beyond sky!
 	"orbital_tether": 600.0,
 	"mass_driver": 25.0,      # Rail with tall gantries
+	"skyhook": 50.0,          # Anchor structure for rotating tether
 }
 
 # Colony era multipliers (affects all buildings slightly)
@@ -293,6 +294,13 @@ const UPGRADE_PATHS = {
 		4: {"name": "Mass Driver Array", "desc": "High capacity", "rail_length": 1.0, "power_glow": 0.85},
 		5: {"name": "Orbital Cannon", "desc": "Continuous ops", "rail_length": 1.2, "power_glow": 1.0},
 	},
+	"skyhook": {
+		1: {"name": "Tether Anchor", "desc": "Ground anchor deployed", "rotation_speed": 0.0, "tether_length": 0.3, "counterweight": false},
+		2: {"name": "Short Tether", "desc": "Initial rotation", "rotation_speed": 0.2, "tether_length": 0.5, "counterweight": false},
+		3: {"name": "Operational Skyhook", "desc": "Catching payloads", "rotation_speed": 0.4, "tether_length": 0.7, "counterweight": true},
+		4: {"name": "High-Capacity Tether", "desc": "Passenger service", "rotation_speed": 0.5, "tether_length": 0.85, "counterweight": true},
+		5: {"name": "Interplanetary Gateway", "desc": "Mars-Earth transfers", "rotation_speed": 0.6, "tether_length": 1.0, "counterweight": true},
+	},
 }
 
 # =============================================================================
@@ -466,7 +474,92 @@ func _process(delta: float):
 	var anim_scale = clampf(_time_scale / 30.0, 0.5, 4.0)
 	_time += delta * anim_scale
 	_update_dust(delta * anim_scale)
+	_update_transport_animations(delta * anim_scale)
 	queue_redraw()
+
+func _update_transport_animations(delta: float):
+	"""Update mass driver launch and skyhook rotation animations"""
+	var mass_driver_tier = _get_building_max_tier(_MCSTypes.BuildingType.MASS_DRIVER)
+	var skyhook_tier = _get_building_max_tier(_MCSTypes.BuildingType.SKYHOOK)
+
+	# Mass driver launch cycle (every 5 seconds at tier 5, slower at lower tiers)
+	if mass_driver_tier > 0:
+		var launch_interval = 8.0 - mass_driver_tier  # 7s at T1, 3s at T5
+		_mass_driver_launch_timer += delta
+		if _mass_driver_launch_timer >= launch_interval:
+			_mass_driver_launch_timer = 0.0
+			_mass_driver_projectile_t = 0.0
+		# Advance projectile if in flight
+		if _mass_driver_projectile_t >= 0:
+			_mass_driver_projectile_t += delta * 0.5  # 2 seconds flight time
+			if _mass_driver_projectile_t > 1.0:
+				_mass_driver_projectile_t = -1.0  # Done
+
+	# Skyhook rotation
+	if skyhook_tier > 0:
+		var rotation_speed = 0.1 + skyhook_tier * 0.1  # 0.2-0.6 based on tier
+		_skyhook_rotation += delta * rotation_speed
+		if _skyhook_rotation > TAU:
+			_skyhook_rotation -= TAU
+
+		# Catch/release flash timer (every 8 seconds)
+		_skyhook_catch_timer += delta
+		if _skyhook_catch_timer >= 8.0:
+			_skyhook_catch_timer = 0.0
+
+	# === LANDING SHIPS ===
+	var starport_tier = _get_building_max_tier(_MCSTypes.BuildingType.STARPORT)
+	if starport_tier > 0:
+		# Spawn new landing ships periodically
+		_landing_ship_spawn_timer += delta
+		var spawn_interval = 12.0 - starport_tier * 2.0  # 10s at T1, 2s at T5
+		if _landing_ship_spawn_timer >= spawn_interval:
+			_landing_ship_spawn_timer = 0.0
+			# Spawn a new landing/takeoff ship
+			var is_landing = randf() > 0.4  # 60% landing, 40% takeoff
+			_landing_ships.append({
+				"x": randf_range(0.3, 0.7),  # Screen X ratio
+				"y": 0.0 if is_landing else 1.0,  # Start from top (landing) or ground (takeoff)
+				"phase": "landing" if is_landing else "takeoff",
+				"type": ["shuttle", "freighter", "passenger"][randi() % 3],
+				"timer": 0.0
+			})
+
+		# Update existing landing ships
+		var new_landing_ships: Array = []
+		for ship in _landing_ships:
+			ship.timer += delta
+			var duration = 4.0 if ship.type == "shuttle" else 6.0
+			var progress = ship.timer / duration
+			if ship.phase == "landing":
+				ship.y = progress
+			else:  # takeoff
+				ship.y = 1.0 - progress
+			if progress < 1.0:
+				new_landing_ships.append(ship)
+		_landing_ships = new_landing_ships
+
+	# === ORBITAL SHIPS ===
+	# Initialize orbital ships if empty and we have starport
+	if _orbital_ships.is_empty() and starport_tier > 0:
+		for i in range(2 + starport_tier):  # 3-7 orbital ships
+			_orbital_ships.append({
+				"orbit_t": randf() * TAU,
+				"orbit_r": 100 + randf() * 80,  # Orbit radius
+				"orbit_speed": 0.05 + randf() * 0.1,
+				"size": 8 + randf() * 12,  # Ship size
+				"type": ["freighter", "liner", "cruiser"][randi() % 3]
+			})
+
+	# Update orbital ships
+	for ship in _orbital_ships:
+		ship.orbit_t += delta * ship.orbit_speed
+
+	# === CITY SPOTLIGHTS ===
+	for i in range(_spotlight_angles.size()):
+		_spotlight_angles[i] += delta * (0.3 + i * 0.1)  # Different rotation speeds
+		if _spotlight_angles[i] > TAU:
+			_spotlight_angles[i] -= TAU
 
 func _draw():
 	# Background sky with atmospheric gradient
@@ -492,11 +585,20 @@ func _draw():
 			"colonist": _draw_colonist_obj(obj)
 			"drone": _draw_drone_obj(obj)
 
+	# Communication dishes on COMMS buildings
+	_draw_comms_dishes()
+
 	# Force field dome over colony
 	_draw_force_field()
 
 	# Energy beams between major structures
 	_draw_energy_network()
+
+	# City spotlights (on tall buildings)
+	_draw_city_spotlights()
+
+	# Ships landing/taking off
+	_draw_landing_ships()
 
 	# Dust on top
 	_draw_dust()
@@ -733,8 +835,31 @@ func _draw_foreground_rocks(ground_colors: Dictionary):
 	draw_circle(Vector2(size.x * 0.68, size.y * 0.94), 14, boulder_color)
 	draw_circle(Vector2(size.x * 0.72, size.y * 0.96), 8, boulder_color.darkened(0.15))
 
+# =============================================================================
+# BUILDING QUERY HELPERS
+# =============================================================================
+
+func _has_building_type(building_type: int) -> bool:
+	"""Check if colony has an operational building of the given type"""
+	for b in _buildings:
+		if b.get("type", -1) == building_type and b.get("is_operational", false):
+			return true
+	return false
+
+func _get_building_max_tier(building_type: int) -> int:
+	"""Get the highest tier of an operational building type (0 if none)"""
+	var max_tier = 0
+	for b in _buildings:
+		if b.get("type", -1) == building_type and b.get("is_operational", false):
+			max_tier = maxi(max_tier, b.get("tier", 1))
+	return max_tier
+
+# =============================================================================
+# ORBITAL ELEMENTS
+# =============================================================================
+
 func _draw_orbital_elements():
-	"""Draw satellites, space stations, and orbital ring in the sky"""
+	"""Draw satellites, space stations, skyhook, and orbital ring in the sky"""
 	# Only show orbital stuff in later tiers
 	if _colony_tier == "survival":
 		return
@@ -763,6 +888,19 @@ func _draw_orbital_elements():
 		draw_rect(Rect2(station_x - 20, station_y - 1, 10, 2), Color(0.3, 0.4, 0.6, 0.6))
 		draw_rect(Rect2(station_x + 10, station_y - 1, 10, 2), Color(0.3, 0.4, 0.6, 0.6))
 
+	# LARGE ORBITAL SHIPS - freighters, liners, cruisers
+	if not _orbital_ships.is_empty():
+		_draw_orbital_ships(sky_center)
+
+	# SKYHOOK - Rotating momentum-exchange tether
+	var skyhook_tier = _get_building_max_tier(_MCSTypes.BuildingType.SKYHOOK)
+	if skyhook_tier > 0:
+		_draw_skyhook(sky_center, skyhook_tier)
+
+	# MASS DRIVER PROJECTILE - Launched cargo capsule
+	if _mass_driver_projectile_t >= 0:
+		_draw_mass_driver_projectile(sky_center)
+
 	# ORBITAL RING (transcendence only) - the ultimate flex
 	if _colony_tier == "transcendence":
 		var ring_center = Vector2(size.x * 0.5, size.y * 0.2)
@@ -783,6 +921,307 @@ func _draw_orbital_elements():
 			var node_a = i * TAU / 8 + _time * 0.1
 			var node_pos = ring_center + Vector2(cos(node_a) * ring_rx, sin(node_a) * ring_ry)
 			draw_circle(node_pos, 4, Color(0.5, 0.9, 1.0, 0.8))
+
+func _draw_skyhook(sky_center: Vector2, tier: int):
+	"""Draw rotating skyhook tether with counterweights"""
+	# Position slightly left of center, higher orbit than station
+	var hook_center = sky_center + Vector2(-60, 20)
+
+	# Tether properties based on tier
+	var tether_length = 40.0 + tier * 15.0  # 55-115 pixels
+	var rotation_speed = UPGRADE_PATHS.get("skyhook", {}).get(tier, {}).get("rotation_speed", 0.3)
+	var has_counterweight = tier >= 3
+
+	# Calculate tether endpoints based on rotation
+	var angle = _skyhook_rotation
+	var end1 = hook_center + Vector2(cos(angle), sin(angle) * 0.4) * tether_length
+	var end2 = hook_center + Vector2(cos(angle + PI), sin(angle + PI) * 0.4) * tether_length
+
+	# Tether color - metallic with energy glow at higher tiers
+	var tether_color = Color(0.7, 0.75, 0.8, 0.7)
+	if tier >= 4:
+		tether_color = tether_color.lerp(Color(0.5, 0.8, 1.0), 0.3)
+
+	# Draw tether
+	draw_line(end1, end2, tether_color, 2.0 + tier * 0.3)
+
+	# Central hub
+	draw_circle(hook_center, 4 + tier, Color(0.6, 0.65, 0.7, 0.8))
+
+	# Counterweights at endpoints (tier 3+)
+	if has_counterweight:
+		draw_circle(end1, 3, Color(0.5, 0.55, 0.6, 0.7))
+		draw_circle(end2, 3, Color(0.5, 0.55, 0.6, 0.7))
+
+	# Catch/release flash effect (when timer just reset)
+	if _skyhook_catch_timer < 0.5:
+		var flash_alpha = 1.0 - _skyhook_catch_timer * 2.0
+		# Flash at lower endpoint (catching payload from mass driver)
+		var catch_end = end1 if end1.y > end2.y else end2
+		draw_circle(catch_end, 8 + tier * 2, Color(1.0, 0.9, 0.5, flash_alpha * 0.6))
+
+	# Orbital arc hint (subtle curve showing trajectory)
+	if tier >= 2:
+		var arc_color = Color(0.6, 0.7, 0.8, 0.15)
+		var arc_points = PackedVector2Array()
+		for i in range(17):
+			var a = -0.4 + i * 0.05
+			arc_points.append(hook_center + Vector2(cos(a) * 100, sin(a) * 40))
+		for i in range(arc_points.size() - 1):
+			draw_line(arc_points[i], arc_points[i + 1], arc_color, 1.0)
+
+func _draw_mass_driver_projectile(sky_center: Vector2):
+	"""Draw cargo capsule launched from mass driver"""
+	# Start position: bottom of screen (mass driver location)
+	var start_pos = Vector2(size.x * 0.3, size.y * 0.85)
+	# End position: near skyhook in orbit
+	var end_pos = sky_center + Vector2(-60, 40)  # Same as skyhook center, lower
+
+	# Curved trajectory (parabolic arc)
+	var t = _mass_driver_projectile_t
+	var mid_y = lerp(start_pos.y, end_pos.y, 0.5) - 80  # Arc peak
+	var mid_pos = Vector2(lerp(start_pos.x, end_pos.x, 0.5), mid_y)
+
+	# Quadratic bezier interpolation
+	var p01 = start_pos.lerp(mid_pos, t)
+	var p12 = mid_pos.lerp(end_pos, t)
+	var current_pos = p01.lerp(p12, t)
+
+	# Capsule
+	var capsule_color = Color(0.8, 0.75, 0.6)
+	draw_circle(current_pos, 4, capsule_color)
+
+	# Plasma/exhaust trail
+	var trail_length = 8
+	for i in range(trail_length):
+		var trail_t = maxf(0, t - i * 0.02)
+		var tp01 = start_pos.lerp(mid_pos, trail_t)
+		var tp12 = mid_pos.lerp(end_pos, trail_t)
+		var trail_pos = tp01.lerp(tp12, trail_t)
+		var trail_alpha = (trail_length - i) / float(trail_length) * 0.5
+		var trail_size = 3 - i * 0.3
+		if trail_size > 0:
+			draw_circle(trail_pos, trail_size, Color(1.0, 0.6, 0.2, trail_alpha))
+
+	# Bright point at front
+	draw_circle(current_pos, 2, Color(1.0, 0.95, 0.8, 0.9))
+
+func _draw_orbital_ships(sky_center: Vector2):
+	"""Draw large orbital ships - freighters, liners, cruisers"""
+	for ship in _orbital_ships:
+		var orbit_x = sky_center.x + cos(ship.orbit_t) * ship.orbit_r
+		var orbit_y = sky_center.y + sin(ship.orbit_t) * ship.orbit_r * 0.35  # Flattened
+		var pos = Vector2(orbit_x, orbit_y)
+		var ship_size = ship.size
+
+		# Different ship types have different shapes
+		match ship.type:
+			"freighter":
+				# Boxy cargo ship with containers
+				var body_color = Color(0.55, 0.52, 0.48, 0.8)
+				draw_rect(Rect2(pos.x - ship_size, pos.y - ship_size * 0.3, ship_size * 2, ship_size * 0.6), body_color)
+				# Engine glow
+				draw_circle(pos + Vector2(-ship_size - 3, 0), 3, Color(0.3, 0.6, 1.0, 0.6))
+				# Containers on top
+				for i in range(3):
+					var cx = pos.x - ship_size * 0.6 + i * ship_size * 0.5
+					draw_rect(Rect2(cx, pos.y - ship_size * 0.5, ship_size * 0.4, ship_size * 0.2), Color(0.7, 0.5, 0.3, 0.7))
+
+			"liner":
+				# Sleek passenger ship with windows
+				var body_color = Color(0.8, 0.82, 0.85, 0.8)
+				# Elongated hull
+				draw_rect(Rect2(pos.x - ship_size * 1.2, pos.y - ship_size * 0.25, ship_size * 2.4, ship_size * 0.5), body_color)
+				# Window strip
+				for i in range(5):
+					var wx = pos.x - ship_size * 0.8 + i * ship_size * 0.4
+					draw_circle(Vector2(wx, pos.y), 1.5, Color(1.0, 0.95, 0.7, 0.8))
+				# Engine pods
+				draw_circle(pos + Vector2(-ship_size * 1.2, ship_size * 0.2), 2, Color(0.4, 0.7, 1.0, 0.7))
+				draw_circle(pos + Vector2(-ship_size * 1.2, -ship_size * 0.2), 2, Color(0.4, 0.7, 1.0, 0.7))
+
+			"cruiser":
+				# Military-style with angular design
+				var body_color = Color(0.4, 0.42, 0.45, 0.85)
+				# Wedge shape
+				var hull = PackedVector2Array([
+					pos + Vector2(ship_size * 1.3, 0),  # Nose
+					pos + Vector2(-ship_size, -ship_size * 0.4),
+					pos + Vector2(-ship_size, ship_size * 0.4)
+				])
+				draw_polygon(hull, [body_color])
+				# Bridge
+				draw_rect(Rect2(pos.x - ship_size * 0.3, pos.y - ship_size * 0.5, ship_size * 0.6, ship_size * 0.15), Color(0.6, 0.65, 0.7, 0.8))
+				# Engine array
+				for i in range(3):
+					var ey = pos.y - ship_size * 0.25 + i * ship_size * 0.25
+					draw_circle(Vector2(pos.x - ship_size * 1.05, ey), 2, Color(0.3, 0.5, 0.9, 0.7))
+
+func _draw_landing_ships():
+	"""Draw ships landing/taking off from the colony"""
+	for ship in _landing_ships:
+		# Screen position
+		var screen_x = size.x * ship.x
+		var screen_y = lerp(size.y * 0.1, size.y * 0.7, ship.y)  # Landing zone
+
+		# Ship gets bigger as it descends (perspective)
+		var scale = 0.3 + ship.y * 0.7
+		var base_size = 8 if ship.type == "shuttle" else (14 if ship.type == "freighter" else 12)
+		var ship_size = base_size * scale
+
+		match ship.type:
+			"shuttle":
+				# Small triangular shuttle
+				var nose = Vector2(screen_x, screen_y - ship_size)
+				var left = Vector2(screen_x - ship_size * 0.6, screen_y + ship_size * 0.5)
+				var right = Vector2(screen_x + ship_size * 0.6, screen_y + ship_size * 0.5)
+				draw_polygon(PackedVector2Array([nose, left, right]), [Color(0.75, 0.78, 0.82, 0.9)])
+				# Engine flame (landing = bottom, takeoff = top)
+				if ship.phase == "landing":
+					_draw_engine_flame(Vector2(screen_x, screen_y + ship_size * 0.6), ship_size * 0.4, true)
+				else:
+					_draw_engine_flame(Vector2(screen_x, screen_y + ship_size * 0.6), ship_size * 0.5, false)
+
+			"freighter":
+				# Boxy cargo ship
+				draw_rect(Rect2(screen_x - ship_size, screen_y - ship_size * 0.4, ship_size * 2, ship_size * 0.8), Color(0.55, 0.52, 0.48, 0.9))
+				# Cockpit
+				draw_rect(Rect2(screen_x - ship_size * 0.3, screen_y - ship_size * 0.7, ship_size * 0.6, ship_size * 0.35), Color(0.4, 0.6, 0.8, 0.8))
+				# Engines
+				_draw_engine_flame(Vector2(screen_x - ship_size * 0.5, screen_y + ship_size * 0.5), ship_size * 0.3, ship.phase == "landing")
+				_draw_engine_flame(Vector2(screen_x + ship_size * 0.5, screen_y + ship_size * 0.5), ship_size * 0.3, ship.phase == "landing")
+
+			"passenger":
+				# Sleek passenger liner
+				var body = PackedVector2Array([
+					Vector2(screen_x, screen_y - ship_size),  # Nose
+					Vector2(screen_x - ship_size * 0.8, screen_y + ship_size * 0.3),
+					Vector2(screen_x - ship_size * 0.8, screen_y + ship_size * 0.5),
+					Vector2(screen_x + ship_size * 0.8, screen_y + ship_size * 0.5),
+					Vector2(screen_x + ship_size * 0.8, screen_y + ship_size * 0.3),
+				])
+				draw_polygon(body, [Color(0.85, 0.87, 0.9, 0.9)])
+				# Windows
+				for i in range(4):
+					var wx = screen_x - ship_size * 0.5 + i * ship_size * 0.35
+					draw_circle(Vector2(wx, screen_y), 1.5 * scale, Color(1.0, 0.95, 0.7, 0.8))
+				# Engine
+				_draw_engine_flame(Vector2(screen_x, screen_y + ship_size * 0.55), ship_size * 0.4, ship.phase == "landing")
+
+func _draw_engine_flame(pos: Vector2, size_mult: float, is_retro: bool):
+	"""Draw engine exhaust flame"""
+	var flame_length = size_mult * (15 if is_retro else 25)
+	var flame_width = size_mult * 6
+
+	# Flame direction (down for landing/retro, up for takeoff)
+	var direction = -1 if is_retro else 1
+
+	# Core flame (white-yellow)
+	var core_points = PackedVector2Array([
+		pos,
+		pos + Vector2(-flame_width * 0.3, flame_length * 0.6 * direction),
+		pos + Vector2(0, flame_length * direction),
+		pos + Vector2(flame_width * 0.3, flame_length * 0.6 * direction)
+	])
+	draw_polygon(core_points, [Color(1.0, 0.95, 0.7, 0.9)])
+
+	# Outer flame (orange)
+	var outer_points = PackedVector2Array([
+		pos + Vector2(-flame_width * 0.2, 0),
+		pos + Vector2(-flame_width * 0.5, flame_length * 0.7 * direction),
+		pos + Vector2(0, flame_length * 1.2 * direction),
+		pos + Vector2(flame_width * 0.5, flame_length * 0.7 * direction),
+		pos + Vector2(flame_width * 0.2, 0)
+	])
+	draw_polygon(outer_points, [Color(1.0, 0.5, 0.1, 0.6)])
+
+func _draw_city_spotlights():
+	"""Draw rotating searchlights sweeping across the city"""
+	if _colony_tier == "survival" or _building_layout.size() < 10:
+		return
+
+	# Place spotlights at tall buildings
+	var spotlight_positions: Array = []
+	for bid in _building_layout:
+		var layout = _building_layout[bid]
+		if layout.height > 60:  # Only on tall buildings
+			spotlight_positions.append(Vector2(layout.screen_x, layout.screen_y - layout.height * 0.8))
+
+	# Draw each spotlight beam
+	for i in range(mini(_spotlight_angles.size(), spotlight_positions.size())):
+		var pos = spotlight_positions[i]
+		var angle = _spotlight_angles[i]
+
+		# Beam cone
+		var beam_length = 200 + sin(_time * 0.5 + i) * 50
+		var beam_spread = 0.2
+
+		var end_center = pos + Vector2(cos(angle), sin(angle) * 0.5) * beam_length
+		var end_left = pos + Vector2(cos(angle - beam_spread), sin(angle - beam_spread) * 0.5) * beam_length
+		var end_right = pos + Vector2(cos(angle + beam_spread), sin(angle + beam_spread) * 0.5) * beam_length
+
+		# Draw cone with gradient
+		var beam_color = Color(1.0, 0.98, 0.9, 0.08)
+		var cone = PackedVector2Array([pos, end_left, end_center, end_right])
+		draw_polygon(cone, [beam_color])
+
+		# Bright spot at origin
+		draw_circle(pos, 4, Color(1.0, 0.95, 0.8, 0.6))
+
+		# Sky hit (if beam points upward)
+		if sin(angle) < -0.3:
+			var sky_y = size.y * 0.1
+			var sky_x = pos.x + (sky_y - pos.y) / tan(angle) if abs(tan(angle)) > 0.01 else pos.x
+			if sky_x > 0 and sky_x < size.x:
+				draw_circle(Vector2(sky_x, sky_y), 15 + sin(_time * 2 + i) * 5, Color(1.0, 0.95, 0.85, 0.15))
+
+func _draw_comms_dishes():
+	"""Draw radar dishes on COMMS buildings"""
+	for b in _buildings:
+		if b.get("type", -1) != _MCSTypes.BuildingType.COMMS:
+			continue
+		if not b.get("is_operational", false):
+			continue
+
+		var bid = b.get("id", "")
+		if not _building_layout.has(bid):
+			continue
+
+		var layout = _building_layout[bid]
+		var tier = b.get("tier", 1)
+
+		# Draw dishes on top of the COMMS building
+		var base_pos = Vector2(layout.screen_x, layout.screen_y - layout.height * 0.6)
+
+		# Main dish - rotates slowly
+		var dish_angle = _time * 0.1
+		var dish_size = 12 + tier * 3
+
+		# Dish base (pole)
+		draw_rect(Rect2(base_pos.x - 2, base_pos.y, 4, 15), Color(0.5, 0.52, 0.55))
+
+		# Dish (parabolic shape)
+		var dish_center = base_pos + Vector2(cos(dish_angle) * 8, -5)
+		var dish_points = PackedVector2Array()
+		for j in range(9):
+			var a = -0.8 + j * 0.2
+			var dx = cos(dish_angle + a * 0.5) * dish_size * abs(cos(a))
+			var dy = sin(a) * dish_size * 0.4 - 8
+			dish_points.append(dish_center + Vector2(dx, dy))
+		if dish_points.size() >= 3:
+			draw_polyline(dish_points, Color(0.7, 0.72, 0.75), 2.0)
+
+		# Dish face
+		draw_circle(dish_center + Vector2(0, -8), dish_size * 0.3, Color(0.6, 0.65, 0.7, 0.5))
+
+		# Signal waves (animated)
+		if tier >= 2:
+			for wave in range(3):
+				var wave_t = fmod(_time * 0.8 + wave * 0.3, 1.0)
+				var wave_r = 10 + wave_t * 40
+				var wave_alpha = (1.0 - wave_t) * 0.3
+				var wave_pos = dish_center + Vector2(cos(dish_angle), 0) * wave_r * 0.5
+				draw_arc(wave_pos, wave_r, dish_angle - 0.3, dish_angle + 0.3, 8, Color(0.4, 0.8, 1.0, wave_alpha), 1.5)
 
 func _draw_energy_network():
 	"""Draw energy beams connecting power sources to major buildings"""
@@ -886,6 +1325,25 @@ const CRATER_SEGMENTS = 32          # Smoothness of crater circle
 
 # Terraforming stage (0-4)
 var _terraforming_stage: int = 0
+
+# Transport animation state
+var _mass_driver_launch_timer: float = 0.0
+var _mass_driver_projectile_t: float = -1.0  # -1 = no projectile, 0-1 = in flight
+var _skyhook_rotation: float = 0.0
+var _skyhook_catch_timer: float = 0.0
+
+# Landing ships animation
+var _landing_ships: Array = []  # {x, y, phase, type, timer}
+var _landing_ship_spawn_timer: float = 0.0
+
+# Orbital ships (large freighters/colony ships)
+var _orbital_ships: Array = []  # {orbit_t, orbit_r, size, type}
+
+# City spotlights
+var _spotlight_angles: Array = [0.0, 1.5, 3.0, 4.5]  # Multiple spotlights with different phases
+
+# Procedural skyscraper seeds (for deterministic generation)
+var _skyscraper_seeds: Array = []
 
 # Terraforming color palettes
 # Golden/warm sky colors inspired by concept art - dramatic sunset atmosphere
@@ -1471,7 +1929,8 @@ func _draw_building_obj(obj: Dictionary):
 		left_color.a = alpha
 		right_color.a = alpha
 
-	var shape = _get_building_shape(building_type)
+	var tier = building.get("tier", 1)
+	var shape = _get_building_shape(building_type, tier)
 
 	# Perspective mode: use simplified building shapes
 	if obj.get("is_perspective", false):
@@ -1507,6 +1966,11 @@ func _draw_building_obj(obj: Dictionary):
 			_draw_mass_driver(bx, by, BUILDING_RADIUS * 3.0)
 		BuildingShape.FUSION_REACTOR:
 			_draw_fusion_reactor(bx, by, draw_height * 1.5)
+		BuildingShape.STADIUM:
+			_draw_stadium(bx, by, BUILDING_RADIUS * 2.5, draw_height * 0.5)
+		BuildingShape.PROCEDURAL_SKYSCRAPER:
+			var seed_val = hash(building.get("id", "default"))
+			_draw_procedural_skyscraper(bx, by, BUILDING_RADIUS * 1.5, draw_height * 1.5, seed_val)
 		_:  # HEX_PRISM (default)
 			_draw_hex_prism(bx, by, BUILDING_RADIUS, draw_height, top_color, left_color, right_color)
 
@@ -1595,6 +2059,13 @@ func _draw_building_perspective(obj: Dictionary, shape: BuildingShape, draw_heig
 			_draw_perspective_spire(base_pos, draw_height, scale_mult, top_color, depth_ratio, tier)
 		BuildingShape.MASS_DRIVER:
 			_draw_perspective_mass_driver(base_pos, base_width * 2.0, scale_mult, depth_ratio, tier)
+		BuildingShape.STADIUM:
+			_draw_perspective_stadium(base_pos, base_width * 2.5, draw_height * 0.6, scale_mult,
+				depth_ratio, tier)
+		BuildingShape.PROCEDURAL_SKYSCRAPER:
+			var seed_val = hash(building.get("id", "default"))
+			_draw_perspective_procedural_skyscraper(base_pos, top_pos, base_width * 1.5, draw_height * 1.5,
+				scale_mult, top_color, left_color, right_color, depth_ratio, tier, seed_val)
 		_:  # HEX_PRISM, LANDING_PAD, etc
 			_draw_perspective_block(base_pos, top_pos, base_width, draw_height, scale_mult,
 				top_color, left_color, right_color, tier)
@@ -2494,7 +2965,7 @@ func _draw_perspective_reactor(base_pos: Vector2, width: float, height: float,
 	])
 	draw_polygon(right_body, [vessel_light])
 
-	# Top dome cap
+	# Top dome cap - semicircle arc that closes automatically
 	var dome_points = PackedVector2Array()
 	var dome_segments = 8
 	var dome_radius = hw * 0.75
@@ -2504,9 +2975,9 @@ func _draw_perspective_reactor(base_pos: Vector2, width: float, height: float,
 		var x = base_pos.x + cos(angle) * dome_radius
 		var y = base_pos.y - reactor_height - sin(angle) * dome_height
 		dome_points.append(Vector2(x, y))
-	dome_points.append(base_pos + Vector2(dome_radius, -reactor_height))
-	dome_points.append(base_pos + Vector2(-dome_radius, -reactor_height))
-	draw_polygon(dome_points, [vessel_highlight])
+	# Polygon auto-closes from last point to first - arc already forms complete dome shape
+	if dome_points.size() >= 3:
+		draw_polygon(dome_points, [vessel_highlight])
 
 	# Containment rings (industrial details)
 	var num_rings = 3
@@ -4038,23 +4509,33 @@ func _get_building_label(building_type: int) -> String:
 enum BuildingShape {
 	HEX_PRISM, TOWER, DOME, SOLAR_ARRAY, TERRAFORMING_TOWER,
 	ARCOLOGY, GREENHOUSE, REACTOR, LANDING_PAD, COMMS_TOWER, SPACE_ELEVATOR,
-	MASS_DRIVER, FUSION_REACTOR
+	MASS_DRIVER, FUSION_REACTOR, STADIUM, PROCEDURAL_SKYSCRAPER
 }
 
-func _get_building_shape(building_type: int) -> BuildingShape:
+func _get_building_shape(building_type: int, tier: int = 1) -> BuildingShape:
 	"""Determine which visual shape to use for a building type"""
 	match building_type:
 		# DOME - low bunker/dome structures (survival era basics)
 		_MCSTypes.BuildingType.HABITAT, _MCSTypes.BuildingType.MEDICAL, \
-		_MCSTypes.BuildingType.ACADEMY, _MCSTypes.BuildingType.RECREATION:
+		_MCSTypes.BuildingType.ACADEMY:
+			return BuildingShape.DOME
+		# RECREATION - becomes stadium at higher tiers
+		_MCSTypes.BuildingType.RECREATION:
+			if tier >= 3:
+				return BuildingShape.STADIUM
 			return BuildingShape.DOME
 		# TOWER - tall rectangular buildings (growth era and later)
 		_MCSTypes.BuildingType.BARRACKS, _MCSTypes.BuildingType.FABRICATOR, \
 		_MCSTypes.BuildingType.FOUNDRY, _MCSTypes.BuildingType.PRECISION, \
 		_MCSTypes.BuildingType.STORAGE, _MCSTypes.BuildingType.LOGISTICS:
 			return BuildingShape.TOWER
-		# ARCOLOGY - mega domes for research and luxury
-		_MCSTypes.BuildingType.RESEARCH, _MCSTypes.BuildingType.QUARTERS:
+		# QUARTERS - becomes procedural skyscraper at higher tiers
+		_MCSTypes.BuildingType.QUARTERS:
+			if tier >= 4:
+				return BuildingShape.PROCEDURAL_SKYSCRAPER
+			return BuildingShape.ARCOLOGY
+		# ARCOLOGY - mega domes for research
+		_MCSTypes.BuildingType.RESEARCH:
 			return BuildingShape.ARCOLOGY
 		# GREENHOUSE - glass domes with plants
 		_MCSTypes.BuildingType.AGRIDOME, _MCSTypes.BuildingType.HYDROPONICS, \

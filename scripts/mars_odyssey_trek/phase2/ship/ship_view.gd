@@ -9,6 +9,7 @@ const ShipRoom = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_room.
 const CrewMember = preload("res://scripts/mars_odyssey_trek/phase2/ship/crew_member.gd")
 const ShipNavigation = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_navigation.gd")
 const EVAController = preload("res://scripts/mars_odyssey_trek/phase2/ship/eva_controller.gd")
+const LifeSupportSystems = preload("res://scripts/mars_odyssey_trek/phase2/ship/life_support_systems.gd")
 
 # ============================================================================
 # SIGNALS
@@ -19,6 +20,10 @@ signal task_completed(crew_role: String, task_type: ShipTypes.TaskType)
 signal room_damaged(room_type: ShipTypes.RoomType, severity: float)
 signal room_repaired(room_type: ShipTypes.RoomType)
 signal eva_repair_completed(waypoint: int)  # Emitted when EVA repairs exterior surface
+signal food_produced(amount: float)  # From hydroponics
+signal water_efficiency_changed(efficiency: float)  # From water reclaimer
+signal life_support_damaged(system_name: String)
+signal life_support_repaired(system_name: String)
 
 # ============================================================================
 # SHIP LAYOUT CONSTANTS
@@ -41,6 +46,7 @@ var crew: Dictionary = {}   # role -> CrewMember
 var navigation_region: NavigationRegion2D
 var ship_nav: ShipNavigation  # Graph-based pathfinding
 var eva_ctrl: EVAController   # EVA mechanics controller
+var life_support_sys: LifeSupportSystems  # Hydroponics & Water Reclaimer
 
 # ============================================================================
 # EVA STATE (managed by EVAController)
@@ -58,6 +64,7 @@ func _ready() -> void:
 	_create_ship_layout()
 	_setup_navigation_graph()
 	_setup_eva_controller()
+	_setup_life_support_systems()
 	_create_crew()
 	_position_crew_at_stations()
 
@@ -74,6 +81,47 @@ func _setup_eva_controller() -> void:
 	eva_ctrl.crew_drifted.connect(_on_crew_drifted)
 	eva_ctrl.rescue_completed.connect(_on_rescue_completed)
 	eva_ctrl.eva_repair_completed.connect(_on_eva_repair_completed)
+
+func _setup_life_support_systems() -> void:
+	## Initialize hydroponics in Hydroponics room, water reclaimer in Life Support room
+	life_support_sys = LifeSupportSystems.new()
+	life_support_sys.name = "LifeSupportSystems"
+	add_child(life_support_sys)
+
+	# Position hydroponics in the dedicated Hydroponics room
+	var hydroponics_room = rooms.get(ShipTypes.RoomType.HYDROPONICS)
+	# Position water reclaimer in Life Support room
+	var life_support_room = rooms.get(ShipTypes.RoomType.LIFE_SUPPORT)
+
+	if hydroponics_room and life_support_room:
+		life_support_sys.setup_separate(hydroponics_room.position, life_support_room.position)
+	elif hydroponics_room:
+		life_support_sys.setup(hydroponics_room.position)
+	elif life_support_room:
+		life_support_sys.setup(life_support_room.position)
+
+	# Connect signals
+	life_support_sys.food_produced.connect(_on_food_produced)
+	life_support_sys.water_recycled.connect(_on_water_recycled)
+	life_support_sys.system_damaged.connect(_on_life_support_damaged)
+	life_support_sys.system_repaired.connect(_on_life_support_repaired)
+
+func _on_food_produced(amount: float) -> void:
+	print("[LIFE SUPPORT] Hydroponics produced %.2f food" % amount)
+	food_produced.emit(amount)
+
+func _on_water_recycled(efficiency: float) -> void:
+	water_efficiency_changed.emit(efficiency)
+
+func _on_life_support_damaged(system_name: String) -> void:
+	print("[LIFE SUPPORT] %s is damaged!" % system_name.capitalize())
+	flash_room(ShipTypes.RoomType.LIFE_SUPPORT, Color(1.0, 0.5, 0.0))
+	life_support_damaged.emit(system_name)
+
+func _on_life_support_repaired(system_name: String) -> void:
+	print("[LIFE SUPPORT] %s repaired" % system_name.capitalize())
+	flash_room(ShipTypes.RoomType.LIFE_SUPPORT, Color(0.3, 0.9, 0.3))
+	life_support_repaired.emit(system_name)
 
 func _on_eva_started(crew_role: String, target: int) -> void:
 	print("[SHIP] EVA started: %s -> %s" % [crew_role, ShipNavigation.get_exterior_name(target)])
@@ -120,9 +168,12 @@ func _create_ship_layout() -> void:
 	#
 	#  [MEDICAL]---[QUARTERS]---[CORRIDOR]---[BRIDGE]  (nose/front)
 	#                              |
-	#  [CARGO ]---[LIFE SUP]---[ENGINEERING]
+	#  [HYDRO ]---[LIFE SUP]---[ENGINEERING]
+	#     |
+	#  [CARGO ]
 	#
 	# Ship travels nose-first (right side) toward Mars
+	# Hydroponics is connected to Cargo Bay (supplies) and Life Support (water/O2)
 
 	var center = layout_center
 	var h_spacing = 130  # Horizontal spacing between rooms
@@ -131,13 +182,18 @@ func _create_ship_layout() -> void:
 	# Top row (left to right: rear to front)
 	_create_room(ShipTypes.RoomType.MEDICAL, center + Vector2(-h_spacing * 1.5, -v_spacing * 0.5))
 	_create_room(ShipTypes.RoomType.QUARTERS, center + Vector2(-h_spacing * 0.5, -v_spacing * 0.5))
-	_create_room(ShipTypes.RoomType.CORRIDOR, center + Vector2(h_spacing * 0.5, -v_spacing * 0.5), Vector2(60, 50))
+	# Corridor junction is minimal - just a small connector, no label
+	var corridor_room = _create_room(ShipTypes.RoomType.CORRIDOR, center + Vector2(h_spacing * 0.5, -v_spacing * 0.5), Vector2(30, 30))
+	corridor_room.hide_label()  # Don't show "Corridor" label
 	_create_room(ShipTypes.RoomType.BRIDGE, center + Vector2(h_spacing * 1.5, -v_spacing * 0.5))
 
-	# Bottom row (left to right: rear to front)
-	_create_room(ShipTypes.RoomType.CARGO_BAY, center + Vector2(-h_spacing * 1.5, v_spacing * 0.5))
+	# Middle row (left to right: rear to front)
+	_create_room(ShipTypes.RoomType.HYDROPONICS, center + Vector2(-h_spacing * 1.5, v_spacing * 0.5))
 	_create_room(ShipTypes.RoomType.LIFE_SUPPORT, center + Vector2(-h_spacing * 0.5, v_spacing * 0.5))
 	_create_room(ShipTypes.RoomType.ENGINEERING, center + Vector2(h_spacing * 0.5, v_spacing * 0.5))
+
+	# Bottom row - Cargo Bay (larger, below Hydroponics for easy supply access)
+	_create_room(ShipTypes.RoomType.CARGO_BAY, center + Vector2(-h_spacing * 1.5, v_spacing * 1.5), Vector2(ROOM_WIDTH, ROOM_HEIGHT * 0.8))
 
 	# Create connecting corridors
 	_create_corridors(center, h_spacing, v_spacing)
@@ -161,24 +217,65 @@ func _create_room(room_type: ShipTypes.RoomType, pos: Vector2, size: Vector2 = V
 	return room
 
 func _create_corridors(center: Vector2, h_spacing: float, v_spacing: float) -> void:
-	# Horizontal corridors connecting rooms in each row
-	# Top row connections
-	_create_corridor_segment(center + Vector2(-h_spacing, -v_spacing * 0.5), Vector2(30, CORRIDOR_WIDTH))  # Medical-Quarters
-	_create_corridor_segment(center + Vector2(0, -v_spacing * 0.5), Vector2(30, CORRIDOR_WIDTH))           # Quarters-Corridor
-	_create_corridor_segment(center + Vector2(h_spacing, -v_spacing * 0.5), Vector2(30, CORRIDOR_WIDTH))   # Corridor-Bridge
+	# Minimal corridor indicators - just thin lines connecting rooms
+	# Less visually cluttered than full corridor segments
 
-	# Bottom row connections
-	_create_corridor_segment(center + Vector2(-h_spacing, v_spacing * 0.5), Vector2(30, CORRIDOR_WIDTH))   # Cargo-LifeSupport
-	_create_corridor_segment(center + Vector2(0, v_spacing * 0.5), Vector2(30, CORRIDOR_WIDTH))            # LifeSupport-Engineering
+	# Horizontal connectors - Top row (thin lines)
+	_create_corridor_line(
+		center + Vector2(-h_spacing * 1.5 + 50, -v_spacing * 0.5),
+		center + Vector2(-h_spacing * 0.5 - 50, -v_spacing * 0.5)
+	)  # Medical -> Quarters
 
-	# Vertical corridor connecting the two rows (through corridor room)
-	_create_corridor_segment(center + Vector2(h_spacing * 0.5, 0), Vector2(CORRIDOR_WIDTH, v_spacing - 40))
+	_create_corridor_line(
+		center + Vector2(-h_spacing * 0.5 + 50, -v_spacing * 0.5),
+		center + Vector2(h_spacing * 0.5 - 30, -v_spacing * 0.5)
+	)  # Quarters -> Corridor junction
+
+	_create_corridor_line(
+		center + Vector2(h_spacing * 0.5 + 30, -v_spacing * 0.5),
+		center + Vector2(h_spacing * 1.5 - 50, -v_spacing * 0.5)
+	)  # Corridor junction -> Bridge
+
+	# Horizontal connectors - Middle row
+	_create_corridor_line(
+		center + Vector2(-h_spacing * 1.5 + 50, v_spacing * 0.5),
+		center + Vector2(-h_spacing * 0.5 - 50, v_spacing * 0.5)
+	)  # Hydro -> Life Support
+
+	_create_corridor_line(
+		center + Vector2(-h_spacing * 0.5 + 50, v_spacing * 0.5),
+		center + Vector2(h_spacing * 0.5 - 50, v_spacing * 0.5)
+	)  # Life Support -> Engineering
+
+	# Vertical connector - Top to Middle row (through corridor junction)
+	_create_corridor_line(
+		center + Vector2(h_spacing * 0.5, -v_spacing * 0.5 + 25),
+		center + Vector2(h_spacing * 0.5, v_spacing * 0.5 - 40)
+	)
+
+	# Vertical connector - Hydroponics to Cargo Bay
+	_create_corridor_line(
+		center + Vector2(-h_spacing * 1.5, v_spacing * 0.5 + 40),
+		center + Vector2(-h_spacing * 1.5, v_spacing * 1.5 - 40)
+	)
+
+func _create_corridor_line(from: Vector2, to: Vector2) -> void:
+	## Create a thin corridor line connecting two points
+	var line = Line2D.new()
+	line.add_point(from)
+	line.add_point(to)
+	line.width = 8  # Thin corridor
+	line.default_color = Color(0.3, 0.3, 0.35, 0.6)  # Semi-transparent dark gray
+	line.z_index = -1  # Behind rooms
+	add_child(line)
 
 func _create_corridor_segment(pos: Vector2, size: Vector2) -> void:
+	# Kept for backward compatibility but made more subtle
 	var corridor = ColorRect.new()
 	corridor.size = size
 	corridor.position = pos - size / 2
-	corridor.color = ShipTypes.get_room_color(ShipTypes.RoomType.CORRIDOR)
+	corridor.color = Color(0.25, 0.25, 0.3, 0.4)  # More transparent
+	corridor.z_index = -1  # Behind rooms
 	add_child(corridor)
 
 func _build_navigation_mesh() -> void:
@@ -444,3 +541,86 @@ func flash_all_rooms(color: Color) -> void:
 		var room = rooms[room_type]
 		if room and room.has_method("flash"):
 			room.flash(color)
+
+# ============================================================================
+# LIFE SUPPORT SYSTEMS
+# ============================================================================
+
+func process_life_support_hour(current_power: float) -> Dictionary:
+	## Process one hour of life support systems
+	## Returns: {food_produced, water_efficiency, power_consumed}
+	if not life_support_sys:
+		return {"food_produced": 0.0, "water_efficiency": 0.85, "power_consumed": 0.0}
+	return life_support_sys.process_hour(current_power)
+
+func set_hydroponics_power_level(level: int) -> void:
+	## Set hydroponics power level (0=OFF, 1=LOW, 2=NORMAL, 3=HIGH)
+	if life_support_sys:
+		life_support_sys.set_hydroponics_power(level)
+
+func get_hydroponics_status() -> Dictionary:
+	if not life_support_sys:
+		return {}
+	return life_support_sys.get_hydroponics_status()
+
+func get_water_reclaimer_status() -> Dictionary:
+	if not life_support_sys:
+		return {}
+	return life_support_sys.get_water_reclaimer_status()
+
+func get_current_water_efficiency() -> float:
+	if not life_support_sys:
+		return 0.85
+	return life_support_sys.get_current_water_efficiency()
+
+func damage_life_support_system(system_name: String, amount: float) -> void:
+	## Damage a life support system (hydroponics, water_reclaimer, solar_panels, co2_scrubber)
+	if not life_support_sys:
+		return
+	match system_name:
+		"hydroponics":
+			life_support_sys.damage_hydroponics(amount)
+		"water_reclaimer":
+			life_support_sys.damage_water_reclaimer(amount)
+		"solar_panels":
+			life_support_sys.damage_solar_panels(amount)
+		"co2_scrubber":
+			life_support_sys.damage_co2_scrubber(amount)
+
+func repair_life_support_system(system_name: String, amount: float) -> void:
+	## Repair a life support system
+	if not life_support_sys:
+		return
+	match system_name:
+		"hydroponics":
+			life_support_sys.repair_hydroponics(amount)
+		"water_reclaimer":
+			life_support_sys.repair_water_reclaimer(amount)
+		"solar_panels":
+			life_support_sys.repair_solar_panels(amount)
+		"co2_scrubber":
+			life_support_sys.repair_co2_scrubber(amount)
+
+func get_solar_panels_status() -> Dictionary:
+	if not life_support_sys:
+		return {}
+	return life_support_sys.get_solar_panels_status()
+
+func get_co2_scrubber_status() -> Dictionary:
+	if not life_support_sys:
+		return {}
+	return life_support_sys.get_co2_scrubber_status()
+
+func get_all_systems_status() -> Dictionary:
+	if not life_support_sys:
+		return {}
+	return life_support_sys.get_all_systems_status()
+
+func save_life_support_state() -> Dictionary:
+	if not life_support_sys:
+		return {}
+	return life_support_sys.save_state()
+
+func load_life_support_state(state: Dictionary) -> void:
+	if life_support_sys:
+		life_support_sys.load_state(state)

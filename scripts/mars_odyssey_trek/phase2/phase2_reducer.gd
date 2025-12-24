@@ -27,7 +27,11 @@ enum ActionType {
 	APPLY_RESOURCE_DRAIN, # Crisis resource drain (O2, water, food, etc.)
 	APPLY_CREW_DAMAGE,    # Crisis crew damage
 	BREAK_SYSTEM,         # Break a ship system (control surface)
-	REPAIR_SYSTEM         # Repair a ship system
+	REPAIR_SYSTEM,        # Repair a ship system
+	# Life Support actions
+	SET_HYDROPONICS_POWER,    # Change hydroponics power level
+	DAMAGE_LIFE_SUPPORT,      # Damage a life support system
+	REPAIR_LIFE_SUPPORT       # Repair a life support system
 }
 
 # ============================================================================
@@ -95,6 +99,19 @@ static func action_repair_system(system_id: int) -> Dictionary:
 	## Repair a ship control surface system
 	return {"type": ActionType.REPAIR_SYSTEM, "system_id": system_id}
 
+# Life Support action creators
+static func action_set_hydroponics_power(level: int) -> Dictionary:
+	## Set hydroponics power level (0=OFF, 1=LOW, 2=NORMAL, 3=HIGH)
+	return {"type": ActionType.SET_HYDROPONICS_POWER, "level": level}
+
+static func action_damage_life_support(system_name: String, amount: float) -> Dictionary:
+	## Damage a life support system (hydroponics or water_reclaimer)
+	return {"type": ActionType.DAMAGE_LIFE_SUPPORT, "system_name": system_name, "amount": amount}
+
+static func action_repair_life_support(system_name: String, amount: float) -> Dictionary:
+	## Repair a life support system
+	return {"type": ActionType.REPAIR_LIFE_SUPPORT, "system_name": system_name, "amount": amount}
+
 # ============================================================================
 # MAIN REDUCER
 # ============================================================================
@@ -136,6 +153,13 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_break_system(state, action.system_id, action.cause)
 		ActionType.REPAIR_SYSTEM:
 			return _reduce_repair_system(state, action.system_id)
+		# Life Support actions
+		ActionType.SET_HYDROPONICS_POWER:
+			return _reduce_set_hydroponics_power(state, action.level)
+		ActionType.DAMAGE_LIFE_SUPPORT:
+			return _reduce_damage_life_support(state, action.system_name, action.amount)
+		ActionType.REPAIR_LIFE_SUPPORT:
+			return _reduce_repair_life_support(state, action.system_name, action.amount)
 		_:
 			return state
 
@@ -334,24 +358,163 @@ static func _update_crew_daily(state: Dictionary) -> Dictionary:
 
 static func _consume_hourly_resources(state: Dictionary) -> Dictionary:
 	## Consume food, water, oxygen from accessible containers (hourly rates)
+	## Also processes life support systems (hydroponics, water reclaimer, solar panels, CO2 scrubber)
 	var new_state = state.duplicate(true)
 	var crew_count = new_state.crew.size()
 	if crew_count == 0:
 		crew_count = 4  # Default
 
-	# Food: hourly consumption per crew
-	var food_needed = float(crew_count) * Phase2Types.HOURLY_FOOD_PER_CREW
-	new_state = _consume_from_containers(new_state, "food", food_needed)
+	# Get life support state
+	var life_support = new_state.get("life_support", Phase2Types.create_life_support_state())
+	life_support = life_support.duplicate(true)
 
-	# Water: hourly consumption per crew (with recycling)
-	var water_needed = float(crew_count) * Phase2Types.HOURLY_WATER_PER_CREW
-	new_state = _consume_from_containers(new_state, "water", water_needed)
-
-	# Oxygen: slight hourly loss from leakage
+	# Get resources for updates
 	var resources = new_state.resources.duplicate(true)
-	resources.oxygen.current = max(0, resources.oxygen.current - Phase2Types.HOURLY_OXYGEN_LOSS)
+
+	# =====================
+	# SOLAR PANELS (Power Generation) - MUST RUN FIRST
+	# =====================
+	var solar_health = life_support.get("solar_panels_health", 100.0)
+	var solar_enabled = life_support.get("solar_panels_enabled", true)
+	var solar_orientation = life_support.get("solar_panel_orientation", 1.0)
+
+	const SOLAR_BASE_OUTPUT = 15.0  # Power per hour at 100% health
+	const SOLAR_DAMAGED_OUTPUT = 5.0
+	const SOLAR_MIN_HEALTH = 10.0
+
+	var power_generated = 0.0
+	if solar_enabled and solar_health > SOLAR_MIN_HEALTH:
+		var health_factor = solar_health / 100.0
+		var base_output = SOLAR_DAMAGED_OUTPUT + (SOLAR_BASE_OUTPUT - SOLAR_DAMAGED_OUTPUT) * health_factor
+		power_generated = base_output * solar_orientation
+		resources.power.current = min(resources.power.max, resources.power.current + power_generated)
+
+	# =====================
+	# HYDROPONICS (Food Production)
+	# =====================
+	var food_produced = 0.0
+	var hydroponics_enabled = life_support.get("hydroponics_enabled", true)
+	var hydroponics_health = life_support.get("hydroponics_health", 100.0)
+
+	if hydroponics_enabled and hydroponics_health > 20:
+		var power_level = life_support.get("hydroponics_power_level", 2)
+		var level_config = Phase2Types.HYDROPONICS_POWER_LEVELS.get(power_level, {})
+		var power_needed = level_config.get("power", 5)
+
+		# Check if we have enough power
+		if resources.power.current >= power_needed:
+			# Consume power for hydroponics
+			resources.power.current = max(0, resources.power.current - power_needed)
+
+			# Grow potatoes (health affects growth rate)
+			var health_factor = hydroponics_health / 100.0
+			var yield_rate = level_config.get("yield_per_hour", 0.06) * health_factor
+			life_support.hydroponics_growth_progress = life_support.get("hydroponics_growth_progress", 0.0) + 1.0
+
+			# Check for harvest
+			if life_support.hydroponics_growth_progress >= Phase2Types.HYDROPONICS_GROWTH_CYCLE_HOURS:
+				life_support.hydroponics_growth_progress = 0.0
+				food_produced = Phase2Types.HYDROPONICS_HARVEST_AMOUNT * health_factor
+			else:
+				# Small continuous yield
+				food_produced = yield_rate
+
+	# =====================
+	# WATER RECLAIMER (Efficiency)
+	# =====================
+	var water_efficiency = 0.0
+	var reclaimer_enabled = life_support.get("water_reclaimer_enabled", true)
+	var reclaimer_health = life_support.get("water_reclaimer_health", 100.0)
+	const RECLAIMER_POWER = 3.0  # Power per hour
+
+	if reclaimer_enabled and reclaimer_health > 0:
+		water_efficiency = Phase2Types.get_water_recycling_efficiency(reclaimer_health)
+		# Consume power for water reclaimer
+		if resources.power.current >= RECLAIMER_POWER:
+			resources.power.current = max(0, resources.power.current - RECLAIMER_POWER)
+		else:
+			# Not enough power - reduced efficiency
+			water_efficiency = water_efficiency * 0.5
+
+	# =====================
+	# CO2 SCRUBBER (Oxygen Generation)
+	# =====================
+	var oxygen_produced = 0.0
+	var scrubber_enabled = life_support.get("co2_scrubber_enabled", true)
+	var scrubber_health = life_support.get("co2_scrubber_health", 100.0)
+	const SCRUBBER_POWER = 4.0  # Power per hour
+	const SCRUBBER_BASE_OUTPUT = 0.8  # Oxygen per hour at 100%
+	const SCRUBBER_DAMAGED_OUTPUT = 0.3
+
+	if scrubber_enabled and scrubber_health > 20:
+		if resources.power.current >= SCRUBBER_POWER:
+			resources.power.current = max(0, resources.power.current - SCRUBBER_POWER)
+			var health_factor = scrubber_health / 100.0
+			oxygen_produced = SCRUBBER_DAMAGED_OUTPUT + (SCRUBBER_BASE_OUTPUT - SCRUBBER_DAMAGED_OUTPUT) * health_factor
+
+	# =====================
+	# FOOD CONSUMPTION (with hydroponics offset)
+	# =====================
+	var food_needed = float(crew_count) * Phase2Types.HOURLY_FOOD_PER_CREW
+	var net_food_needed = max(0, food_needed - food_produced)
+
+	# Apply resource changes before container updates
+	new_state.resources = resources
+	new_state = _consume_from_containers(new_state, "food", net_food_needed)
+
+	# If we produced more than we consumed, add to first available container
+	if food_produced > food_needed:
+		var excess = food_produced - food_needed
+		new_state = _add_to_containers(new_state, "food", excess)
+
+	# =====================
+	# WATER CONSUMPTION (with recycling)
+	# =====================
+	# With 92% efficiency, only 8% of water is actually lost
+	var base_water_needed = float(crew_count) * Phase2Types.HOURLY_WATER_PER_CREW
+	var net_water_needed = Phase2Types.get_net_water_consumption(base_water_needed, water_efficiency)
+	new_state = _consume_from_containers(new_state, "water", net_water_needed)
+
+	# =====================
+	# OXYGEN (consumption - regeneration from CO2 scrubber)
+	# =====================
+	resources = new_state.resources.duplicate(true)
+	var oxygen_consumed = Phase2Types.HOURLY_OXYGEN_LOSS
+	var net_oxygen_change = oxygen_produced - oxygen_consumed
+	resources.oxygen.current = clamp(resources.oxygen.current + net_oxygen_change, 0, resources.oxygen.max)
 	new_state.resources = resources
 
+	# Update life support state
+	new_state.life_support = life_support
+
+	return new_state
+
+static func _add_to_containers(state: Dictionary, resource_type: String, amount: float) -> Dictionary:
+	## Add resource to accessible containers (for hydroponics harvest)
+	var new_state = state.duplicate(true)
+	var containers = new_state.storage_containers.duplicate()
+	var remaining = amount
+
+	for i in range(containers.size()):
+		if remaining <= 0:
+			break
+
+		var container = containers[i]
+		if not container.accessible:
+			continue
+
+		var current = container.get(resource_type, 0)
+		var max_val = container.get(resource_type + "_max", 0)
+		var can_add = max_val - current
+
+		if can_add > 0:
+			var to_add = min(remaining, can_add)
+			var new_container = container.duplicate()
+			new_container[resource_type] = current + to_add
+			containers[i] = new_container
+			remaining -= to_add
+
+	new_state.storage_containers = containers
 	return new_state
 
 static func _update_crew_hourly(state: Dictionary) -> Dictionary:
@@ -1145,6 +1308,69 @@ static func _reduce_repair_system(state: Dictionary, system_id: int) -> Dictiona
 		new_state.broken_systems = broken
 		new_state = _add_log_entry(new_state, "System repaired: %s" % _get_system_name(system_id))
 
+	return new_state
+
+# ============================================================================
+# LIFE SUPPORT REDUCERS
+# ============================================================================
+
+static func _reduce_set_hydroponics_power(state: Dictionary, level: int) -> Dictionary:
+	## Set hydroponics power level (0=OFF, 1=LOW, 2=NORMAL, 3=HIGH)
+	var new_state = state.duplicate(true)
+	var life_support = new_state.get("life_support", Phase2Types.create_life_support_state())
+	life_support = life_support.duplicate(true)
+
+	life_support.hydroponics_power_level = clamp(level, 0, 3)
+
+	var level_name = Phase2Types.HYDROPONICS_POWER_LEVELS.get(level, {}).get("name", "UNKNOWN")
+	new_state = _add_log_entry(new_state, "Hydroponics power set to %s" % level_name)
+	new_state.life_support = life_support
+	return new_state
+
+static func _reduce_damage_life_support(state: Dictionary, system_name: String, amount: float) -> Dictionary:
+	## Damage a life support system
+	var new_state = state.duplicate(true)
+	var life_support = new_state.get("life_support", Phase2Types.create_life_support_state())
+	life_support = life_support.duplicate(true)
+
+	if system_name == "hydroponics":
+		life_support.hydroponics_health = max(0, life_support.hydroponics_health - amount)
+		if life_support.hydroponics_health <= 20:
+			new_state = _add_log_entry(new_state, "WARNING: Hydroponics bay critically damaged!")
+		else:
+			new_state = _add_log_entry(new_state, "Hydroponics bay damaged (%.0f%% health)" % life_support.hydroponics_health)
+	elif system_name == "water_reclaimer":
+		life_support.water_reclaimer_health = max(0, life_support.water_reclaimer_health - amount)
+		if life_support.water_reclaimer_health <= 50:
+			new_state = _add_log_entry(new_state, "WARNING: Water reclaimer efficiency critical!")
+		else:
+			new_state = _add_log_entry(new_state, "Water reclaimer damaged (%.0f%% health)" % life_support.water_reclaimer_health)
+
+	new_state.life_support = life_support
+	return new_state
+
+static func _reduce_repair_life_support(state: Dictionary, system_name: String, amount: float) -> Dictionary:
+	## Repair a life support system
+	var new_state = state.duplicate(true)
+	var life_support = new_state.get("life_support", Phase2Types.create_life_support_state())
+	life_support = life_support.duplicate(true)
+
+	if system_name == "hydroponics":
+		var was_critical = life_support.hydroponics_health <= 20
+		life_support.hydroponics_health = min(100, life_support.hydroponics_health + amount)
+		if was_critical and life_support.hydroponics_health > 20:
+			new_state = _add_log_entry(new_state, "Hydroponics bay restored to operational status")
+		else:
+			new_state = _add_log_entry(new_state, "Hydroponics bay repaired (%.0f%% health)" % life_support.hydroponics_health)
+	elif system_name == "water_reclaimer":
+		var was_critical = life_support.water_reclaimer_health <= 50
+		life_support.water_reclaimer_health = min(100, life_support.water_reclaimer_health + amount)
+		if was_critical and life_support.water_reclaimer_health > 50:
+			new_state = _add_log_entry(new_state, "Water reclaimer restored to full efficiency")
+		else:
+			new_state = _add_log_entry(new_state, "Water reclaimer repaired (%.0f%% health)" % life_support.water_reclaimer_health)
+
+	new_state.life_support = life_support
 	return new_state
 
 static func _get_system_name(system_id: int) -> String:

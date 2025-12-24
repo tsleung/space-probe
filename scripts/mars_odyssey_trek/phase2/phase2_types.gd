@@ -240,11 +240,13 @@ static func create_default_crew() -> Array:
 # ============================================================================
 
 static func create_resources(overrides: Dictionary = {}) -> Dictionary:
+	# BALANCE: Solar generates 15/hr, systems consume 12/hr (5 hydro + 3 water + 4 CO2)
+	# Net: +3/hr when healthy. Higher capacity gives buffer for damage periods.
 	var resources = {
 		"food": {"current": 0, "max": 0},  # Computed from containers
 		"water": {"current": 0, "max": 0},  # Computed from containers
 		"oxygen": {"current": 100.0, "max": 100.0},
-		"power": {"current": 45.0, "max": 50.0},
+		"power": {"current": 80.0, "max": 100.0},  # Increased buffer for damage recovery
 		"fuel": {"current": 100.0, "max": 100.0}
 	}
 
@@ -252,6 +254,63 @@ static func create_resources(overrides: Dictionary = {}) -> Dictionary:
 		resources[key] = overrides[key]
 
 	return resources
+
+# ============================================================================
+# FACTORY FUNCTIONS - Life Support Systems
+# ============================================================================
+
+static func create_life_support_state(overrides: Dictionary = {}) -> Dictionary:
+	## Creates the life support systems state (all regenerative systems)
+	var state = {
+		# Hydroponics (Potato Farm)
+		"hydroponics_enabled": true,
+		"hydroponics_power_level": 2,  # 0=OFF, 1=LOW, 2=NORMAL, 3=HIGH
+		"hydroponics_health": 100.0,
+		"hydroponics_growth_progress": 0.0,  # Hours of growth
+		# Water Reclaimer
+		"water_reclaimer_enabled": true,
+		"water_reclaimer_health": 100.0,
+		# Solar Panels (Power Generation)
+		"solar_panels_enabled": true,
+		"solar_panels_health": 100.0,
+		"solar_panel_orientation": 1.0,  # 0-1, affects output (sun angle)
+		# CO2 Scrubber (Oxygen Generation)
+		"co2_scrubber_enabled": true,
+		"co2_scrubber_health": 100.0,
+	}
+
+	for key in overrides:
+		state[key] = overrides[key]
+
+	return state
+
+# Hydroponics power level configurations
+# BALANCE: 4 crew consume ~0.167 food/hr (4 food/day)
+# Production must exceed this when healthy. At NORMAL (0.10/hr + 8 food/72hr avg):
+# Total ~0.21 food/hr > 0.167 consumption = sustainable
+const HYDROPONICS_POWER_LEVELS = {
+	0: {"power": 0, "yield_per_hour": 0.0, "name": "OFF"},
+	1: {"power": 2, "yield_per_hour": 0.05, "name": "LOW"},       # Survival mode
+	2: {"power": 5, "yield_per_hour": 0.10, "name": "NORMAL"},    # Sustainable
+	3: {"power": 10, "yield_per_hour": 0.20, "name": "HIGH"}      # Surplus
+}
+
+# Water reclaimer efficiency constants
+const WATER_RECLAIMER_BASE_EFFICIENCY = 0.92  # 92% recycled when healthy
+const WATER_RECLAIMER_DAMAGED_EFFICIENCY = 0.60  # 60% when damaged
+const HYDROPONICS_GROWTH_CYCLE_HOURS = 72  # 3 days
+const HYDROPONICS_HARVEST_AMOUNT = 8.0  # Food units per harvest (increased for balance)
+
+static func get_water_recycling_efficiency(health: float) -> float:
+	## Calculate water recycling efficiency based on system health
+	var health_factor = health / 100.0
+	return WATER_RECLAIMER_DAMAGED_EFFICIENCY + \
+		(WATER_RECLAIMER_BASE_EFFICIENCY - WATER_RECLAIMER_DAMAGED_EFFICIENCY) * health_factor
+
+static func get_net_water_consumption(base_consumption: float, efficiency: float) -> float:
+	## Calculate net water consumption after recycling
+	## With 92% efficiency, only 8% is actually consumed
+	return base_consumption * (1.0 - efficiency)
 
 # ============================================================================
 # FACTORY FUNCTIONS - Repair State
@@ -378,6 +437,9 @@ static func create_phase2_state(overrides: Dictionary = {}) -> Dictionary:
 
 		# Repair (now in hours)
 		"repair": create_repair_state(),
+
+		# Life Support Systems (hydroponics + water reclaimer)
+		"life_support": create_life_support_state(),
 
 		# Events
 		"active_event": {},

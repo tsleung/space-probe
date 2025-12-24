@@ -34,7 +34,7 @@ var factory_build_progress = {}  # factory_id -> harvester_ship_id tracking who'
 
 # Harvester camping for factory building anywhere
 var harvester_camp_positions = {}  # ship_id -> { position, time, pending_factory_id }
-const HARVESTER_CAMP_TOLERANCE = 30.0  # How far harvester can drift while "camping"
+const HARVESTER_CAMP_TOLERANCE = 50.0  # How far harvester can drift while "camping"
 
 # Projectile pooling
 var projectile_pool: Array = []
@@ -284,8 +284,8 @@ func fire_base_weapon(team: int, charges: int = 1):
 	if state and state.has("factories"):
 		for factory_id in state.factories:
 			var factory = state.factories[factory_id]
-			if factory.team == team and factory.get("complete", false):
-				var factory_pos = factory.position
+			if factory["team"] == team and factory.get("complete", false):
+				var factory_pos = factory["position"]
 				var factory_weapon = BaseWeapon.new()
 				add_child(factory_weapon)
 				factory_weapon.init(store, team, factory_pos, charges, self)
@@ -670,6 +670,11 @@ func _input(event):
 
 func _handle_rally_click(click_pos: Vector2):
 	var state = store.get_state()
+
+	# Don't process clicks if player base is gone
+	if not base_nodes.has(VnpTypes.Team.PLAYER) or not is_instance_valid(base_nodes[VnpTypes.Team.PLAYER]):
+		return
+
 	var player_base_pos = base_nodes[VnpTypes.Team.PLAYER].position
 
 	# Check if clicked on a player-owned factory (to cycle production)
@@ -3263,14 +3268,14 @@ func _animate_camera_zoom(new_scale: float):
 
 
 func _spawn_expansion_points(phase: int):
-	"""Spawn 4-6 new asteroid fields in the NEWLY EXPANDED territory only"""
+	"""Spawn 3 new asteroid fields in the NEWLY EXPANDED territory only"""
 	var padding = WORLD_PADDING + 50
 
 	# Pre-calculate all positions BEFORE any dispatch calls to avoid state corruption
 	var points_to_spawn = []
 
-	# Spawn 4-6 asteroids per expansion (random)
-	var num_points = randi_range(4, 6)
+	# Spawn 3 asteroids per expansion
+	var num_points = 3
 
 	# Use phase to determine base positions - spawn around gameplay_center (fixed anchor)
 	var base_angle = phase * 0.7  # Rotate slightly each phase

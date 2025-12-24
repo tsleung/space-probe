@@ -1,5 +1,35 @@
 # MCS (Mars Colony Sim): Development Changelog
 
+## December 24, 2024 - AI Intelligence & Transport Systems
+
+### Smart AI Resource Management
+- **Resource Trend Analysis**: AI now tracks production vs consumption to detect deficits before they become critical
+- **Urgency-Based Prioritization**: Buildings that address resource shortages get priority boosts (+15 to +60)
+- **Deficit-Aware Upgrades**: Upgrade ROI calculation now weights resources in deficit higher
+
+### Dynamic Operating Levels
+- Buildings have `operating_level` (0-100%) that scales production and power consumption
+- **Priority Tiers**: CRITICAL (always 100%) → ESSENTIAL (min 50%) → STANDARD (min 25%) → OPTIONAL (can idle)
+- **Graceful Degradation**: During power shortages, optional buildings reduce first, life support stays online
+- Economy respects operating levels in all production/power calculations
+
+### Transport Progression System
+- **SKYHOOK** building type: Rotating momentum-exchange tether (Mars-feasible with current materials)
+- Full transport chain: STARPORT → MASS_DRIVER → SKYHOOK → ORBITAL → SPACE_ELEVATOR
+- Unlock years: 3 → 10 → 20 → 25 → 40
+- Prerequisites ensure proper tech progression (e.g., Skyhook needs Mass Driver + Research T3)
+
+### Transport Visuals
+- Rotating skyhook tether with counterweights in orbital view
+- Mass driver launch animation with plasma trail
+- Cargo catch/release flash effect on skyhook
+
+### UI Improvements
+- Tab bar for center panel: Colony View | Population | Forecast
+- Hidden panels now accessible via tabs
+
+---
+
 ## December 2024 - Major Update
 
 ### Summary

@@ -1305,8 +1305,17 @@ static func _process_entity_movement(state: Dictionary, random_values: Array = [
 						var ship_type = entity.get("ship_type", FCWTypes.ShipType.FRIGATE)
 						var count = entity.get("count", 1)
 						fleet[ship_type] = fleet.get(ship_type, 0) + count
+
+						# Also deposit any escorting fleet
+						var escorting = entity.get("escorting_fleet", {})
+						for escort_type in escorting:
+							fleet[escort_type] = fleet.get(escort_type, 0) + escorting[escort_type]
+
 						dest_zone.assigned_fleet = fleet
 						new_state.zones[entity.destination] = dest_zone
+
+					# Clear escorting fleet after depositing
+					entity["escorting_fleet"] = {}
 
 				# Log arrival with special message for Herald
 				if entity.get("id") == FCWTypes.HERALD_ENTITY_ID:
@@ -1654,6 +1663,7 @@ static func _reduce_spawn_entity(state: Dictionary, entity: Dictionary) -> Dicti
 
 static func _reduce_set_entity_destination(state: Dictionary, entity_id: String, zone_id: int, route_type: String) -> Dictionary:
 	## Set an entity's destination and begin movement
+	## Capital ships take a portion of the zone's fleet with them (1/N where N = capital ships at zone)
 	var new_state = state.duplicate(true)
 	var game_time = new_state.get("game_time", 0.0)
 	var entities = new_state.get("entities", []).duplicate()
@@ -1663,10 +1673,40 @@ static func _reduce_set_entity_destination(state: Dictionary, entity_id: String,
 			var entity = entities[i].duplicate()
 
 			# Store origin if we're starting from orbiting
+			var origin_zone = -1
 			if entity.movement_state == FCWTypes.MovementState.ORBITING:
-				entity.origin = entity.destination if entity.destination >= 0 else -1
+				origin_zone = entity.get("origin", -1)
+				if origin_zone < 0:
+					origin_zone = entity.get("destination", -1)
+				entity.origin = origin_zone
 
 			entity.destination = zone_id
+
+			# Capital ships take a portion of the zone's fleet with them
+			# Count capital ships at origin zone to determine portion
+			if origin_zone >= 0 and _is_capital_ship(entity):
+				var capital_ships_at_zone = _count_capital_ships_at_zone(entities, origin_zone)
+				if capital_ships_at_zone > 0:
+					var portion = 1.0 / float(capital_ships_at_zone)
+					var zone_data = new_state.zones.get(origin_zone, {})
+					var zone_fleet = zone_data.get("assigned_fleet", {}).duplicate()
+					var escorting = {}
+
+					# Take portion of each ship type (frigates primarily - not other capitals)
+					for ship_type in zone_fleet:
+						if ship_type == FCWTypes.ShipType.FRIGATE:
+							var count = zone_fleet[ship_type]
+							var to_take = int(ceil(count * portion))
+							if to_take > 0:
+								escorting[ship_type] = to_take
+								zone_fleet[ship_type] = count - to_take
+								if zone_fleet[ship_type] <= 0:
+									zone_fleet.erase(ship_type)
+
+					# Store escorting fleet on entity and update zone
+					entity["escorting_fleet"] = escorting
+					zone_data.assigned_fleet = zone_fleet
+					new_state.zones[origin_zone] = zone_data
 
 			# Get route options and select based on route_type
 			var from_pos = entity.position
@@ -1705,6 +1745,30 @@ static func _reduce_set_entity_destination(state: Dictionary, entity_id: String,
 
 	new_state.entities = entities
 	return new_state
+
+static func _is_capital_ship(entity: Dictionary) -> bool:
+	## Check if entity is a capital ship (Cruiser, Carrier, or Dreadnought)
+	if entity.get("entity_type") != FCWTypes.EntityType.WARSHIP:
+		return false
+	var ship_type = entity.get("ship_type", FCWTypes.ShipType.FRIGATE)
+	return ship_type in [FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.DREADNOUGHT]
+
+static func _count_capital_ships_at_zone(entities: Array, zone_id: int) -> int:
+	## Count capital ships currently orbiting at a zone
+	var count = 0
+	for entity in entities:
+		if entity.get("entity_type") != FCWTypes.EntityType.WARSHIP:
+			continue
+		if entity.get("movement_state") != FCWTypes.MovementState.ORBITING:
+			continue
+		var origin = entity.get("origin", -1)
+		if origin < 0:
+			origin = entity.get("destination", -1)
+		if origin != zone_id:
+			continue
+		if _is_capital_ship(entity):
+			count += 1
+	return count
 
 static func _reduce_set_entity_movement_state(state: Dictionary, entity_id: String, movement_state: int) -> Dictionary:
 	## Change an entity's movement state (e.g., switch from burning to coasting)

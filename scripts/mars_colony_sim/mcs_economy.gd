@@ -42,6 +42,10 @@ const ADJACENCY_SYNERGIES = {
 	"medical_habitat": {"bonus": 0.10, "resource": "health"},
 	# Space synergy: Orbital near Starport = better coordination
 	"orbital_starport": {"bonus": 0.15, "resource": "immigration"},
+	# Skyhook synergy: Skyhook near Mass Driver = efficient catch operations
+	"skyhook_mass_driver": {"bonus": 0.25, "resource": "all"},
+	# Skyhook synergy: Skyhook near Orbital = passenger transfers
+	"skyhook_orbital": {"bonus": 0.20, "resource": "immigration"},
 	# Refining synergy: Foundry near Extractor = material efficiency
 	"foundry_extractor": {"bonus": 0.15, "resource": "building_materials"},
 	# Parts synergy: Precision near Research = better parts
@@ -240,6 +244,7 @@ static func _get_type_key(building_type: int) -> String:
 		_MCSTypes.BuildingType.STARPORT: return "starport"
 		_MCSTypes.BuildingType.ORBITAL: return "orbital"
 		_MCSTypes.BuildingType.CATCHER: return "catcher"
+		_MCSTypes.BuildingType.SKYHOOK: return "skyhook"
 		_MCSTypes.BuildingType.MASS_DRIVER: return "mass_driver"
 		_MCSTypes.BuildingType.FUSION_PLANT: return "fusion_plant"
 		_MCSTypes.BuildingType.SPACE_ELEVATOR: return "space_elevator"
@@ -276,6 +281,9 @@ static func calc_yearly_production(buildings: Array, colonists: Array, _resource
 		var tier = building.get("tier", 1)
 		var building_type = building.get("type", 0)
 
+		# Operating level scales production (0.0 = idle, 1.0 = full)
+		var operating_level = building.get("operating_level", 1.0)
+
 		# Calculate synergy bonuses for this building
 		var synergy = calc_synergy_multiplier(building, buildings)
 		var base_multiplier = synergy.multiplier  # diversity * clustering
@@ -288,13 +296,13 @@ static func calc_yearly_production(buildings: Array, colonists: Array, _resource
 		var produces = tier_stats.get("production", {})
 		for resource_name in produces:
 			var base_amount = produces[resource_name]
-			# Apply efficiency + synergy multiplier + per-resource adjacency bonus
+			# Apply efficiency + synergy multiplier + per-resource adjacency bonus + operating level
 			var synergy_mult = base_multiplier
 			if adjacency_bonuses.has(resource_name):
 				synergy_mult += adjacency_bonuses[resource_name]
 			elif adjacency_bonuses.has("all"):
 				synergy_mult += adjacency_bonuses["all"]
-			var actual = base_amount * efficiency * synergy_mult
+			var actual = base_amount * efficiency * synergy_mult * operating_level
 			production[resource_name] = production.get(resource_name, 0.0) + actual
 
 		# Fall back to building definition if no tier production defined
@@ -303,23 +311,23 @@ static func calc_yearly_production(buildings: Array, colonists: Array, _resource
 			var base_produces = building_def.get("produces", {})
 			for resource_name in base_produces:
 				var base_amount = base_produces[resource_name]
-				# Apply efficiency + synergy multiplier + per-resource adjacency bonus
+				# Apply efficiency + synergy multiplier + per-resource adjacency bonus + operating level
 				var synergy_mult = base_multiplier
 				if adjacency_bonuses.has(resource_name):
 					synergy_mult += adjacency_bonuses[resource_name]
 				elif adjacency_bonuses.has("all"):
 					synergy_mult += adjacency_bonuses["all"]
-				var actual = base_amount * efficiency * synergy_mult
+				var actual = base_amount * efficiency * synergy_mult * operating_level
 				production[resource_name] = production.get(resource_name, 0.0) + actual
 
-		# Tier-based power generation (synergy applies)
+		# Tier-based power generation (synergy applies, scaled by operating level)
 		if tier_stats.has("power_gen"):
 			var power_synergy = base_multiplier
 			if adjacency_bonuses.has("power"):
 				power_synergy += adjacency_bonuses["power"]
 			elif adjacency_bonuses.has("all"):
 				power_synergy += adjacency_bonuses["all"]
-			production["power"] = production.get("power", 0.0) + tier_stats.power_gen * efficiency * power_synergy
+			production["power"] = production.get("power", 0.0) + tier_stats.power_gen * efficiency * power_synergy * operating_level
 		else:
 			# Fall back to building definition
 			var building_def = _MCSTypes.get_building_definition(building_type)
@@ -329,7 +337,7 @@ static func calc_yearly_production(buildings: Array, colonists: Array, _resource
 					power_synergy += adjacency_bonuses["power"]
 				elif adjacency_bonuses.has("all"):
 					power_synergy += adjacency_bonuses["all"]
-				production["power"] = production.get("power", 0.0) + building_def.power_generation * efficiency * power_synergy
+				production["power"] = production.get("power", 0.0) + building_def.power_generation * efficiency * power_synergy * operating_level
 
 	return production
 
@@ -578,17 +586,20 @@ static func calc_power_balance(buildings: Array, colonists: Array, balance: Dict
 		var building_def = _MCSTypes.get_building_definition(building_type)
 		var efficiency = calc_building_efficiency(building, colonists)
 
-		# Tier-based power generation
-		if tier_stats.has("power_gen"):
-			generation += tier_stats.power_gen * efficiency
-		elif building_def.has("power_generation"):
-			generation += building_def.power_generation * efficiency
+		# Operating level scales both generation and consumption
+		var operating_level = building.get("operating_level", 1.0)
 
-		# Tier-based power consumption (higher tiers use less power)
+		# Tier-based power generation (scaled by operating level)
+		if tier_stats.has("power_gen"):
+			generation += tier_stats.power_gen * efficiency * operating_level
+		elif building_def.has("power_generation"):
+			generation += building_def.power_generation * efficiency * operating_level
+
+		# Tier-based power consumption (higher tiers use less power, scaled by operating level)
 		if tier_stats.has("power"):
-			consumption += tier_stats.power
+			consumption += tier_stats.power * operating_level
 		else:
-			consumption += building_def.get("power_consumption", 0.0)
+			consumption += building_def.get("power_consumption", 0.0) * operating_level
 
 	return {
 		"generation": generation,
@@ -774,6 +785,56 @@ static func execute_trade(resources: Dictionary, buildings: Array, colonists: Ar
 		"report": trade_report
 	}
 
+## Calculate transport infrastructure bonuses (skyhook reduces fuel, boosts immigration)
+## Returns {immigration_bonus: float, fuel_reduction: float, has_skyhook: bool}
+static func calc_transport_bonuses(buildings: Array, colonists: Array, balance: Dictionary = {}) -> Dictionary:
+	var transport = balance.get("transport", {})
+	var skyhook_bonus = transport.get("skyhook_immigration_bonus", 0.25)
+	var skyhook_fuel_reduction = transport.get("skyhook_fuel_reduction", 0.60)
+
+	var has_skyhook = false
+	var has_mass_driver = false
+	var has_orbital = false
+	var has_elevator = false
+	var max_skyhook_tier = 0
+
+	for building in buildings:
+		if not building.is_operational or building.is_under_construction:
+			continue
+		var btype = building.get("type", -1)
+		if btype == _MCSTypes.BuildingType.SKYHOOK:
+			has_skyhook = true
+			max_skyhook_tier = maxi(max_skyhook_tier, building.get("tier", 1))
+		elif btype == _MCSTypes.BuildingType.MASS_DRIVER:
+			has_mass_driver = true
+		elif btype == _MCSTypes.BuildingType.ORBITAL:
+			has_orbital = true
+		elif btype == _MCSTypes.BuildingType.SPACE_ELEVATOR:
+			has_elevator = true
+
+	# Skyhook provides immigration bonus (stacks with tier)
+	var immigration_bonus = 0.0
+	var fuel_reduction = 0.0
+
+	if has_skyhook:
+		# Tier-based bonus from BUILDING_TIER_STATS
+		var tier_stats = _MCSTypes.get_tier_stats(_MCSTypes.BuildingType.SKYHOOK, max_skyhook_tier)
+		immigration_bonus = tier_stats.get("immigration_bonus", skyhook_bonus)
+
+		# Skyhook + Mass Driver = efficient cargo launches (fuel savings)
+		if has_mass_driver:
+			fuel_reduction = skyhook_fuel_reduction * (0.5 + max_skyhook_tier * 0.1)
+
+	return {
+		"immigration_bonus": immigration_bonus,
+		"fuel_reduction": clampf(fuel_reduction, 0.0, 0.8),  # Max 80% reduction
+		"has_skyhook": has_skyhook,
+		"has_mass_driver": has_mass_driver,
+		"has_orbital": has_orbital,
+		"has_elevator": has_elevator,
+		"skyhook_tier": max_skyhook_tier
+	}
+
 ## Get trade balance summary for UI
 static func get_trade_summary(resources: Dictionary, buildings: Array, colonists: Array) -> Dictionary:
 	var capacity = calc_trade_capacity(buildings, colonists)
@@ -850,6 +911,8 @@ static func _get_construction_cost(building_type: int) -> Dictionary:
 			return {"building_materials": 600, "machine_parts": 150, "fuel": 80}
 		_MCSTypes.BuildingType.CATCHER:
 			return {"building_materials": 800, "machine_parts": 200, "fuel": 100}
+		_MCSTypes.BuildingType.SKYHOOK:
+			return {"building_materials": 600, "machine_parts": 180}
 		# === MEGASTRUCTURES ===
 		_MCSTypes.BuildingType.MASS_DRIVER:
 			return {"building_materials": 500, "machine_parts": 200}

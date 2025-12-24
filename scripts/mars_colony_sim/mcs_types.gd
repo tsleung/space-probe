@@ -77,6 +77,18 @@ enum BuildingCategory {
 	MEGASTRUCTURE
 }
 
+## Operating priority determines minimum operating level during power shortages
+## CRITICAL: Always 100% - life support, housing
+## ESSENTIAL: Minimum 50% - food, water, oxygen, power
+## STANDARD: Minimum 25% - fabrication, research, recreation
+## OPTIONAL: Can reduce to 0% - starport, expansion buildings
+enum OperatingPriority {
+	CRITICAL,    # Always 100% - never reduce
+	ESSENTIAL,   # Min 50% during shortage
+	STANDARD,    # Min 25% during shortage
+	OPTIONAL     # Can idle completely
+}
+
 enum BuildingType {
 	# === HOUSING (3) ===
 	HABITAT,            # Standard living quarters (was HAB_POD + APARTMENT_BLOCK)
@@ -114,10 +126,11 @@ enum BuildingType {
 	COMMS,              # Earth connection, trade info (was COMMUNICATIONS)
 	LOGISTICS,          # Transport hub, construction speed (was AIRLOCK + LANDING_PAD)
 
-	# === SPACE ECONOMY (3) ===
+	# === SPACE ECONOMY (4) ===
 	STARPORT,           # Gateway to orbit, immigration, trade
 	ORBITAL,            # Space station, mass immigration (was SPACE_STATION)
 	CATCHER,            # Asteroid mining, massive materials (was ASTEROID_CATCHER)
+	SKYHOOK,            # Rotating tether - catches hypersonic payloads (momentum exchange)
 
 	# === MEGASTRUCTURES (3) ===
 	MASS_DRIVER,        # Electromagnetic launcher
@@ -158,7 +171,7 @@ static func get_building_category(type: BuildingType) -> BuildingCategory:
 			return BuildingCategory.SERVICES
 		BuildingType.STORAGE, BuildingType.COMMS, BuildingType.LOGISTICS:
 			return BuildingCategory.INFRASTRUCTURE
-		BuildingType.STARPORT, BuildingType.ORBITAL, BuildingType.CATCHER:
+		BuildingType.STARPORT, BuildingType.ORBITAL, BuildingType.CATCHER, BuildingType.SKYHOOK:
 			return BuildingCategory.SPACE_ECONOMY
 		BuildingType.MASS_DRIVER, BuildingType.FUSION_PLANT, BuildingType.SPACE_ELEVATOR:
 			return BuildingCategory.MEGASTRUCTURE
@@ -215,10 +228,10 @@ const UPGRADE_COSTS = {
 
 ## Time in years to complete each tier upgrade - FAST for optimal play
 const UPGRADE_DURATIONS = {
-	2: 1,   # 1 year to reach tier 2 (was 2)
-	3: 1,   # 1 year to reach tier 3 (was 2)
-	4: 2,   # 2 years to reach tier 4 (was 3)
-	5: 2,   # 2 years to reach tier 5 (was 4)
+	2: 2,   # 2 years to reach tier 2
+	3: 2,   # 2 years to reach tier 3
+	4: 3,   # 3 years to reach tier 4
+	5: 4,   # 4 years to reach tier 5 (major upgrades take longer)
 }
 
 ## Tier-based stats: production scales UP, workers scale DOWN
@@ -393,6 +406,15 @@ const BUILDING_TIER_STATS = {
 		4: {"production": {"building_materials": 1600, "machine_parts": 300}, "power": 65, "workers": 2},
 		5: {"production": {"building_materials": 2500, "machine_parts": 500}, "power": 55, "workers": 1},
 	},
+	BuildingType.SKYHOOK: {  # Rotating momentum-exchange tether - catches hypersonic payloads
+		# Physics: Kevlar/Spectra tethers work on Mars (38% Earth gravity)
+		# Tip velocity ~3.4 km/s catches mass driver launches, reduces fuel needs
+		1: {"export_capacity": 80, "import_capacity": 40, "immigration_bonus": 0.15, "power": 50, "workers": 3},
+		2: {"export_capacity": 150, "import_capacity": 70, "immigration_bonus": 0.20, "power": 48, "workers": 3},
+		3: {"export_capacity": 250, "import_capacity": 120, "immigration_bonus": 0.25, "power": 45, "workers": 2},
+		4: {"export_capacity": 400, "import_capacity": 200, "immigration_bonus": 0.30, "power": 42, "workers": 2},
+		5: {"export_capacity": 600, "import_capacity": 350, "immigration_bonus": 0.40, "power": 40, "workers": 1},
+	},
 
 	# === MEGASTRUCTURES ===
 	BuildingType.MASS_DRIVER: {  # Electromagnetic launcher
@@ -559,6 +581,7 @@ static func create_building(overrides: Dictionary = {}) -> Dictionary:
 		"is_under_construction": false,
 		"construction_progress": 0.0,
 		"construction_years": 1,
+		"operating_level": 1.0,  # 0.0-1.0, scales production and power consumption
 
 		# Workers
 		"assigned_workers": [],  # colonist IDs
@@ -966,11 +989,55 @@ static func get_building_name(type: BuildingType) -> String:
 		BuildingType.STARPORT: return "Starport"
 		BuildingType.ORBITAL: return "Orbital Station"
 		BuildingType.CATCHER: return "Asteroid Catcher"
+		BuildingType.SKYHOOK: return "Skyhook"
 		# Megastructures
 		BuildingType.MASS_DRIVER: return "Mass Driver"
 		BuildingType.FUSION_PLANT: return "Fusion Plant"
 		BuildingType.SPACE_ELEVATOR: return "Space Elevator"
 	return "Unknown"
+
+## Get operating priority for a building type
+## Determines minimum operating level during power/resource shortages
+static func get_building_priority(type: BuildingType) -> OperatingPriority:
+	match type:
+		# CRITICAL - Life support, always 100%
+		BuildingType.HABITAT, BuildingType.BARRACKS, BuildingType.QUARTERS:
+			return OperatingPriority.CRITICAL
+		BuildingType.MEDICAL:
+			return OperatingPriority.CRITICAL
+
+		# ESSENTIAL - Core production, minimum 50%
+		BuildingType.AGRIDOME, BuildingType.HYDROPONICS, BuildingType.PROTEIN_VATS:
+			return OperatingPriority.ESSENTIAL
+		BuildingType.EXTRACTOR, BuildingType.ICE_MINER, BuildingType.ATMO_PROCESSOR:
+			return OperatingPriority.ESSENTIAL
+		BuildingType.POWER_STATION, BuildingType.SOLAR_FARM, BuildingType.REACTOR, BuildingType.FUSION_PLANT:
+			return OperatingPriority.ESSENTIAL
+
+		# STANDARD - Support operations, minimum 25%
+		BuildingType.FABRICATOR, BuildingType.FOUNDRY, BuildingType.PRECISION:
+			return OperatingPriority.STANDARD
+		BuildingType.ACADEMY, BuildingType.RESEARCH, BuildingType.RECREATION:
+			return OperatingPriority.STANDARD
+		BuildingType.STORAGE, BuildingType.COMMS, BuildingType.LOGISTICS:
+			return OperatingPriority.STANDARD
+
+		# OPTIONAL - Expansion, can idle completely
+		BuildingType.STARPORT, BuildingType.ORBITAL, BuildingType.CATCHER:
+			return OperatingPriority.OPTIONAL
+		BuildingType.SKYHOOK, BuildingType.MASS_DRIVER, BuildingType.SPACE_ELEVATOR:
+			return OperatingPriority.OPTIONAL
+
+	return OperatingPriority.STANDARD
+
+## Get minimum operating level for a priority tier
+static func get_min_operating_level(priority: OperatingPriority) -> float:
+	match priority:
+		OperatingPriority.CRITICAL: return 1.0
+		OperatingPriority.ESSENTIAL: return 0.5
+		OperatingPriority.STANDARD: return 0.25
+		OperatingPriority.OPTIONAL: return 0.0
+	return 0.25
 
 static func get_trait_name(t: ColonistTrait) -> String:
 	match t:
@@ -1271,6 +1338,14 @@ static func get_building_definition(type: BuildingType) -> Dictionary:
 				"required_workers": 4,
 				"produces": {"building_materials": 350.0, "machine_parts": 60.0},
 				"maintenance_cost": {"machine_parts": 10, "fuel": 20}
+			}
+		BuildingType.SKYHOOK:
+			return {
+				"housing_capacity": 0,
+				"power_consumption": 50.0,
+				"construction_years": 3,
+				"required_workers": 3,
+				"maintenance_cost": {"machine_parts": 6, "fuel": 8}
 			}
 		# === MEGASTRUCTURES ===
 		BuildingType.MASS_DRIVER:

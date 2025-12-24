@@ -400,16 +400,27 @@ func _show_choice_visual(event_type: int, choice: int, event_data: Dictionary = 
 					_flash_room(ShipTypes.RoomType.BRIDGE, Color(0.5, 0.5, 0.7))
 
 		Phase2Types.EventType.MEDICAL_EMERGENCY:
+			# Pick a random patient (not the medic themselves)
+			var patient_roles = ["commander", "engineer", "scientist"]
+			var patient_role = patient_roles[randi() % patient_roles.size()]
+
 			match choice:
-				0:  # Full medical workup
+				0:  # Emergency surgery - patient and medic to medical bay
+					# Patient goes first (they're the one in emergency)
+					ship_view.send_crew_to_room(patient_role, ShipTypes.RoomType.MEDICAL, true)
+					# Medic runs to treat them
 					ship_view.send_crew_to_room("medical", ShipTypes.RoomType.MEDICAL, true)
-					ship_view.send_crew_to_room("scientist", ShipTypes.RoomType.MEDICAL, false)
-					_flash_room(ShipTypes.RoomType.MEDICAL, Color(0.3, 0.8, 0.5))
-				1:  # Standard treatment
+					# Scientist assists
+					if patient_role != "scientist":
+						ship_view.send_crew_to_room("scientist", ShipTypes.RoomType.MEDICAL, false)
+					_flash_room(ShipTypes.RoomType.MEDICAL, Color(0.9, 0.3, 0.3))  # Red for emergency
+				1:  # Conservative treatment - patient and medic to medical
+					ship_view.send_crew_to_room(patient_role, ShipTypes.RoomType.MEDICAL, false)
 					ship_view.send_crew_to_room("medical", ShipTypes.RoomType.MEDICAL, true)
 					_flash_room(ShipTypes.RoomType.MEDICAL, Color(0.5, 0.7, 0.5))
-				2:  # Rest and observation
-					ship_view.send_crew_to_room("medical", ShipTypes.RoomType.QUARTERS, false)
+				2:  # Aggressive treatment - patient stays in bed, medic treats
+					ship_view.send_crew_to_room(patient_role, ShipTypes.RoomType.QUARTERS, false)
+					ship_view.send_crew_to_room("medical", ShipTypes.RoomType.QUARTERS, true)
 					_flash_room(ShipTypes.RoomType.QUARTERS, Color(0.4, 0.5, 0.6))
 
 		Phase2Types.EventType.POWER_SURGE:

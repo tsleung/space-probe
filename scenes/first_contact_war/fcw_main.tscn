@@ -149,9 +149,6 @@ text = "Defense: 100"
 layout_mode = 2
 text = "Buildings: Mine x3"
 
-[node name="AssignButtons" type="HBoxContainer" parent="MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox"]
-layout_mode = 2
-
 [node name="EventLog" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
 layout_mode = 2
 size_flags_vertical = 3
@@ -174,6 +171,7 @@ layout_mode = 2
 
 [node name="SpeedLabel" type="Label" parent="MainContainer/Footer"]
 layout_mode = 2
+custom_minimum_size = Vector2(120, 0)
 text = "Speed: NORMAL"
 
 [node name="SpeedSlider" type="HSlider" parent="MainContainer/Footer"]

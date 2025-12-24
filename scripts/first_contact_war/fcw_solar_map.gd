@@ -321,7 +321,9 @@ var _entity_cycle_index: int = 0  # Current index in cycle
 # Fleet roster tracking
 var _starting_fleet: Dictionary = {}  # Starting counts by ship type
 var _current_fleet: Dictionary = {}   # Current counts by ship type
-var _capital_ship_states: Array = []  # Array of {type, alive} for grid display
+var _capital_ship_states: Array = []  # Array of {type, alive, entity_id} for grid display
+var _roster_item_rects: Array = []  # Click rects for roster items [{rect, index}]
+var _roster_panel_rect: Rect2 = Rect2()  # Panel bounds for click detection
 var _fleets_in_transit: Array = []  # Fleets traveling between zones
 var _week_progress: float = 0.0  # Continuous progress through current week (0.0-1.0)
 var _attack_flash_timer: float = 0.0
@@ -569,11 +571,18 @@ func _draw_system_view(rect: Rect2) -> void:
 	# Draw Herald observation zone (behind entities)
 	_draw_herald_observation_zone(offset)
 
+	# Draw detection probability zones (more detailed concentric rings)
+	_draw_detection_probability_zones(offset)
+
 	# Draw traffic patterns that Herald has learned
 	_draw_traffic_patterns(offset)
 
 	# Draw entity trajectories (before entities)
 	_draw_entity_trajectories(offset)
+
+	# Draw route preview curves when entity is selected (shows possible paths)
+	if _route_selection_mode and _selected_entity_id != "" and not _route_options_visible:
+		_draw_route_preview_curves(offset)
 
 	# Draw all entities from unified entity system
 	_draw_entities(offset)
@@ -3209,6 +3218,20 @@ func _gui_input(event: InputEvent) -> void:
 				queue_redraw()
 				return
 
+			# Check for roster panel click (select capital ship from menu)
+			var roster_index = _get_roster_item_at_position(mouse_pos)
+			if roster_index >= 0:
+				var entity_id = _find_entity_for_roster_item(roster_index)
+				if entity_id != "":
+					# If clicking the same ship again, cancel selection
+					if entity_id == _selected_entity_id:
+						_selected_entity_id = ""
+						_route_selection_mode = false
+						queue_redraw()
+					else:
+						_select_entity(entity_id)
+				return
+
 			# ALWAYS check for entity click first (with cycling for stacked ships)
 			# This ensures ships at planets can be selected
 			var clicked_entity = _select_entity_with_cycling(mouse_pos, offset)
@@ -3312,9 +3335,11 @@ func _get_entity_screen_pos(entity: Dictionary, game_time: float) -> Vector2:
 		if zone_id >= 0:
 			var zone_pos = _get_zone_pixel_pos(zone_id)
 			# Offset slightly from zone center based on entity index
+			# Keep ships close to planet edge, not floating far away
 			var entity_index = hash(entity.id) % 8
 			var angle = entity_index * TAU / 8.0
-			var orbit_radius = ZONE_SIZES.get(zone_id, 20.0) + 15.0
+			var zone_size = ZONE_SIZES.get(zone_id, 20.0)
+			var orbit_radius = zone_size * 0.7  # Stay within zone visual
 			return zone_pos + Vector2(cos(angle), sin(angle)) * orbit_radius
 
 	# For moving entities, interpolate between zones
@@ -3379,6 +3404,72 @@ func _get_entity_by_id(entity_id: String) -> Dictionary:
 		if entity.id == entity_id:
 			return entity
 	return {}
+
+## Get roster item index at screen position
+func _get_roster_item_at_position(pos: Vector2) -> int:
+	for item in _roster_item_rects:
+		if item.rect.has_point(pos) and item.alive:
+			return item.index
+	return -1
+
+## Find entity matching a roster ship (by type and availability)
+func _find_entity_for_roster_item(roster_index: int) -> String:
+	if roster_index < 0 or roster_index >= _capital_ship_states.size():
+		return ""
+
+	var roster_ship = _capital_ship_states[roster_index]
+	if not roster_ship.alive:
+		return ""
+
+	# If we already have an entity_id cached, use it
+	if roster_ship.get("entity_id", "") != "":
+		var entity = _get_entity_by_id(roster_ship.entity_id)
+		if not entity.is_empty() and entity.movement_state != FCWTypes.MovementState.DESTROYED:
+			return roster_ship.entity_id
+
+	# Find a warship entity of this type
+	var target_type = roster_ship.type
+	var entities = _state.get("entities", [])
+
+	# Collect all candidate entities matching this ship type
+	var candidates: Array = []
+	for entity in entities:
+		if entity.get("entity_type") != FCWTypes.EntityType.WARSHIP:
+			continue
+		if entity.get("faction") != FCWTypes.Faction.HUMAN:
+			continue
+		if entity.get("ship_type") != target_type:
+			continue
+		if entity.get("movement_state") == FCWTypes.MovementState.DESTROYED:
+			continue
+		candidates.append(entity)
+
+	# If we found any candidates, prefer ones that are orbiting (available)
+	if candidates.size() > 0:
+		# Sort: orbiting entities first, then by ID for consistency
+		candidates.sort_custom(func(a, b):
+			var a_orbiting = a.movement_state == FCWTypes.MovementState.ORBITING
+			var b_orbiting = b.movement_state == FCWTypes.MovementState.ORBITING
+			if a_orbiting != b_orbiting:
+				return a_orbiting  # Orbiting comes first
+			return a.id < b.id
+		)
+
+		# Find one that's not already mapped to another roster item
+		var used_ids: Array = []
+		for i in range(_capital_ship_states.size()):
+			if i != roster_index:
+				var other_id = _capital_ship_states[i].get("entity_id", "")
+				if other_id != "":
+					used_ids.append(other_id)
+
+		for candidate in candidates:
+			if candidate.id not in used_ids:
+				# Cache this mapping
+				_capital_ship_states[roster_index]["entity_id"] = candidate.id
+				return candidate.id
+
+	return ""
 
 ## Get route option index at screen position
 func _get_route_option_at_position(pos: Vector2) -> int:
@@ -3490,6 +3581,194 @@ func _trigger_capital_ship_launch(entity_id: String) -> void:
 		p.max_life = p.life
 		p.size = randf_range(2, 5)
 		_particles.append(p)
+
+## Draw bezier curve previews from selected entity to each possible destination
+## Shows visual paths with color-coded route types (direct, coast, gravity assist)
+func _draw_route_preview_curves(offset: Vector2) -> void:
+	var entity = _get_entity_by_id(_selected_entity_id)
+	if entity.is_empty():
+		return
+
+	var origin_zone = entity.get("origin", -1)
+	if origin_zone < 0:
+		return
+
+	var game_time = _state.get("game_time", 0.0)
+	var entity_pos = _get_entity_screen_pos(entity, game_time) + offset
+
+	# Determine ship type for route calculations
+	var ship_type = FCWTypes.ShipType.CRUISER
+	if entity.entity_type == FCWTypes.EntityType.TRANSPORT:
+		ship_type = FCWTypes.ShipType.FRIGATE
+
+	var FCWOrbital = load("res://scripts/first_contact_war/fcw_orbital.gd")
+
+	# Draw curves to each valid destination
+	for zone_id in FCWTypes.ZoneId.values():
+		if zone_id == origin_zone:
+			continue
+
+		var zone = _state.zones.get(zone_id, {})
+		if zone.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+			continue
+
+		var dest_pos = _get_zone_pixel_pos(zone_id) + offset
+		var is_hovered = _hovered_zone == zone_id
+
+		# Get route options for this destination
+		var routes = FCWOrbital.get_route_summary(origin_zone, zone_id, game_time, ship_type)
+		if routes.is_empty():
+			continue
+
+		# Draw curve for fastest route (primary preview)
+		var fastest_route = routes[0]
+		var route_type = fastest_route.get("type", "direct")
+
+		# Calculate bezier control point based on route type
+		var control_point = _calc_route_control_point(entity_pos, dest_pos, route_type, game_time)
+
+		# Determine curve color and style based on route type and hover state
+		var base_alpha = 0.15 if not is_hovered else 0.5
+		var curve_width = 1.5 if not is_hovered else 3.0
+		var curve_color: Color
+
+		match route_type:
+			"direct":
+				curve_color = Color(1.0, 0.5, 0.3, base_alpha)  # Orange - fast but visible
+			"coast":
+				curve_color = Color(0.4, 0.9, 0.5, base_alpha)  # Green - stealthy
+			"gravity_assist":
+				curve_color = Color(0.5, 0.6, 1.0, base_alpha)  # Blue - efficient
+			_:
+				curve_color = Color(0.7, 0.7, 0.7, base_alpha)  # Gray - unknown
+
+		# Draw animated bezier curve
+		_draw_animated_bezier(entity_pos, control_point, dest_pos, curve_color, curve_width)
+
+		# Draw destination marker with matching color
+		if is_hovered:
+			var pulse = sin(_global_time * 3.0) * 0.2 + 0.8
+			draw_arc(dest_pos, 12.0 * pulse, 0, TAU, 24, curve_color.lightened(0.3), 2.0)
+
+## Calculate bezier control point for route preview curve
+func _calc_route_control_point(start_pos: Vector2, end_pos: Vector2, route_type: String, _game_time: float) -> Vector2:
+	var midpoint = start_pos.lerp(end_pos, 0.5)
+	var perpendicular = (end_pos - start_pos).rotated(PI / 2).normalized()
+	var distance = start_pos.distance_to(end_pos)
+
+	# Sun is roughly at center-right of map (Earth position)
+	var sun_pos = Vector2(0.85, 0.5) * size
+	var to_sun = (sun_pos - midpoint).normalized()
+
+	match route_type:
+		"direct":
+			# Slight curve toward sun (brachistochrone approximation)
+			return midpoint + to_sun * distance * 0.08
+		"coast":
+			# Wider arc perpendicular to path (Hohmann-like transfer)
+			# Choose direction away from sun for realistic orbital path
+			var away_from_sun = -to_sun
+			return midpoint + away_from_sun * distance * 0.2
+		"gravity_assist":
+			# More pronounced curve (using gravity well)
+			return midpoint + perpendicular * distance * 0.25
+		_:
+			return midpoint
+
+## Calculate bezier control point for entity trajectory (used when entity already has route assigned)
+func _calc_trajectory_control_point(start_pos: Vector2, end_pos: Vector2, route_type: String, waypoint_zone: int) -> Vector2:
+	var midpoint = start_pos.lerp(end_pos, 0.5)
+	var perpendicular = (end_pos - start_pos).rotated(PI / 2).normalized()
+	var distance = start_pos.distance_to(end_pos)
+
+	# Sun is roughly at center-right of map (Earth position)
+	var sun_pos = Vector2(0.85, 0.5) * size
+	var to_sun = (sun_pos - midpoint).normalized()
+
+	match route_type:
+		"direct":
+			# Slight curve toward sun
+			return midpoint + to_sun * distance * 0.08
+		"coast":
+			# Wider arc away from sun
+			var away_from_sun = -to_sun
+			return midpoint + away_from_sun * distance * 0.2
+		"gravity_assist":
+			# Use waypoint zone as control point if valid
+			if waypoint_zone >= 0:
+				return _get_zone_pixel_pos(waypoint_zone)
+			# Fallback to perpendicular curve
+			return midpoint + perpendicular * distance * 0.25
+		_:
+			# Default: slight curve for visual interest
+			return midpoint + perpendicular * distance * 0.1
+
+## Draw animated dashed bezier curve with flowing dash effect
+func _draw_animated_bezier(p0: Vector2, p1: Vector2, p2: Vector2, color: Color, width: float) -> void:
+	var segments = 24
+	var dash_length = 12.0
+	var gap_length = 6.0
+
+	# Generate curve points
+	var points: Array[Vector2] = []
+	for i in range(segments + 1):
+		var t = float(i) / segments
+		var t1 = 1.0 - t
+		# Quadratic bezier: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+		var point = t1 * t1 * p0 + 2 * t1 * t * p1 + t * t * p2
+		points.append(point)
+
+	# Calculate arc lengths between points
+	var arc_lengths: Array[float] = [0.0]
+	for i in range(1, points.size()):
+		arc_lengths.append(arc_lengths[i - 1] + points[i - 1].distance_to(points[i]))
+	var total_length = arc_lengths[arc_lengths.size() - 1]
+
+	# Animated offset for flowing effect
+	var dash_offset = fmod(_global_time * 40.0, dash_length + gap_length)
+
+	# Draw dashes along the curve
+	var current_dist = -dash_offset
+	var drawing = true
+
+	while current_dist < total_length:
+		var segment_end_dist = current_dist + (dash_length if drawing else gap_length)
+
+		if drawing and current_dist < total_length:
+			var start_dist = maxf(0.0, current_dist)
+			var end_dist = minf(total_length, segment_end_dist)
+
+			if start_dist < end_dist:
+				var start_point = _get_point_at_arc_length(points, arc_lengths, start_dist)
+				var end_point = _get_point_at_arc_length(points, arc_lengths, end_dist)
+				draw_line(start_point, end_point, color, width)
+
+		current_dist = segment_end_dist
+		drawing = not drawing
+
+## Get point along bezier curve at specific arc length distance
+func _get_point_at_arc_length(points: Array[Vector2], arc_lengths: Array[float], target_dist: float) -> Vector2:
+	# Binary search for segment containing target distance
+	var low = 0
+	var high = arc_lengths.size() - 1
+
+	while low < high - 1:
+		var mid = (low + high) / 2
+		if arc_lengths[mid] < target_dist:
+			low = mid
+		else:
+			high = mid
+
+	# Interpolate within segment
+	var segment_start = arc_lengths[low]
+	var segment_end = arc_lengths[high]
+	var segment_length = segment_end - segment_start
+
+	if segment_length < 0.001:
+		return points[low]
+
+	var t = (target_dist - segment_start) / segment_length
+	return points[low].lerp(points[high], t)
 
 ## Draw route cost preview at each possible destination zone
 func _draw_route_cost_previews(offset: Vector2) -> void:
@@ -4481,33 +4760,24 @@ func _draw_entity_trajectories(offset: Vector2) -> void:
 		else:
 			traj_color = Color(0.4, 0.7, 1.0, 0.3)
 
-		# Draw trajectory as dashed line
-		var direction = (dest_pos - start_pos).normalized()
-		var distance = start_pos.distance_to(dest_pos)
-		var dash_length = 10.0
-		var gap_length = 5.0
+		# Get route type from entity (default to "direct" if not set)
+		var route_type = entity.get("route_type", "direct")
 
-		var dash_offset = 0.0
-		var drawing = true
-		while dash_offset < distance:
-			var segment_start = start_pos + direction * dash_offset
-			var segment_length = dash_length if drawing else gap_length
-			var segment_end = start_pos + direction * minf(dash_offset + segment_length, distance)
+		# Calculate bezier control point based on route type
+		var control_point = _calc_trajectory_control_point(start_pos, dest_pos, route_type, entity.get("waypoint_zone", -1))
 
-			if drawing:
-				draw_line(segment_start, segment_end, traj_color, 1.5)
-
-			dash_offset += segment_length
-			drawing = not drawing
+		# Draw trajectory as animated bezier curve
+		_draw_animated_bezier(start_pos, control_point, dest_pos, traj_color, 1.5)
 
 		# Draw destination marker
 		draw_arc(dest_pos, 8.0, 0, TAU, 16, traj_color, 1.0)
 
-		# Show ETA
+		# Show ETA at curve midpoint (use bezier midpoint for better placement)
 		if entity.eta > 0 and entity.eta < 100:
 			var eta_text = "%.1fw" % entity.eta
 			var font = ThemeDB.fallback_font
-			var mid_pos = start_pos.lerp(dest_pos, 0.5)
+			# Bezier midpoint: 0.25*p0 + 0.5*p1 + 0.25*p2
+			var mid_pos = 0.25 * start_pos + 0.5 * control_point + 0.25 * dest_pos
 			draw_string(font, mid_pos + Vector2(5, -5), eta_text, HORIZONTAL_ALIGNMENT_LEFT, 50, 10, traj_color)
 
 ## Draw Herald observation zone - clean circle showing detection radius
@@ -4613,6 +4883,84 @@ func _draw_zone_detection_labels(offset: Vector2, herald_au_pos: Vector2) -> voi
 		# Draw detection percentage
 		draw_string(font, label_pos, "[" + percent_text + "]", HORIZONTAL_ALIGNMENT_LEFT, 60, 10, label_color)
 
+## Draw detection probability zones - concentric rings showing detection risk at distances
+## Provides visual gradient from high probability (close to Herald) to low probability (far)
+func _draw_detection_probability_zones(offset: Vector2) -> void:
+	var screen_pos = _herald_position + offset
+
+	# Visual scale: map AU to pixels
+	var visual_scale = size.x / 80.0
+
+	# Observation radius in pixels
+	var base_radius = FCWHeraldAI.OBSERVATION_RADIUS * visual_scale
+
+	# Detection probability thresholds to visualize (outer to inner)
+	var thresholds = [0.1, 0.3, 0.5, 0.7, 0.9]
+
+	# Calculate radii for each threshold
+	# At base_radius (5 AU), detection is ~80% for burning ships
+	# Radius inversely related to detection probability
+	var pulse = sin(_global_time * 1.2) * 0.08 + 0.92
+
+	for i in range(thresholds.size()):
+		var prob = thresholds[i]
+		# Lower probability = larger radius (farther from Herald)
+		var ring_radius = base_radius * (2.0 - prob) * pulse
+
+		# Color gradient: red (high prob) -> orange -> yellow -> green (low prob)
+		var ring_color: Color
+		var fill_alpha = 0.03 - i * 0.005  # Subtle fill, fainter for outer rings
+
+		if prob >= 0.7:
+			ring_color = Color(1.0, 0.2, 0.2, 0.25)  # Red - very dangerous
+		elif prob >= 0.5:
+			ring_color = Color(1.0, 0.5, 0.2, 0.2)   # Orange - dangerous
+		elif prob >= 0.3:
+			ring_color = Color(1.0, 0.8, 0.3, 0.15)  # Yellow - risky
+		else:
+			ring_color = Color(0.7, 0.9, 0.4, 0.1)   # Yellow-green - safer
+
+		# Draw filled band between this ring and next outer ring
+		if i > 0:
+			var prev_radius = base_radius * (2.0 - thresholds[i - 1]) * pulse
+			_draw_ring_band(screen_pos, ring_radius, prev_radius, Color(ring_color.r, ring_color.g, ring_color.b, fill_alpha))
+
+		# Draw ring outline with subtle pulsing
+		var ring_pulse = sin(_global_time * 2.0 + i * 0.4) * 0.15 + 0.85
+		var outline_alpha = ring_color.a * ring_pulse
+		var line_width = 1.0 + (1.0 - prob) * 0.5  # Thicker for outer rings
+
+		draw_arc(screen_pos, ring_radius, 0, TAU, 48, Color(ring_color.r, ring_color.g, ring_color.b, outline_alpha), line_width)
+
+		# Label key thresholds at right edge of ring
+		if prob == 0.5 or prob == 0.1:
+			var label_pos = screen_pos + Vector2(ring_radius + 5, 0)
+			var font = ThemeDB.fallback_font
+			var label_text = "%d%%" % int(prob * 100)
+			draw_string(font, label_pos, label_text, HORIZONTAL_ALIGNMENT_LEFT, 40, 9, ring_color)
+
+## Draw a filled ring band between two radii
+func _draw_ring_band(center: Vector2, inner_radius: float, outer_radius: float, color: Color) -> void:
+	if inner_radius >= outer_radius:
+		return
+
+	var segments = 32
+	var angle_step = TAU / segments
+
+	# Draw as series of quads
+	for i in range(segments):
+		var angle1 = i * angle_step
+		var angle2 = (i + 1) * angle_step
+
+		var inner1 = center + Vector2(cos(angle1), sin(angle1)) * inner_radius
+		var inner2 = center + Vector2(cos(angle2), sin(angle2)) * inner_radius
+		var outer1 = center + Vector2(cos(angle1), sin(angle1)) * outer_radius
+		var outer2 = center + Vector2(cos(angle2), sin(angle2)) * outer_radius
+
+		# Draw quad as two triangles
+		var points = PackedVector2Array([inner1, outer1, outer2, inner2])
+		draw_colored_polygon(points, color)
+
 ## Get Herald position in AU coordinates
 func _get_herald_au_position(game_time: float) -> Vector2:
 	# Read from Herald entity if available
@@ -4706,13 +5054,18 @@ func _update_capital_ship_states() -> void:
 
 func _draw_fleet_roster(rect: Rect2) -> void:
 	## Draw fleet status panel in top-right corner with ship outlines and names
-	var panel_width = 220
+	## Clicking an alive ship selects it for route assignment
+	var panel_width = 280  # Wider to show location info
 	var row_height = 18
 	var max_ships_shown = 30  # Limit to prevent overflow
 	var ships_to_show = mini(_capital_ship_states.size(), max_ships_shown)
 	var panel_height = 30 + ships_to_show * row_height
 	var margin = 10
 	var panel_pos = Vector2(rect.size.x - panel_width - margin, margin)
+
+	# Store panel rect for click detection
+	_roster_panel_rect = Rect2(panel_pos, Vector2(panel_width, panel_height))
+	_roster_item_rects.clear()
 
 	# Panel background
 	draw_rect(Rect2(panel_pos, Vector2(panel_width, panel_height)), Color(0.02, 0.04, 0.08, 0.9))
@@ -4731,6 +5084,10 @@ func _draw_fleet_roster(rect: Rect2) -> void:
 		var ship = _capital_ship_states[i]
 		var ship_y = panel_pos.y + y_offset + i * row_height
 		var ship_x = panel_pos.x + 8
+
+		# Store click rect for this row (only for alive ships)
+		var row_rect = Rect2(Vector2(panel_pos.x, ship_y), Vector2(panel_width, row_height))
+		_roster_item_rects.append({"rect": row_rect, "index": i, "alive": ship.alive})
 
 		# Ship outline (simplified silhouette)
 		var outline_width = 24
@@ -4757,11 +5114,54 @@ func _draw_fleet_roster(rect: Rect2) -> void:
 		# Generate consistent name from index
 		var ship_name = _get_capital_ship_name(i, ship.type)
 
+		# Get entity location and escort fleet info for alive ships
+		var location_text = ""
+		var location_color = Color(0.5, 0.5, 0.5, 0.7)
+		var escort_count = 0
+		var entity_id = _find_entity_for_roster_item(i)
+		if entity_id != "" and ship.alive:
+			var entity = _get_entity_by_id(entity_id)
+			if not entity.is_empty():
+				# Count escorting fleet
+				var escorting = entity.get("escorting_fleet", {})
+				for escort_type in escorting:
+					escort_count += escorting[escort_type]
+
+				var move_state = entity.get("movement_state", FCWTypes.MovementState.ORBITING)
+				if move_state == FCWTypes.MovementState.ORBITING:
+					var origin = entity.get("origin", -1)
+					if origin >= 0:
+						location_text = "@ %s" % FCWTypes.get_zone_name(origin)
+						location_color = Color(0.4, 0.6, 0.4, 0.8)  # Green for stationed
+				elif move_state == FCWTypes.MovementState.BURNING or move_state == FCWTypes.MovementState.COASTING:
+					var dest = entity.get("destination", -1)
+					if dest >= 0:
+						var arrow = "→" if move_state == FCWTypes.MovementState.BURNING else "⟶"
+						location_text = "%s %s" % [arrow, FCWTypes.get_zone_name(dest)]
+						location_color = Color(0.6, 0.5, 0.3, 0.8)  # Orange for in transit
+
+		# Check if this ship's entity is currently selected
+		var is_selected = ship.get("entity_id", "") == _selected_entity_id and _selected_entity_id != ""
+
 		if ship.alive:
+			# Draw selection highlight if selected
+			if is_selected:
+				draw_rect(row_rect, Color(0.3, 0.5, 0.8, 0.3))
+				draw_rect(row_rect, Color(0.4, 0.6, 1.0, 0.8), false, 2.0)
+
 			# Draw ship outline (alive)
-			_draw_ship_silhouette(outline_pos, outline_width, outline_height, ship.type, base_color)
-			# Ship name
-			draw_string(font, Vector2(ship_x + outline_width + 6, ship_y + 11), ship_name, HORIZONTAL_ALIGNMENT_LEFT, 150, 8, base_color)
+			var display_color = base_color if not is_selected else base_color.lightened(0.3)
+			_draw_ship_silhouette(outline_pos, outline_width, outline_height, ship.type, display_color)
+
+			# Ship name with escort count
+			var name_with_escort = ship_name
+			if escort_count > 0:
+				name_with_escort += " +%d" % escort_count
+			draw_string(font, Vector2(ship_x + outline_width + 6, ship_y + 11), name_with_escort, HORIZONTAL_ALIGNMENT_LEFT, 100, 8, display_color)
+
+			# Location/destination (right side of row)
+			if location_text != "":
+				draw_string(font, Vector2(ship_x + outline_width + 110, ship_y + 11), location_text, HORIZONTAL_ALIGNMENT_LEFT, 130, 7, location_color)
 		else:
 			# Draw ship outline (destroyed - red X through it)
 			_draw_ship_silhouette(outline_pos, outline_width, outline_height, ship.type, Color(0.3, 0.3, 0.3, 0.5))

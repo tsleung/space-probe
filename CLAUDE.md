@@ -80,6 +80,33 @@ See `docs/DOCUMENTATION.md` for full governance, templates, and workflows.
 5. **Log decisions** → `docs/games/{game}/notes/decisions.md`
 6. **Archive project** → `docs/archive/projects/`
 
+### Mandatory: Documentation Update After Implementation
+
+**After completing any implementation work, spawn a subagent to update documentation.** This prevents documentation from falling behind without blocking the main work thread.
+
+```
+After implementation, spin off a Task subagent with:
+"Update documentation for [feature]. Check and update:
+- docs/games/{game}/design.md (if systems/mechanics changed)
+- docs/games/{game}/notes/changelog.md (append entry)
+- docs/games/{game}/notes/decisions.md (if significant choices made)
+- balance.json comments (if numbers changed)
+Do NOT update thematic/philosophy sections unless explicitly requested."
+```
+
+### What Changes vs What Stays Stable
+
+| Document Type | Stability | Updates When |
+|--------------|-----------|--------------|
+| **Core Philosophy** (FCW thesis, game identity) | Stable | Only with explicit creative direction change |
+| **Thematic Elements** (victory conditions, emotional goals) | Stable | Rarely, requires deliberate decision |
+| **Systems & Mechanics** (how things work) | Living | After implementation changes them |
+| **Balance & Numbers** (tuning values) | Living | As we tune and playtest |
+| **Decisions Log** | Immutable | Append-only, never edit past entries |
+| **Changelog** | Immutable | Append-only, never edit past entries |
+
+**Rule of thumb:** If you're changing how something *works*, update the systems docs. If you're changing what the game *is about*, that requires explicit discussion first.
+
 ### Documentation Structure
 
 ```
@@ -166,7 +193,7 @@ Test files follow `test_*.gd` naming convention and extend `GutTest`.
 Data files - game content, not engine logic:
 - `data/games/*/balance.json` - Tune numbers
 - `data/games/*/events/*.json` - Add/modify events
-- `data/games/*/components.json`, `crew_roster.json`, etc.
+- `data/games/*/crew_roster.json`, `ships.json`, etc.
 
 ### Yellow Zone: Edit with Care
 Game-specific logic - run tests after changes:
@@ -227,8 +254,6 @@ data/
 │   ├── mars_odyssey_trek/    # MOT - Core game
 │   │   ├── manifest.json
 │   │   ├── balance.json
-│   │   ├── engines.json
-│   │   ├── components.json
 │   │   ├── crew_roster.json
 │   │   └── events/
 │   ├── first_contact_war/    # FCW expansion

@@ -207,7 +207,7 @@ const SHIP_STATS = {
 		"speed": 100,           # Slow but deadly
 		"health": 220,          # Tanky
 		"damage": 50,           # Base damage, splash adds more
-		"range": 500,           # Long range bombardment
+		"range": 1000,          # Double range - true artillery platform
 		"fire_rate": 0.8,       # Slow reload, big impact
 	},
 	ShipType.HARVESTER: {

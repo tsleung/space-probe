@@ -19,42 +19,62 @@ enum Waypoint {
 	MEDICAL,
 	QUARTERS,
 	CARGO_BAY,
+	HYDROPONICS,          # New: Potato farm room
 	# Corridor waypoints
 	CORRIDOR_CENTER,      # Central corridor hub
 	CORRIDOR_UPPER_LEFT,  # Between Medical and Quarters
 	CORRIDOR_UPPER_RIGHT, # Between Quarters and Bridge
-	CORRIDOR_LOWER_LEFT,  # Between Cargo and Life Support
-	CORRIDOR_LOWER_RIGHT, # Between Life Support and Engineering
+	CORRIDOR_MIDDLE_LEFT, # Between Hydroponics and Life Support
+	CORRIDOR_MIDDLE_RIGHT,# Between Life Support and Engineering
 	CORRIDOR_VERTICAL,    # Vertical connection between rows
+	CORRIDOR_HYDRO_CARGO, # Vertical between Hydroponics and Cargo Bay
 	# Exterior waypoints (EVA)
 	AIRLOCK,              # Exit point from cargo bay
+	# Hull traversal waypoints - crew walks along hull exterior
+	HULL_TOP,             # Top of hull (crew climbs up from airlock)
+	HULL_LEFT,            # Left side of hull (toward solar panels)
+	HULL_RIGHT,           # Right side of hull (toward engine)
+	# Exterior work destinations
 	EXTERIOR_ENGINE,      # Engine maintenance area (right side)
-	EXTERIOR_ANTENNA,     # Antenna array (top)
-	EXTERIOR_SOLAR,       # Solar panels (left side)
+	EXTERIOR_ANTENNA,     # Antenna array (top/nose)
+	EXTERIOR_SOLAR,       # Solar panels (left/top side)
 }
 
 ## Graph edges - which waypoints connect directly
+## Layout:
+##   [MEDICAL]---[QUARTERS]---[CORRIDOR]---[BRIDGE]
+##                               |
+##   [HYDRO ]---[LIFE SUP]---[ENGINEERING]
+##      |
+##   [CARGO ]
 const CONNECTIONS: Dictionary = {
+	# Room connections to corridors
 	Waypoint.BRIDGE: [Waypoint.CORRIDOR_UPPER_RIGHT],
-	Waypoint.ENGINEERING: [Waypoint.CORRIDOR_LOWER_RIGHT, Waypoint.CORRIDOR_VERTICAL],
-	Waypoint.LIFE_SUPPORT: [Waypoint.CORRIDOR_LOWER_LEFT, Waypoint.CORRIDOR_LOWER_RIGHT],
+	Waypoint.ENGINEERING: [Waypoint.CORRIDOR_MIDDLE_RIGHT, Waypoint.CORRIDOR_VERTICAL],
+	Waypoint.LIFE_SUPPORT: [Waypoint.CORRIDOR_MIDDLE_LEFT, Waypoint.CORRIDOR_MIDDLE_RIGHT],
 	Waypoint.MEDICAL: [Waypoint.CORRIDOR_UPPER_LEFT],
 	Waypoint.QUARTERS: [Waypoint.CORRIDOR_UPPER_LEFT, Waypoint.CORRIDOR_UPPER_RIGHT, Waypoint.CORRIDOR_CENTER],
-	Waypoint.CARGO_BAY: [Waypoint.CORRIDOR_LOWER_LEFT, Waypoint.AIRLOCK],
+	Waypoint.HYDROPONICS: [Waypoint.CORRIDOR_MIDDLE_LEFT, Waypoint.CORRIDOR_HYDRO_CARGO],
+	Waypoint.CARGO_BAY: [Waypoint.CORRIDOR_HYDRO_CARGO, Waypoint.AIRLOCK],
 
 	# Corridor connections
 	Waypoint.CORRIDOR_CENTER: [Waypoint.QUARTERS, Waypoint.CORRIDOR_VERTICAL],
 	Waypoint.CORRIDOR_UPPER_LEFT: [Waypoint.MEDICAL, Waypoint.QUARTERS],
 	Waypoint.CORRIDOR_UPPER_RIGHT: [Waypoint.QUARTERS, Waypoint.BRIDGE, Waypoint.CORRIDOR_VERTICAL],
-	Waypoint.CORRIDOR_LOWER_LEFT: [Waypoint.CARGO_BAY, Waypoint.LIFE_SUPPORT],
-	Waypoint.CORRIDOR_LOWER_RIGHT: [Waypoint.LIFE_SUPPORT, Waypoint.ENGINEERING],
+	Waypoint.CORRIDOR_MIDDLE_LEFT: [Waypoint.HYDROPONICS, Waypoint.LIFE_SUPPORT],
+	Waypoint.CORRIDOR_MIDDLE_RIGHT: [Waypoint.LIFE_SUPPORT, Waypoint.ENGINEERING],
 	Waypoint.CORRIDOR_VERTICAL: [Waypoint.CORRIDOR_CENTER, Waypoint.CORRIDOR_UPPER_RIGHT, Waypoint.ENGINEERING],
+	Waypoint.CORRIDOR_HYDRO_CARGO: [Waypoint.HYDROPONICS, Waypoint.CARGO_BAY],
 
-	# Exterior connections (EVA only - must pass through airlock)
-	Waypoint.AIRLOCK: [Waypoint.CARGO_BAY, Waypoint.EXTERIOR_ENGINE, Waypoint.EXTERIOR_ANTENNA, Waypoint.EXTERIOR_SOLAR],
-	Waypoint.EXTERIOR_ENGINE: [Waypoint.AIRLOCK],
-	Waypoint.EXTERIOR_ANTENNA: [Waypoint.AIRLOCK],
-	Waypoint.EXTERIOR_SOLAR: [Waypoint.AIRLOCK],
+	# Exterior connections (EVA only - crew walks along hull, never through ship)
+	# Path: AIRLOCK -> HULL_TOP -> (branch to left/right) -> destinations
+	Waypoint.AIRLOCK: [Waypoint.CARGO_BAY, Waypoint.HULL_TOP],
+	Waypoint.HULL_TOP: [Waypoint.AIRLOCK, Waypoint.HULL_LEFT, Waypoint.HULL_RIGHT, Waypoint.EXTERIOR_ANTENNA],
+	Waypoint.HULL_LEFT: [Waypoint.HULL_TOP, Waypoint.EXTERIOR_SOLAR],
+	Waypoint.HULL_RIGHT: [Waypoint.HULL_TOP, Waypoint.EXTERIOR_ENGINE],
+	Waypoint.EXTERIOR_ENGINE: [Waypoint.HULL_RIGHT],
+	Waypoint.EXTERIOR_ANTENNA: [Waypoint.HULL_TOP],
+	Waypoint.EXTERIOR_SOLAR: [Waypoint.HULL_LEFT],
 }
 
 # ============================================================================
@@ -68,34 +88,55 @@ var waypoint_positions: Dictionary = {}
 static func get_default_offsets() -> Dictionary:
 	## Default waypoint offsets from ship center
 	## Based on ship layout: h_spacing=130, v_spacing=100
+	## Layout:
+	##   [MEDICAL]---[QUARTERS]---[CORRIDOR]---[BRIDGE]    (top row, y = -50)
+	##                               |
+	##   [HYDRO ]---[LIFE SUP]---[ENGINEERING]             (middle row, y = +50)
+	##      |
+	##   [CARGO ]                                          (bottom row, y = +150)
 	var h = 130.0
 	var v = 100.0
 	var half_v = v * 0.5
 
 	return {
-		# Room centers
+		# Room centers - Top row
 		Waypoint.MEDICAL: Vector2(-h * 1.5, -half_v),
 		Waypoint.QUARTERS: Vector2(-h * 0.5, -half_v),
 		Waypoint.BRIDGE: Vector2(h * 0.5, -half_v),
-		Waypoint.CARGO_BAY: Vector2(-h * 1.5, half_v),
+
+		# Room centers - Middle row
+		Waypoint.HYDROPONICS: Vector2(-h * 1.5, half_v),
 		Waypoint.LIFE_SUPPORT: Vector2(-h * 0.5, half_v),
 		Waypoint.ENGINEERING: Vector2(h * 0.5, half_v),
 
-		# Corridor waypoints (between rooms)
-		Waypoint.CORRIDOR_UPPER_LEFT: Vector2(-h, -half_v),      # Between Medical & Quarters
-		Waypoint.CORRIDOR_UPPER_RIGHT: Vector2(0, -half_v),       # Between Quarters & Bridge
-		Waypoint.CORRIDOR_LOWER_LEFT: Vector2(-h, half_v),        # Between Cargo & Life Support
-		Waypoint.CORRIDOR_LOWER_RIGHT: Vector2(0, half_v),        # Between Life Support & Engineering
+		# Room centers - Bottom row
+		Waypoint.CARGO_BAY: Vector2(-h * 1.5, v * 1.5),
+
+		# Corridor waypoints - Top row
+		Waypoint.CORRIDOR_UPPER_LEFT: Vector2(-h, -half_v),       # Between Medical & Quarters
+		Waypoint.CORRIDOR_UPPER_RIGHT: Vector2(0, -half_v),       # Between Quarters & Corridor/Bridge
 		Waypoint.CORRIDOR_CENTER: Vector2(-h * 0.5, 0),           # Central hub
-		Waypoint.CORRIDOR_VERTICAL: Vector2(0, 0),                # Vertical connection
+
+		# Corridor waypoints - Middle row
+		Waypoint.CORRIDOR_MIDDLE_LEFT: Vector2(-h, half_v),       # Between Hydro & Life Support
+		Waypoint.CORRIDOR_MIDDLE_RIGHT: Vector2(0, half_v),       # Between Life Support & Engineering
+		Waypoint.CORRIDOR_VERTICAL: Vector2(0, 0),                # Vertical connection top-middle
+
+		# Corridor waypoints - Vertical Hydro-Cargo
+		Waypoint.CORRIDOR_HYDRO_CARGO: Vector2(-h * 1.5, v),      # Between Hydroponics & Cargo
 
 		# Exterior waypoints (EVA) - positioned OUTSIDE the hull visual
-		# Hull rect is (720, 280, 480, 360), layout_center is (960, 430)
-		# Engines extend to x~640, solar panels to y~140, nose antenna at x~1340
-		Waypoint.AIRLOCK: Vector2(-280, 70),             # Left edge of cargo bay (x=680, y=500)
-		Waypoint.EXTERIOR_ENGINE: Vector2(-320, 50),     # At engine bells (x=640, y=480)
-		Waypoint.EXTERIOR_ANTENNA: Vector2(380, -30),    # At nose antenna (x=1340, y=400)
-		Waypoint.EXTERIOR_SOLAR: Vector2(-40, -290),     # At top solar panel (x=920, y=140)
+		Waypoint.AIRLOCK: Vector2(-280, 170),             # Left edge of cargo bay (below hydro)
+
+		# Hull traversal waypoints - crew walks along the hull exterior
+		Waypoint.HULL_TOP: Vector2(-200, -160),          # Top of hull
+		Waypoint.HULL_LEFT: Vector2(-120, -220),         # Left side, toward solar
+		Waypoint.HULL_RIGHT: Vector2(-280, -80),         # Right side, toward engine
+
+		# Exterior work destinations
+		Waypoint.EXTERIOR_ENGINE: Vector2(-320, 50),     # At engine bells
+		Waypoint.EXTERIOR_ANTENNA: Vector2(380, -30),    # At nose antenna
+		Waypoint.EXTERIOR_SOLAR: Vector2(-40, -290),     # At top solar panel
 	}
 
 # ============================================================================
@@ -185,6 +226,7 @@ static func room_to_waypoint(room_type: int) -> int:
 		ShipTypes.RoomType.MEDICAL: return Waypoint.MEDICAL
 		ShipTypes.RoomType.QUARTERS: return Waypoint.QUARTERS
 		ShipTypes.RoomType.CARGO_BAY: return Waypoint.CARGO_BAY
+		ShipTypes.RoomType.HYDROPONICS: return Waypoint.HYDROPONICS
 		_: return Waypoint.CORRIDOR_CENTER
 
 static func waypoint_to_room(waypoint: int) -> int:
@@ -196,6 +238,7 @@ static func waypoint_to_room(waypoint: int) -> int:
 		Waypoint.MEDICAL: return ShipTypes.RoomType.MEDICAL
 		Waypoint.QUARTERS: return ShipTypes.RoomType.QUARTERS
 		Waypoint.CARGO_BAY: return ShipTypes.RoomType.CARGO_BAY
+		Waypoint.HYDROPONICS: return ShipTypes.RoomType.HYDROPONICS
 		_: return -1  # Corridor waypoints don't map to rooms
 
 func get_waypoint_position(waypoint: int) -> Vector2:
@@ -220,6 +263,21 @@ func debug_print_graph() -> void:
 # EVA HELPERS
 # ============================================================================
 
+# Work destinations (where repairs happen)
+const EXTERIOR_WORK_WAYPOINTS = [
+	Waypoint.EXTERIOR_ENGINE,
+	Waypoint.EXTERIOR_ANTENNA,
+	Waypoint.EXTERIOR_SOLAR,
+]
+
+# Hull traversal waypoints (path along hull)
+const HULL_WAYPOINTS = [
+	Waypoint.HULL_TOP,
+	Waypoint.HULL_LEFT,
+	Waypoint.HULL_RIGHT,
+]
+
+# All exterior waypoints (used for legacy compatibility)
 const EXTERIOR_WAYPOINTS = [
 	Waypoint.EXTERIOR_ENGINE,
 	Waypoint.EXTERIOR_ANTENNA,
@@ -228,7 +286,11 @@ const EXTERIOR_WAYPOINTS = [
 
 static func is_exterior_waypoint(wp: int) -> bool:
 	## Check if waypoint is outside the ship (EVA required)
-	return wp in EXTERIOR_WAYPOINTS or wp == Waypoint.AIRLOCK
+	return wp in EXTERIOR_WORK_WAYPOINTS or wp in HULL_WAYPOINTS or wp == Waypoint.AIRLOCK
+
+static func is_hull_waypoint(wp: int) -> bool:
+	## Check if waypoint is on the hull traversal path
+	return wp in HULL_WAYPOINTS
 
 static func get_random_exterior_target() -> int:
 	## Get a random exterior work location for EVA

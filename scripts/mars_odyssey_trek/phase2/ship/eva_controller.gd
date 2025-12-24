@@ -55,6 +55,7 @@ var ship_nav: ShipNavigation = null
 # Active EVA state
 var active_eva: Dictionary = {}  # crew_role -> EVA state dict
 var exterior_surfaces: Dictionary = {}  # waypoint -> Node2D
+var maintenance_panels: Dictionary = {}  # waypoint -> panel node
 
 # Tethers
 var tethers: Dictionary = {}  # crew_role -> Line2D
@@ -98,7 +99,385 @@ func _create_surface_visual(waypoint: int, config: Dictionary, pos: Vector2) -> 
 		"solar":
 			_add_solar_visual(container, config)
 
+	# Add maintenance panel to each surface
+	var panel = _create_maintenance_panel(config.shape)
+	container.add_child(panel)
+	maintenance_panels[waypoint] = panel
+
 	return container
+
+func _create_maintenance_panel(surface_type: String) -> Node2D:
+	## Create an openable maintenance panel for exterior work
+	var panel_container = Node2D.new()
+	panel_container.name = "MaintenancePanel"
+
+	# Panel position varies by surface type
+	var panel_offset = Vector2.ZERO
+	var panel_size = Vector2(16, 12)
+
+	match surface_type:
+		"engine":
+			panel_offset = Vector2(-25, -10)
+			panel_size = Vector2(14, 10)
+		"antenna":
+			panel_offset = Vector2(0, 15)
+			panel_size = Vector2(12, 8)
+		"solar":
+			panel_offset = Vector2(25, 0)
+			panel_size = Vector2(10, 10)
+
+	panel_container.position = panel_offset
+
+	# Panel cover (closed state)
+	var cover = Polygon2D.new()
+	cover.polygon = PackedVector2Array([
+		Vector2(-panel_size.x/2, -panel_size.y/2),
+		Vector2(panel_size.x/2, -panel_size.y/2),
+		Vector2(panel_size.x/2, panel_size.y/2),
+		Vector2(-panel_size.x/2, panel_size.y/2),
+	])
+	cover.color = Color(0.5, 0.5, 0.55)
+	cover.name = "PanelCover"
+	panel_container.add_child(cover)
+
+	# Panel frame
+	var frame = Line2D.new()
+	frame.add_point(Vector2(-panel_size.x/2, -panel_size.y/2))
+	frame.add_point(Vector2(panel_size.x/2, -panel_size.y/2))
+	frame.add_point(Vector2(panel_size.x/2, panel_size.y/2))
+	frame.add_point(Vector2(-panel_size.x/2, panel_size.y/2))
+	frame.add_point(Vector2(-panel_size.x/2, -panel_size.y/2))
+	frame.width = 1.5
+	frame.default_color = Color(0.3, 0.3, 0.35)
+	frame.name = "PanelFrame"
+	panel_container.add_child(frame)
+
+	# Panel handle/latch
+	var handle = Polygon2D.new()
+	handle.polygon = PackedVector2Array([
+		Vector2(-2, -1), Vector2(2, -1),
+		Vector2(2, 1), Vector2(-2, 1),
+	])
+	handle.position = Vector2(0, panel_size.y/2 - 2)
+	handle.color = Color(0.7, 0.6, 0.2)
+	handle.name = "PanelHandle"
+	panel_container.add_child(handle)
+
+	# Interior (hidden behind cover, revealed when open)
+	var interior = Polygon2D.new()
+	interior.polygon = PackedVector2Array([
+		Vector2(-panel_size.x/2 + 1, -panel_size.y/2 + 1),
+		Vector2(panel_size.x/2 - 1, -panel_size.y/2 + 1),
+		Vector2(panel_size.x/2 - 1, panel_size.y/2 - 1),
+		Vector2(-panel_size.x/2 + 1, panel_size.y/2 - 1),
+	])
+	interior.color = Color(0.15, 0.15, 0.2)  # Dark interior
+	interior.z_index = -1  # Behind cover
+	interior.name = "PanelInterior"
+	panel_container.add_child(interior)
+
+	# Circuitry/components inside (visible when open)
+	var circuit1 = Line2D.new()
+	circuit1.add_point(Vector2(-4, -2))
+	circuit1.add_point(Vector2(0, -2))
+	circuit1.add_point(Vector2(0, 2))
+	circuit1.add_point(Vector2(4, 2))
+	circuit1.width = 1.0
+	circuit1.default_color = Color(0.3, 0.8, 0.3, 0.8)
+	circuit1.z_index = -1
+	circuit1.name = "Circuit1"
+	panel_container.add_child(circuit1)
+
+	var circuit2 = Line2D.new()
+	circuit2.add_point(Vector2(-3, 0))
+	circuit2.add_point(Vector2(3, 0))
+	circuit2.width = 1.0
+	circuit2.default_color = Color(0.8, 0.3, 0.3, 0.8)
+	circuit2.z_index = -1
+	circuit2.name = "Circuit2"
+	panel_container.add_child(circuit2)
+
+	return panel_container
+
+func open_maintenance_panel(waypoint: int) -> void:
+	## Animate opening a maintenance panel
+	var panel = maintenance_panels.get(waypoint)
+	if not panel:
+		return
+
+	var cover = panel.get_node_or_null("PanelCover")
+	if not cover:
+		return
+
+	# Animate cover opening (rotate/scale)
+	var tween = create_tween()
+	tween.tween_property(cover, "scale", Vector2(0.1, 1.0), 0.3).set_ease(Tween.EASE_OUT)
+	tween.parallel().tween_property(cover, "position:x", cover.position.x - 8, 0.3)
+
+func close_maintenance_panel(waypoint: int) -> void:
+	## Animate closing a maintenance panel
+	var panel = maintenance_panels.get(waypoint)
+	if not panel:
+		return
+
+	var cover = panel.get_node_or_null("PanelCover")
+	if not cover:
+		return
+
+	# Animate cover closing
+	var tween = create_tween()
+	tween.tween_property(cover, "scale", Vector2(1.0, 1.0), 0.3).set_ease(Tween.EASE_IN)
+	tween.parallel().tween_property(cover, "position:x", 0.0, 0.3)
+
+# ============================================================================
+# WORK ANIMATIONS & ACTIVITY INDICATORS
+# ============================================================================
+
+var active_work_animations: Dictionary = {}  # waypoint -> animation nodes
+var activity_indicators: Dictionary = {}  # waypoint -> glow node
+
+func _start_work_animation(waypoint: int) -> void:
+	## Start work-specific animation at exterior surface
+	var surface = exterior_surfaces.get(waypoint)
+	if not surface:
+		return
+
+	# Start the ship-level activity indicator (visible from distance)
+	_start_activity_indicator(waypoint)
+
+	# Get the panel position for animation placement
+	var panel = maintenance_panels.get(waypoint)
+	var panel_pos = panel.position if panel else Vector2.ZERO
+
+	match waypoint:
+		ShipNavigation.Waypoint.EXTERIOR_ENGINE:
+			_start_engine_work_animation(surface, panel_pos)
+		ShipNavigation.Waypoint.EXTERIOR_ANTENNA:
+			_start_antenna_work_animation(surface, panel_pos)
+		ShipNavigation.Waypoint.EXTERIOR_SOLAR:
+			_start_solar_work_animation(surface, panel_pos)
+
+func _stop_work_animation(waypoint: int) -> void:
+	## Stop and clean up work animation
+	if active_work_animations.has(waypoint):
+		var anim_nodes = active_work_animations[waypoint]
+		for node in anim_nodes:
+			if is_instance_valid(node):
+				node.queue_free()
+		active_work_animations.erase(waypoint)
+
+	# Stop activity indicator
+	_stop_activity_indicator(waypoint)
+
+func _start_activity_indicator(waypoint: int) -> void:
+	## Create a pulsing glow at work location visible from zoomed-out view
+	var surface = exterior_surfaces.get(waypoint)
+	if not surface:
+		return
+
+	# Determine glow color based on work type
+	var glow_color: Color
+	match waypoint:
+		ShipNavigation.Waypoint.EXTERIOR_ENGINE:
+			glow_color = Color(1.0, 0.6, 0.2, 0.4)  # Orange for welding
+		ShipNavigation.Waypoint.EXTERIOR_ANTENNA:
+			glow_color = Color(0.3, 0.7, 1.0, 0.4)  # Blue for calibration
+		ShipNavigation.Waypoint.EXTERIOR_SOLAR:
+			glow_color = Color(1.0, 0.9, 0.3, 0.4)  # Yellow for percussive
+		_:
+			glow_color = Color(0.8, 0.8, 0.8, 0.4)
+
+	# Create large outer glow (visible from distance)
+	var glow_container = Node2D.new()
+	glow_container.name = "ActivityIndicator"
+	glow_container.z_index = -2  # Behind everything else
+	surface.add_child(glow_container)
+
+	# Large soft glow
+	var outer_glow = Polygon2D.new()
+	outer_glow.polygon = _create_circle(40, 16)
+	outer_glow.color = glow_color * Color(1, 1, 1, 0.3)
+	outer_glow.name = "OuterGlow"
+	glow_container.add_child(outer_glow)
+
+	# Medium glow
+	var mid_glow = Polygon2D.new()
+	mid_glow.polygon = _create_circle(25, 12)
+	mid_glow.color = glow_color * Color(1, 1, 1, 0.5)
+	mid_glow.name = "MidGlow"
+	glow_container.add_child(mid_glow)
+
+	# Inner bright glow
+	var inner_glow = Polygon2D.new()
+	inner_glow.polygon = _create_circle(12, 8)
+	inner_glow.color = glow_color
+	inner_glow.name = "InnerGlow"
+	glow_container.add_child(inner_glow)
+
+	# Pulse animation
+	var pulse_tween = create_tween()
+	pulse_tween.set_loops()
+	pulse_tween.tween_property(glow_container, "scale", Vector2(1.2, 1.2), 0.6).set_ease(Tween.EASE_IN_OUT)
+	pulse_tween.tween_property(glow_container, "scale", Vector2(0.9, 0.9), 0.6).set_ease(Tween.EASE_IN_OUT)
+
+	# Also pulse the alpha
+	var alpha_tween = create_tween()
+	alpha_tween.set_loops()
+	alpha_tween.tween_property(glow_container, "modulate:a", 0.7, 0.5)
+	alpha_tween.tween_property(glow_container, "modulate:a", 1.0, 0.5)
+
+	activity_indicators[waypoint] = glow_container
+
+func _stop_activity_indicator(waypoint: int) -> void:
+	## Stop and remove activity indicator
+	if activity_indicators.has(waypoint):
+		var indicator = activity_indicators[waypoint]
+		if is_instance_valid(indicator):
+			# Fade out before removing
+			var tween = create_tween()
+			tween.tween_property(indicator, "modulate:a", 0.0, 0.3)
+			tween.tween_callback(indicator.queue_free)
+		activity_indicators.erase(waypoint)
+
+func _start_engine_work_animation(surface: Node2D, panel_pos: Vector2) -> void:
+	## Engine work - welding sparks
+	var anim_nodes: Array = []
+
+	# Create spark emitter container
+	var spark_container = Node2D.new()
+	spark_container.position = panel_pos + Vector2(0, 5)
+	spark_container.name = "EngineWorkAnim"
+	surface.add_child(spark_container)
+	anim_nodes.append(spark_container)
+
+	# Welding light glow
+	var glow = Polygon2D.new()
+	glow.polygon = _create_circle(8, 8)
+	glow.color = Color(1.0, 0.8, 0.3, 0.6)
+	glow.name = "WeldGlow"
+	spark_container.add_child(glow)
+
+	# Animate the glow pulsing
+	var glow_tween = create_tween()
+	glow_tween.set_loops()
+	glow_tween.tween_property(glow, "scale", Vector2(1.3, 1.3), 0.15)
+	glow_tween.tween_property(glow, "scale", Vector2(0.8, 0.8), 0.15)
+
+	# Start spark emission timer
+	var timer = Timer.new()
+	timer.wait_time = 0.2
+	timer.autostart = true
+	timer.timeout.connect(_emit_weld_spark.bind(spark_container))
+	spark_container.add_child(timer)
+
+	active_work_animations[ShipNavigation.Waypoint.EXTERIOR_ENGINE] = anim_nodes
+
+func _emit_weld_spark(container: Node2D) -> void:
+	## Emit a single welding spark
+	if not is_instance_valid(container):
+		return
+
+	var spark = Polygon2D.new()
+	spark.polygon = PackedVector2Array([
+		Vector2(-1, -1), Vector2(1, -1),
+		Vector2(1, 1), Vector2(-1, 1)
+	])
+	spark.color = Color(1.0, 0.9, 0.4)
+	container.add_child(spark)
+
+	# Random spark direction
+	var angle = randf_range(0, TAU)
+	var distance = randf_range(15, 30)
+	var end_pos = Vector2(cos(angle), sin(angle)) * distance
+
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(spark, "position", end_pos, 0.3)
+	tween.tween_property(spark, "modulate:a", 0.0, 0.3)
+	tween.chain().tween_callback(spark.queue_free)
+
+func _start_antenna_work_animation(surface: Node2D, panel_pos: Vector2) -> void:
+	## Antenna work - calibration gestures with dish movement
+	var anim_nodes: Array = []
+
+	# Create calibration indicator
+	var indicator = Node2D.new()
+	indicator.position = Vector2(0, -25)  # Above antenna dish
+	indicator.name = "AntennaWorkAnim"
+	surface.add_child(indicator)
+	anim_nodes.append(indicator)
+
+	# Signal indicator circles (like radio waves)
+	for i in range(3):
+		var ring = Line2D.new()
+		var radius = 8 + i * 6
+		for j in range(17):
+			var angle = (float(j) / 16) * TAU
+			ring.add_point(Vector2(cos(angle) * radius, sin(angle) * radius * 0.5))
+		ring.width = 1.5
+		ring.default_color = Color(0.3, 0.8, 0.3, 0.5 - i * 0.15)
+		ring.name = "Ring%d" % i
+		indicator.add_child(ring)
+
+		# Animate rings pulsing
+		var ring_tween = create_tween()
+		ring_tween.set_loops()
+		ring_tween.tween_interval(i * 0.2)  # Stagger
+		ring_tween.tween_property(ring, "scale", Vector2(1.2, 1.2), 0.5)
+		ring_tween.tween_property(ring, "scale", Vector2(0.8, 0.8), 0.5)
+
+	# Dish subtle rotation animation
+	var dish_tween = create_tween()
+	dish_tween.set_loops()
+	dish_tween.tween_property(surface, "rotation", 0.1, 1.0).set_ease(Tween.EASE_IN_OUT)
+	dish_tween.tween_property(surface, "rotation", -0.1, 1.0).set_ease(Tween.EASE_IN_OUT)
+	dish_tween.tween_property(surface, "rotation", 0.0, 0.5).set_ease(Tween.EASE_IN_OUT)
+
+	active_work_animations[ShipNavigation.Waypoint.EXTERIOR_ANTENNA] = anim_nodes
+
+func _start_solar_work_animation(surface: Node2D, panel_pos: Vector2) -> void:
+	## Solar panel work - percussive maintenance (hitting the panel)
+	var anim_nodes: Array = []
+
+	# Impact indicator
+	var impact = Node2D.new()
+	impact.position = panel_pos
+	impact.name = "SolarWorkAnim"
+	surface.add_child(impact)
+	anim_nodes.append(impact)
+
+	# Start impact timer
+	var timer = Timer.new()
+	timer.wait_time = 0.8
+	timer.autostart = true
+	timer.timeout.connect(_do_solar_hit.bind(impact, surface))
+	impact.add_child(timer)
+
+	active_work_animations[ShipNavigation.Waypoint.EXTERIOR_SOLAR] = anim_nodes
+
+func _do_solar_hit(impact_node: Node2D, surface: Node2D) -> void:
+	## Create a hit impact effect on solar panel
+	if not is_instance_valid(impact_node) or not is_instance_valid(surface):
+		return
+
+	# Impact flash
+	var flash = Polygon2D.new()
+	flash.polygon = _create_circle(6, 8)
+	flash.color = Color(1.0, 1.0, 0.8, 0.8)
+	impact_node.add_child(flash)
+
+	# Flash animation
+	var flash_tween = create_tween()
+	flash_tween.tween_property(flash, "scale", Vector2(2.0, 2.0), 0.1)
+	flash_tween.parallel().tween_property(flash, "modulate:a", 0.0, 0.15)
+	flash_tween.chain().tween_callback(flash.queue_free)
+
+	# Panel shake
+	var original_pos = surface.position
+	var shake_tween = create_tween()
+	shake_tween.tween_property(surface, "position", original_pos + Vector2(2, -1), 0.03)
+	shake_tween.tween_property(surface, "position", original_pos + Vector2(-2, 1), 0.03)
+	shake_tween.tween_property(surface, "position", original_pos, 0.04)
 
 func _add_engine_visual(container: Node2D, config: Dictionary) -> void:
 	## Engine nozzle - cone shape
@@ -220,32 +599,169 @@ func _add_solar_visual(container: Node2D, config: Dictionary) -> void:
 	container.add_child(arm)
 
 func _create_airlock_visual() -> void:
-	## Create airlock door visual
+	## Create MASSIVE airlock door visual with dramatic effects
 	var airlock_pos = ship_nav.get_waypoint_position(ShipNavigation.Waypoint.AIRLOCK)
 
 	var airlock = Node2D.new()
 	airlock.position = airlock_pos
 	airlock.name = "Airlock"
 
-	# Airlock hatch (circular)
+	# OUTER RING - Heavy industrial frame
+	var outer_frame = Polygon2D.new()
+	outer_frame.polygon = _create_circle(45, 24)
+	outer_frame.color = Color(0.25, 0.25, 0.3)
+	outer_frame.name = "OuterFrame"
+	airlock.add_child(outer_frame)
+
+	# Warning stripes ring
+	var warning_ring = Line2D.new()
+	for i in range(25):
+		var angle = (float(i) / 24) * TAU
+		warning_ring.add_point(Vector2(cos(angle) * 40, sin(angle) * 40))
+	warning_ring.width = 6.0
+	warning_ring.default_color = Color(0.9, 0.7, 0.1) if true else Color(0.1, 0.1, 0.1)
+	warning_ring.name = "WarningRing"
+	airlock.add_child(warning_ring)
+
+	# Main hatch (circular) - BIG
 	var hatch = Polygon2D.new()
-	hatch.polygon = _create_circle(15, 12)
-	hatch.color = Color(0.4, 0.4, 0.45)
+	hatch.polygon = _create_circle(35, 20)
+	hatch.color = Color(0.45, 0.45, 0.5)
+	hatch.name = "Hatch"
 	airlock.add_child(hatch)
 
-	# Hatch inner ring
+	# Hatch inner ring with details
 	var inner = Polygon2D.new()
-	inner.polygon = _create_circle(10, 12)
-	inner.color = Color(0.3, 0.3, 0.35)
+	inner.polygon = _create_circle(28, 16)
+	inner.color = Color(0.35, 0.35, 0.4)
+	inner.name = "InnerRing"
 	airlock.add_child(inner)
 
-	# Handle
+	# Center viewport window
+	var viewport = Polygon2D.new()
+	viewport.polygon = _create_circle(12, 12)
+	viewport.color = Color(0.15, 0.2, 0.25)
+	viewport.name = "Viewport"
+	airlock.add_child(viewport)
+
+	# Viewport glass reflection
+	var glass = Polygon2D.new()
+	glass.polygon = _create_circle(10, 12)
+	glass.color = Color(0.3, 0.4, 0.5, 0.4)
+	glass.name = "Glass"
+	airlock.add_child(glass)
+
+	# Locking bolts around the hatch (8 bolts)
+	for i in range(8):
+		var angle = (float(i) / 8) * TAU
+		var bolt = Polygon2D.new()
+		bolt.polygon = _create_circle(4, 6)
+		bolt.position = Vector2(cos(angle) * 32, sin(angle) * 32)
+		bolt.color = Color(0.5, 0.5, 0.55)
+		bolt.name = "Bolt%d" % i
+		airlock.add_child(bolt)
+
+	# Main handle wheel
+	var handle_bg = Polygon2D.new()
+	handle_bg.polygon = _create_circle(8, 8)
+	handle_bg.color = Color(0.3, 0.3, 0.35)
+	handle_bg.name = "HandleBg"
+	airlock.add_child(handle_bg)
+
 	var handle = Line2D.new()
 	handle.add_point(Vector2(-6, 0))
 	handle.add_point(Vector2(6, 0))
+	handle.add_point(Vector2(0, 0))
+	handle.add_point(Vector2(0, -6))
+	handle.add_point(Vector2(0, 6))
 	handle.width = 3.0
-	handle.default_color = Color(0.6, 0.6, 0.2)
+	handle.default_color = Color(0.8, 0.6, 0.2)
+	handle.name = "Handle"
 	airlock.add_child(handle)
+
+	# AIRLOCK label - positioned ABOVE the airlock, much bigger
+	var label = Label.new()
+	label.text = "◄ AIRLOCK ►"
+	label.position = Vector2(-55, -70)
+	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.3))
+	label.name = "AirlockLabel"
+	airlock.add_child(label)
+
+	# Status lights panel (multiple lights for drama)
+	var light_panel = Node2D.new()
+	light_panel.position = Vector2(55, -20)
+	light_panel.name = "LightPanel"
+	airlock.add_child(light_panel)
+
+	# Panel background
+	var panel_bg = Polygon2D.new()
+	panel_bg.polygon = PackedVector2Array([
+		Vector2(-12, -25), Vector2(12, -25),
+		Vector2(12, 25), Vector2(-12, 25)
+	])
+	panel_bg.color = Color(0.15, 0.15, 0.18)
+	light_panel.add_child(panel_bg)
+
+	# Three status lights: SEAL, PRESSURE, READY
+	var light_colors = [Color(0.2, 0.8, 0.2), Color(0.2, 0.8, 0.2), Color(0.2, 0.8, 0.2)]
+	var light_names = ["SealLight", "PressureLight", "ReadyLight"]
+	for i in range(3):
+		var light = Polygon2D.new()
+		light.polygon = _create_circle(6, 8)
+		light.position = Vector2(0, -15 + i * 15)
+		light.color = light_colors[i]
+		light.name = light_names[i]
+		light_panel.add_child(light)
+
+	# Main status light (the big one)
+	var status_light = Polygon2D.new()
+	status_light.polygon = _create_circle(8, 10)
+	status_light.position = Vector2(-55, 0)
+	status_light.color = Color(0.2, 0.9, 0.2)  # Bright green = pressurized/safe
+	status_light.name = "StatusLight"
+	airlock.add_child(status_light)
+
+	# Status light glow
+	var status_glow = Polygon2D.new()
+	status_glow.polygon = _create_circle(14, 10)
+	status_glow.position = Vector2(-55, 0)
+	status_glow.color = Color(0.2, 0.9, 0.2, 0.3)
+	status_glow.name = "StatusGlow"
+	status_glow.z_index = -1
+	airlock.add_child(status_glow)
+
+	# Pressure gauge - BIGGER
+	var gauge_container = Node2D.new()
+	gauge_container.position = Vector2(0, 55)
+	gauge_container.name = "GaugeContainer"
+	airlock.add_child(gauge_container)
+
+	var gauge_bg = Polygon2D.new()
+	gauge_bg.polygon = PackedVector2Array([
+		Vector2(-35, -8), Vector2(35, -8),
+		Vector2(35, 8), Vector2(-35, 8)
+	])
+	gauge_bg.color = Color(0.15, 0.15, 0.18)
+	gauge_bg.name = "GaugeBg"
+	gauge_container.add_child(gauge_bg)
+
+	var gauge_fill = Polygon2D.new()
+	gauge_fill.polygon = PackedVector2Array([
+		Vector2(-33, -6), Vector2(33, -6),
+		Vector2(33, 6), Vector2(-33, 6)
+	])
+	gauge_fill.color = Color(0.2, 0.7, 0.9)  # Blue = full pressure
+	gauge_fill.name = "GaugeFill"
+	gauge_container.add_child(gauge_fill)
+
+	# Gauge label
+	var gauge_label = Label.new()
+	gauge_label.text = "PRESSURE"
+	gauge_label.position = Vector2(-28, -22)
+	gauge_label.add_theme_font_size_override("font_size", 9)
+	gauge_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	gauge_container.add_child(gauge_label)
 
 	add_child(airlock)
 
@@ -408,13 +924,18 @@ func _begin_airlock_sequence(crew_role: String, target_waypoint: int) -> void:
 	print("[EVA-DEBUG] Creating tether...")
 	_create_tether(crew_role)
 
-	# Change crew to EVA state (visuals handled by crew_member)
+	# Apply EVA suit visuals
+	print("[EVA-DEBUG] Applying EVA suit visuals...")
+	_apply_eva_suit(crew_member)
+
+	# Change crew to EVA state
 	print("[EVA-DEBUG] Setting crew state to EVA...")
 	crew_member.set_state(ShipTypes.CrewState.EVA)
 	print("[EVA-DEBUG] Crew now in EVA state, tether attached, exiting airlock!")
 
 func _begin_exterior_work(crew_role: String, target_waypoint: int) -> bool:
-	## Phase 3: Move to exterior target and work
+	## Phase 3: Move along hull to exterior target and work
+	## Crew follows hull traversal path: AIRLOCK -> HULL_TOP -> (branch) -> destination
 	## Returns true if crew drifted, false otherwise
 	print("[EVA-DEBUG] _begin_exterior_work starting...")
 	var crew_member = ship_view.crew.get(crew_role)
@@ -422,27 +943,54 @@ func _begin_exterior_work(crew_role: String, target_waypoint: int) -> bool:
 		push_error("[EVA-DEBUG] _begin_exterior_work: crew_member is NULL!")
 		return false
 
-	var target_pos = ship_nav.get_waypoint_position(target_waypoint)
-	print("[EVA-DEBUG] Moving to exterior target: %s at %s" % [
-		ShipNavigation.get_exterior_name(target_waypoint), str(target_pos)])
-	print("[EVA-DEBUG] Crew current position: %s" % str(crew_member.global_position))
+	# Get the hull traversal path from airlock to target
+	var hull_path = ship_nav.find_eva_path(ShipTypes.RoomType.CARGO_BAY, target_waypoint)
+	print("[EVA-DEBUG] Hull traversal path has %d waypoints" % hull_path.size())
 
 	# EVA movement is slower and floaty
 	var eva_speed = 30.0
-	var distance = crew_member.global_position.distance_to(target_pos)
-	var duration = distance / eva_speed
-	print("[EVA-DEBUG] EVA move: distance=%.1f, duration=%.1fs" % [distance, duration])
 
-	var tween = create_tween()
-	tween.tween_property(crew_member, "global_position", target_pos, duration)
-	await tween.finished
-	print("[EVA-DEBUG] Arrived at exterior target!")
+	# Walk along hull path (skip first point which is airlock where we already are)
+	for i in range(1, hull_path.size()):
+		var next_pos = hull_path[i]
+		var distance = crew_member.global_position.distance_to(next_pos)
+		var duration = distance / eva_speed
 
-	# Work at target
-	var work_time = ShipTypes.TASK_DURATIONS.get(ShipTypes.TaskType.EVA_REPAIR, 4.0)
+		print("[EVA-DEBUG] EVA move to waypoint %d: distance=%.1f, duration=%.1fs" % [i, distance, duration])
+
+		var tween = create_tween()
+		tween.tween_property(crew_member, "global_position", next_pos, duration)
+		await tween.finished
+
+		# Check if EVA was cancelled
+		if not active_eva.has(crew_role):
+			return false
+
+	print("[EVA-DEBUG] Arrived at exterior target: %s" % ShipNavigation.get_exterior_name(target_waypoint))
+
+	# Work at target - use increased work time (6 seconds with 1s securing)
+	print("[EVA-DEBUG] Securing position (1s)...")
+	await get_tree().create_timer(1.0).timeout
+
+	# Open maintenance panel
+	print("[EVA-DEBUG] Opening maintenance panel...")
+	open_maintenance_panel(target_waypoint)
+	await get_tree().create_timer(0.3).timeout
+
+	var work_time = ShipTypes.TASK_DURATIONS.get(ShipTypes.TaskType.EVA_REPAIR, 6.0)
 	print("[EVA-DEBUG] Working on %s for %.1fs..." % [
 		ShipNavigation.get_exterior_name(target_waypoint), work_time])
+
+	# Start work animation
+	_start_work_animation(target_waypoint)
 	await get_tree().create_timer(work_time).timeout
+	_stop_work_animation(target_waypoint)
+
+	# Close maintenance panel
+	print("[EVA-DEBUG] Closing maintenance panel...")
+	close_maintenance_panel(target_waypoint)
+	await get_tree().create_timer(0.3).timeout
+
 	print("[EVA-DEBUG] Work complete!")
 
 	# Check for drift
@@ -459,22 +1007,38 @@ func _begin_exterior_work(crew_role: String, target_waypoint: int) -> bool:
 	return false
 
 func _begin_return_sequence(crew_role: String) -> void:
-	## Phase 4: Return through airlock
+	## Phase 4: Return through airlock via hull path
 	print("[EVA-DEBUG] _begin_return_sequence starting...")
 	var crew_member = ship_view.crew.get(crew_role)
 	if not crew_member:
 		push_error("[EVA-DEBUG] _begin_return_sequence: crew_member is NULL!")
 		return
 
-	# Move back to airlock
-	var airlock_pos = ship_nav.get_waypoint_position(ShipNavigation.Waypoint.AIRLOCK)
-	var distance = crew_member.global_position.distance_to(airlock_pos)
-	var duration = distance / 35.0  # Slightly faster on return
-	print("[EVA-DEBUG] Returning to airlock: distance=%.1f, duration=%.1fs" % [distance, duration])
+	# Get the current target from active_eva to find return path
+	var target_wp = active_eva[crew_role].get("target", ShipNavigation.Waypoint.EXTERIOR_ENGINE)
 
-	var tween = create_tween()
-	tween.tween_property(crew_member, "global_position", airlock_pos, duration)
-	await tween.finished
+	# Get hull path and reverse it for return
+	var hull_path = ship_nav.find_eva_path(ShipTypes.RoomType.CARGO_BAY, target_wp)
+	hull_path.reverse()
+
+	var return_speed = 35.0  # Slightly faster on return
+
+	# Walk back along hull path (skip first point which is current position)
+	for i in range(1, hull_path.size()):
+		var next_pos = hull_path[i]
+		var distance = crew_member.global_position.distance_to(next_pos)
+		var duration = distance / return_speed
+
+		print("[EVA-DEBUG] Return move to waypoint %d: distance=%.1f, duration=%.1fs" % [i, distance, duration])
+
+		var tween = create_tween()
+		tween.tween_property(crew_member, "global_position", next_pos, duration)
+		await tween.finished
+
+		# Check if EVA was cancelled
+		if not active_eva.has(crew_role):
+			return
+
 	print("[EVA-DEBUG] Arrived at airlock!")
 
 	# Animate airlock close
@@ -492,23 +1056,352 @@ func _begin_return_sequence(crew_role: String) -> void:
 	complete_eva(crew_role, true)
 
 func _animate_airlock_open() -> void:
-	## Animate the airlock door opening
+	## Animate the airlock door opening with EPIC decompression effects
 	var airlock_node = get_node_or_null("Airlock")
 	if not airlock_node:
 		return
 
-	var tween = create_tween()
-	tween.tween_property(airlock_node, "scale", Vector2(0.2, 1.0), 0.3)
-	# Could add depressurization particles here
+	# ALL LIGHTS GO RED - EMERGENCY!
+	var status_light = airlock_node.get_node_or_null("StatusLight")
+	var status_glow = airlock_node.get_node_or_null("StatusGlow")
+	if status_light:
+		status_light.color = Color(1.0, 0.2, 0.1)  # BRIGHT RED
+	if status_glow:
+		status_glow.color = Color(1.0, 0.2, 0.1, 0.5)
+
+	# Flash all panel lights red with staggered timing
+	var light_panel = airlock_node.get_node_or_null("LightPanel")
+	if light_panel:
+		for i in range(3):
+			var light = light_panel.get_node_or_null(["SealLight", "PressureLight", "ReadyLight"][i])
+			if light:
+				var light_tween = create_tween()
+				light_tween.tween_interval(i * 0.1)
+				light_tween.tween_property(light, "color", Color(1.0, 0.2, 0.1), 0.1)
+				light_tween.tween_property(light, "color", Color(0.3, 0.1, 0.1), 0.1)
+				light_tween.set_loops(5)
+
+	# WARNING RING FLASHES
+	var warning_ring = airlock_node.get_node_or_null("WarningRing")
+	if warning_ring:
+		var ring_tween = create_tween()
+		ring_tween.set_loops(6)
+		ring_tween.tween_property(warning_ring, "default_color", Color(1.0, 0.3, 0.0), 0.1)
+		ring_tween.tween_property(warning_ring, "default_color", Color(0.9, 0.7, 0.1), 0.1)
+
+	# Animate pressure gauge emptying DRAMATICALLY
+	var gauge_container = airlock_node.get_node_or_null("GaugeContainer")
+	var gauge_fill = gauge_container.get_node_or_null("GaugeFill") if gauge_container else null
+	if gauge_fill:
+		var gauge_tween = create_tween()
+		gauge_tween.tween_property(gauge_fill, "scale", Vector2(0.0, 1.0), 1.2)
+		gauge_tween.parallel().tween_property(gauge_fill, "color", Color(0.8, 0.2, 0.2), 1.2)
+
+	# MASSIVE decompression particle effect
+	_create_decompression_particles(airlock_node.global_position)
+
+	# Flash the ENTIRE airlock with emergency lighting
+	var flash_tween = create_tween()
+	flash_tween.set_loops(4)
+	flash_tween.tween_property(airlock_node, "modulate", Color(1.3, 0.8, 0.8), 0.15)
+	flash_tween.tween_property(airlock_node, "modulate", Color(1.0, 1.0, 1.0), 0.15)
+
+	# Rotate handle wheel as it unlocks
+	var handle = airlock_node.get_node_or_null("Handle")
+	if handle:
+		var handle_tween = create_tween()
+		handle_tween.tween_property(handle, "rotation", TAU, 0.8).set_ease(Tween.EASE_OUT)
+
+	# Bolts retract (scale down)
+	for i in range(8):
+		var bolt = airlock_node.get_node_or_null("Bolt%d" % i)
+		if bolt:
+			var bolt_tween = create_tween()
+			bolt_tween.tween_interval(i * 0.05)
+			bolt_tween.tween_property(bolt, "scale", Vector2(0.3, 0.3), 0.2)
+
+	# Open the hatch with dramatic swing
+	var hatch = airlock_node.get_node_or_null("Hatch")
+	var inner = airlock_node.get_node_or_null("InnerRing")
+	var viewport = airlock_node.get_node_or_null("Viewport")
+	if hatch:
+		var tween = create_tween()
+		tween.tween_interval(0.5)  # Wait for bolts
+		tween.tween_property(hatch, "scale", Vector2(0.1, 1.0), 0.6).set_ease(Tween.EASE_OUT)
+		tween.parallel().tween_property(hatch, "position:x", -30, 0.6)
+	if inner:
+		var inner_tween = create_tween()
+		inner_tween.tween_interval(0.5)
+		inner_tween.tween_property(inner, "scale", Vector2(0.1, 1.0), 0.6)
+		inner_tween.parallel().tween_property(inner, "position:x", -25, 0.6)
+	if viewport:
+		var vp_tween = create_tween()
+		vp_tween.tween_interval(0.5)
+		vp_tween.tween_property(viewport, "modulate:a", 0.0, 0.4)
 
 func _animate_airlock_close() -> void:
-	## Animate the airlock door closing
+	## Animate the airlock door closing with EPIC recompression effects
 	var airlock_node = get_node_or_null("Airlock")
 	if not airlock_node:
 		return
 
-	var tween = create_tween()
-	tween.tween_property(airlock_node, "scale", Vector2(1.0, 1.0), 0.3)
+	# SECURE THE HATCH - dramatic swing closed
+	var hatch = airlock_node.get_node_or_null("Hatch")
+	var inner = airlock_node.get_node_or_null("InnerRing")
+	var viewport = airlock_node.get_node_or_null("Viewport")
+
+	if hatch:
+		var hatch_tween = create_tween()
+		hatch_tween.tween_property(hatch, "scale", Vector2(1.0, 1.0), 0.5).set_ease(Tween.EASE_IN)
+		hatch_tween.parallel().tween_property(hatch, "position:x", 0.0, 0.5)
+	if inner:
+		var inner_tween = create_tween()
+		inner_tween.tween_property(inner, "scale", Vector2(1.0, 1.0), 0.5)
+		inner_tween.parallel().tween_property(inner, "position:x", 0.0, 0.5)
+	if viewport:
+		var vp_tween = create_tween()
+		vp_tween.tween_property(viewport, "modulate:a", 1.0, 0.3)
+
+	# Rotate handle wheel to LOCK
+	var handle = airlock_node.get_node_or_null("Handle")
+	if handle:
+		var handle_tween = create_tween()
+		handle_tween.tween_interval(0.4)
+		handle_tween.tween_property(handle, "rotation", TAU * 2, 0.8).set_ease(Tween.EASE_OUT)
+
+	# BOLTS SLAM BACK INTO PLACE - staggered for drama
+	for i in range(8):
+		var bolt = airlock_node.get_node_or_null("Bolt%d" % i)
+		if bolt:
+			var bolt_tween = create_tween()
+			bolt_tween.tween_interval(0.5 + i * 0.08)
+			bolt_tween.tween_property(bolt, "scale", Vector2(1.0, 1.0), 0.15).set_ease(Tween.EASE_OUT)
+			# Bolt flash on engage
+			bolt_tween.parallel().tween_property(bolt, "color", Color(0.8, 0.8, 0.3), 0.1)
+			bolt_tween.tween_property(bolt, "color", Color(0.5, 0.5, 0.55), 0.2)
+
+	# SEAL CONFIRMED - panel lights sequence
+	var light_panel = airlock_node.get_node_or_null("LightPanel")
+	if light_panel:
+		var light_names = ["SealLight", "PressureLight", "ReadyLight"]
+		for i in range(3):
+			var light = light_panel.get_node_or_null(light_names[i])
+			if light:
+				var light_tween = create_tween()
+				# Start yellow (in progress)
+				light_tween.tween_property(light, "color", Color(0.9, 0.7, 0.2), 0.2)
+				# Wait then turn green
+				light_tween.tween_interval(0.8 + i * 0.4)
+				light_tween.tween_property(light, "color", Color(0.2, 0.9, 0.2), 0.2)
+
+	# REPRESSURIZATION - the gauge fills with satisfying drama
+	var gauge_container = airlock_node.get_node_or_null("GaugeContainer")
+	var gauge_fill = gauge_container.get_node_or_null("GaugeFill") if gauge_container else null
+	if gauge_fill:
+		var gauge_tween = create_tween()
+		gauge_tween.tween_interval(0.5)
+		# Color shift: red -> yellow -> cyan as pressure builds
+		gauge_tween.tween_property(gauge_fill, "color", Color(0.8, 0.4, 0.2), 0.4)
+		gauge_tween.parallel().tween_property(gauge_fill, "scale", Vector2(0.4, 1.0), 0.4)
+		gauge_tween.tween_property(gauge_fill, "color", Color(0.9, 0.7, 0.2), 0.4)
+		gauge_tween.parallel().tween_property(gauge_fill, "scale", Vector2(0.7, 1.0), 0.4)
+		gauge_tween.tween_property(gauge_fill, "color", Color(0.2, 0.7, 0.9), 0.4)
+		gauge_tween.parallel().tween_property(gauge_fill, "scale", Vector2(1.0, 1.0), 0.4)
+
+	# REPRESSURIZATION PARTICLES - air rushing back in
+	_create_repressurization_particles(airlock_node.global_position)
+
+	# Main status light: RED -> YELLOW (cycling) -> GREEN
+	var status_light = airlock_node.get_node_or_null("StatusLight")
+	var status_glow = airlock_node.get_node_or_null("StatusGlow")
+	if status_light:
+		# Start with cycling yellow
+		var cycle_tween = create_tween()
+		cycle_tween.set_loops(4)
+		cycle_tween.tween_property(status_light, "color", Color(0.9, 0.7, 0.2), 0.2)
+		cycle_tween.tween_property(status_light, "color", Color(0.6, 0.4, 0.1), 0.2)
+
+		# After cycling, go solid green
+		var final_tween = create_tween()
+		final_tween.tween_interval(1.8)
+		final_tween.tween_property(status_light, "color", Color(0.2, 0.95, 0.2), 0.3)
+
+	if status_glow:
+		var glow_tween = create_tween()
+		glow_tween.tween_interval(1.8)
+		glow_tween.tween_property(status_glow, "color", Color(0.2, 0.95, 0.2, 0.4), 0.3)
+
+	# Warning ring stops flashing, returns to normal
+	var warning_ring = airlock_node.get_node_or_null("WarningRing")
+	if warning_ring:
+		var ring_tween = create_tween()
+		ring_tween.tween_interval(2.0)
+		ring_tween.tween_property(warning_ring, "default_color", Color(0.9, 0.7, 0.1), 0.3)
+
+	# Flash the whole airlock with "SAFE" green lighting
+	var safe_tween = create_tween()
+	safe_tween.tween_interval(2.0)
+	safe_tween.tween_property(airlock_node, "modulate", Color(0.9, 1.1, 0.9), 0.3)
+	safe_tween.tween_property(airlock_node, "modulate", Color(1.0, 1.0, 1.0), 0.3)
+
+func _create_repressurization_particles(pos: Vector2) -> void:
+	## Create visual effect of air rushing BACK into airlock
+	for i in range(10):
+		var particle = Polygon2D.new()
+		particle.polygon = _create_circle(2, 6)
+		particle.color = Color(0.6, 0.8, 0.95, 0.5)
+
+		# Start from outside, rush inward
+		var angle = randf_range(-PI * 0.5, PI * 0.5) - PI / 2
+		var start_offset = Vector2(cos(angle), sin(angle)) * randf_range(50, 90)
+		particle.global_position = pos + start_offset
+		add_child(particle)
+
+		# Rush toward center
+		var duration = randf_range(0.4, 0.7)
+
+		var tween = create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(particle, "global_position", pos, duration)
+		tween.tween_property(particle, "modulate:a", 0.0, duration * 0.8)
+		tween.tween_property(particle, "scale", Vector2(0.5, 0.5), duration)
+		tween.chain().tween_callback(particle.queue_free)
+
+func _create_decompression_particles(pos: Vector2) -> void:
+	## Create visual effect of air venting from airlock
+	# Create multiple small particles that drift outward
+	for i in range(8):
+		var particle = Polygon2D.new()
+		particle.polygon = _create_circle(2, 6)
+		particle.color = Color(0.7, 0.8, 0.9, 0.6)
+		particle.global_position = pos
+		add_child(particle)
+
+		# Random outward direction (biased left since airlock opens to space)
+		var angle = randf_range(-PI * 0.7, PI * 0.7) - PI / 2
+		var direction = Vector2(cos(angle), sin(angle))
+		var distance = randf_range(40, 80)
+		var duration = randf_range(0.5, 1.0)
+
+		var tween = create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(particle, "global_position", pos + direction * distance, duration)
+		tween.tween_property(particle, "modulate:a", 0.0, duration)
+		tween.tween_property(particle, "scale", Vector2(0.3, 0.3), duration)
+		tween.chain().tween_callback(particle.queue_free)
+
+# ============================================================================
+# EVA SUIT VISUALS
+# ============================================================================
+
+func _apply_eva_suit(crew_member: Node2D) -> void:
+	## Apply EVA suit visuals - white tint and helmet overlay
+	if not crew_member:
+		return
+
+	# Store original modulate for restoration
+	if not crew_member.has_meta("original_modulate"):
+		crew_member.set_meta("original_modulate", crew_member.modulate)
+
+	# Apply white suit tint
+	crew_member.modulate = Color(0.95, 0.95, 1.0)
+
+	# Add helmet overlay if not already present
+	if not crew_member.has_node("EVAHelmet"):
+		var helmet = _create_helmet_visual()
+		crew_member.add_child(helmet)
+
+	# Add backpack/life support unit
+	if not crew_member.has_node("EVABackpack"):
+		var backpack = _create_backpack_visual()
+		crew_member.add_child(backpack)
+
+func _remove_eva_suit(crew_member: Node2D) -> void:
+	## Remove EVA suit visuals and restore original appearance
+	if not crew_member:
+		return
+
+	# Restore original modulate
+	if crew_member.has_meta("original_modulate"):
+		crew_member.modulate = crew_member.get_meta("original_modulate")
+		crew_member.remove_meta("original_modulate")
+	else:
+		crew_member.modulate = Color.WHITE
+
+	# Remove helmet
+	var helmet = crew_member.get_node_or_null("EVAHelmet")
+	if helmet:
+		helmet.queue_free()
+
+	# Remove backpack
+	var backpack = crew_member.get_node_or_null("EVABackpack")
+	if backpack:
+		backpack.queue_free()
+
+func _create_helmet_visual() -> Node2D:
+	## Create a programmatic helmet overlay
+	var helmet_container = Node2D.new()
+	helmet_container.name = "EVAHelmet"
+	helmet_container.z_index = 1  # Above crew sprite
+
+	# Helmet dome (rounded rectangle-ish)
+	var dome = Polygon2D.new()
+	dome.polygon = PackedVector2Array([
+		Vector2(-7, -14), Vector2(7, -14),   # Top
+		Vector2(9, -10), Vector2(9, -2),      # Right side upper
+		Vector2(7, 2), Vector2(-7, 2),        # Bottom
+		Vector2(-9, -2), Vector2(-9, -10),    # Left side upper
+	])
+	dome.color = Color(0.85, 0.85, 0.9, 0.95)  # Light grey/white helmet
+	helmet_container.add_child(dome)
+
+	# Visor (golden reflective)
+	var visor = Polygon2D.new()
+	visor.polygon = PackedVector2Array([
+		Vector2(-5, -11), Vector2(5, -11),
+		Vector2(6, -6), Vector2(6, -2),
+		Vector2(-6, -2), Vector2(-6, -6),
+	])
+	visor.color = Color(0.9, 0.75, 0.3, 0.85)  # Golden visor
+	helmet_container.add_child(visor)
+
+	# Visor reflection highlight
+	var highlight = Line2D.new()
+	highlight.add_point(Vector2(-4, -9))
+	highlight.add_point(Vector2(2, -9))
+	highlight.width = 1.5
+	highlight.default_color = Color(1.0, 1.0, 1.0, 0.6)
+	helmet_container.add_child(highlight)
+
+	return helmet_container
+
+func _create_backpack_visual() -> Node2D:
+	## Create a life support backpack visual
+	var backpack_container = Node2D.new()
+	backpack_container.name = "EVABackpack"
+	backpack_container.z_index = -1  # Behind crew sprite
+
+	# Main backpack body
+	var body = Polygon2D.new()
+	body.polygon = PackedVector2Array([
+		Vector2(-6, -8), Vector2(0, -8),
+		Vector2(0, 6), Vector2(-6, 6),
+	])
+	body.position = Vector2(-4, 0)  # Offset to back
+	body.color = Color(0.7, 0.7, 0.75)
+	backpack_container.add_child(body)
+
+	# Oxygen tank (small cylinder)
+	var tank = Polygon2D.new()
+	tank.polygon = PackedVector2Array([
+		Vector2(-2, -6), Vector2(2, -6),
+		Vector2(2, 4), Vector2(-2, 4),
+	])
+	tank.position = Vector2(-8, 0)
+	tank.color = Color(0.3, 0.5, 0.7)  # Blue oxygen tank
+	backpack_container.add_child(tank)
+
+	return backpack_container
 
 func _create_tether(crew_role: String) -> void:
 	var tether = Line2D.new()
@@ -527,13 +1420,14 @@ func _create_tether(crew_role: String) -> void:
 	add_child(tether)
 	tethers[crew_role] = tether
 
-func _process(delta: float) -> void:
-	# Update tethers to follow crew
+func _process(_delta: float) -> void:
+	# Update visual elements only (tethers)
 	for role in active_eva:
 		_update_tether(role)
 
-	# Process drift physics
-	for role in drifting_crew:
+func _physics_process(delta: float) -> void:
+	# Process drift physics in physics_process for framerate-independent behavior
+	for role in drifting_crew.keys():  # Use .keys() to avoid modification during iteration
 		_process_drift(role, delta)
 
 func _update_tether(crew_role: String) -> void:
@@ -560,9 +1454,13 @@ func complete_eva(crew_role: String, success: bool = true) -> void:
 		tethers[crew_role].queue_free()
 		tethers.erase(crew_role)
 
-	# Send crew back to their home room
+	# Remove EVA suit visuals and send crew back to their home room
 	var crew_member = ship_view.crew.get(crew_role)
 	if crew_member:
+		# Remove EVA suit
+		_remove_eva_suit(crew_member)
+
+		# Send to home room
 		var home_room = ShipTypes.CREW_HOME_ROOMS.get(crew_role, ShipTypes.RoomType.BRIDGE)
 		ship_view.send_crew_to_room(crew_role, home_room, false)
 
@@ -594,9 +1492,13 @@ func _start_drift(crew_role: String) -> void:
 
 	# Random drift direction (away from ship)
 	var drift_dir = Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized()
-	# Bias away from ship center
-	var to_center = (ship_view.layout_center - crew_member.global_position).normalized()
-	drift_dir = (drift_dir - to_center * 0.5).normalized()
+
+	# Bias away from ship center (with null check)
+	var layout_center = ship_view.layout_center if ship_view and "layout_center" in ship_view else crew_member.global_position
+	if layout_center != Vector2.ZERO:
+		var to_center = (layout_center - crew_member.global_position).normalized()
+		if to_center.length() > 0.001:  # Avoid NaN from zero vector
+			drift_dir = (drift_dir - to_center * 0.5).normalized()
 
 	drifting_crew[crew_role] = {
 		"direction": drift_dir,
@@ -642,7 +1544,8 @@ func _process_drift(crew_role: String, delta: float) -> void:
 			crew_member.global_position += to_airlock * speed * delta
 			drift.distance -= speed * delta
 
-			if drift.distance <= 0:
+			# Use epsilon for floating point comparison to avoid precision issues
+			if drift.distance <= 0.5:  # Small tolerance
 				_complete_rescue(crew_role)
 
 func _check_for_rescue(drifted_role: String) -> void:
@@ -696,6 +1599,75 @@ func _complete_rescue(crew_role: String) -> void:
 	rescue_completed.emit(crew_role)
 
 # ============================================================================
+# SAVE/LOAD STATE
+# ============================================================================
+
+func save_eva_state() -> Dictionary:
+	## Save current EVA state for persistence
+	var state = {
+		"active_eva": {},
+		"drifting_crew": {},
+	}
+
+	# Save active EVA state (excluding visual references)
+	for role in active_eva:
+		var eva = active_eva[role]
+		state.active_eva[role] = {
+			"target": eva.get("target", 0),
+			"phase": eva.get("phase", ""),
+			"start_time": eva.get("start_time", 0),
+		}
+
+	# Save drifting crew state
+	for role in drifting_crew:
+		var drift = drifting_crew[role]
+		state.drifting_crew[role] = {
+			"direction": {"x": drift.direction.x, "y": drift.direction.y},
+			"distance": drift.distance,
+			"max_distance": drift.max_distance,
+			"phase": drift.phase,
+			"rescuer": drift.rescuer,
+		}
+
+	return state
+
+func load_eva_state(state: Dictionary) -> void:
+	## Restore EVA state from saved data
+	# Note: This should be called after ship_view and ship_nav are set up
+
+	# Restore active EVA (visual elements will need recreation)
+	active_eva = {}
+	for role in state.get("active_eva", {}):
+		var eva_data = state.active_eva[role]
+		active_eva[role] = {
+			"target": eva_data.get("target", 0),
+			"phase": eva_data.get("phase", ""),
+			"start_time": eva_data.get("start_time", 0),
+		}
+
+		# Recreate tether if crew is on EVA
+		var crew_member = ship_view.crew.get(role) if ship_view else null
+		if crew_member:
+			_create_tether(role)
+			_apply_eva_suit(crew_member)
+
+	# Restore drifting crew
+	drifting_crew = {}
+	for role in state.get("drifting_crew", {}):
+		var drift_data = state.drifting_crew[role]
+		drifting_crew[role] = {
+			"direction": Vector2(drift_data.direction.x, drift_data.direction.y),
+			"distance": drift_data.distance,
+			"max_distance": drift_data.max_distance,
+			"phase": drift_data.phase,
+			"rescuer": drift_data.rescuer,
+		}
+
+func has_active_eva() -> bool:
+	## Check if any EVA is currently in progress
+	return active_eva.size() > 0 or drifting_crew.size() > 0
+
+# ============================================================================
 # QUERIES
 # ============================================================================
 
@@ -710,3 +1682,47 @@ func get_active_eva_count() -> int:
 
 func get_exterior_surface_position(waypoint: int) -> Vector2:
 	return ship_nav.get_waypoint_position(waypoint)
+
+func get_active_eva_crew() -> Array:
+	## Get list of crew roles currently on EVA
+	return active_eva.keys()
+
+func _force_emergency_return(crew_role: String) -> void:
+	## Force an immediate emergency return for crew on EVA
+	## Used for solar flare radiation exposure, etc.
+	if not active_eva.has(crew_role):
+		return
+
+	print("[EVA] EMERGENCY: %s forced return initiated!" % crew_role.capitalize())
+
+	var crew_member = ship_view.crew.get(crew_role)
+	if not crew_member:
+		return
+
+	# Stop any work animations
+	var target = active_eva[crew_role].get("target", ShipNavigation.Waypoint.EXTERIOR_ENGINE)
+	_stop_work_animation(target)
+	close_maintenance_panel(target)
+
+	# Set phase to emergency return
+	active_eva[crew_role].phase = "emergency_return"
+
+	# Immediately move to airlock (faster than normal return)
+	var airlock_pos = ship_nav.get_waypoint_position(ShipNavigation.Waypoint.AIRLOCK)
+	var emergency_speed = 60.0  # Fast emergency return
+
+	var tween = create_tween()
+	var distance = crew_member.global_position.distance_to(airlock_pos)
+	var duration = distance / emergency_speed
+	tween.tween_property(crew_member, "global_position", airlock_pos, duration)
+	tween.tween_callback(_complete_emergency_return.bind(crew_role))
+
+func _complete_emergency_return(crew_role: String) -> void:
+	## Complete emergency return after reaching airlock
+	print("[EVA] %s emergency return complete - entering airlock!" % crew_role.capitalize())
+
+	# Animate airlock close
+	_animate_airlock_close()
+
+	# Complete EVA (marked as unsuccessful due to emergency)
+	complete_eva(crew_role, false)

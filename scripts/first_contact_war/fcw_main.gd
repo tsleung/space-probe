@@ -60,7 +60,7 @@ var solar_map: FCWSolarMap
 @onready var zone_pop_label: Label = $MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox/ZonePopLabel
 @onready var zone_defense_label: Label = $MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox/ZoneDefenseLabel
 @onready var zone_buildings_label: Label = $MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox/ZoneBuildingsLabel
-@onready var assign_buttons: HBoxContainer = $MainContainer/GameArea/SidePanel/ZoneDetailPanel/VBox/AssignButtons
+# Removed: assign_buttons - ships now travel with capital ships instead of teleporting
 
 # Event log
 @onready var event_log: RichTextLabel = $MainContainer/GameArea/SidePanel/EventLog/LogText
@@ -429,8 +429,7 @@ func _setup_ui() -> void:
 	# Create build buttons
 	_create_build_buttons()
 
-	# Create assign buttons
-	_create_assign_buttons()
+	# Note: Assign buttons removed - ships now travel with capital ships
 
 	# Setup speed slider
 	speed_slider.min_value = 0
@@ -485,21 +484,6 @@ func _create_build_buttons() -> void:
 		btn.custom_minimum_size = Vector2(80, 50)
 		btn.pressed.connect(_build_ship.bind(ship_data[0]))
 		build_buttons.add_child(btn)
-
-func _create_assign_buttons() -> void:
-	for child in assign_buttons.get_children():
-		child.queue_free()
-
-	# Add ship assignment buttons
-	var label = Label.new()
-	label.text = "Assign:"
-	assign_buttons.add_child(label)
-
-	for ship_type in [FCWTypes.ShipType.FRIGATE, FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.DREADNOUGHT]:
-		var btn = Button.new()
-		btn.text = "+%s" % FCWTypes.get_ship_name(ship_type).substr(0, 4)
-		btn.pressed.connect(_assign_ship_to_zone.bind(ship_type))
-		assign_buttons.add_child(btn)
 
 func _connect_signals() -> void:
 	store.state_changed.connect(_on_state_changed)
@@ -1904,16 +1888,6 @@ func _select_zone(zone_id: int) -> void:
 
 func _build_ship(ship_type: int) -> void:
 	store.dispatch_build_ship(ship_type)
-
-func _assign_ship_to_zone(ship_type: int) -> void:
-	if _selected_zone < 0:
-		return
-	# Visual warp effect
-	solar_map.spawn_warp_in(_selected_zone)
-	store.dispatch_assign_fleet(_selected_zone, ship_type, 1)
-	# Sync battle system ship locations
-	if _battle_system:
-		_battle_system.assign_ships_to_zone(FCWTypes.ZoneId.EARTH, _selected_zone, ship_type, 1)
 
 func _set_paused(paused: bool) -> void:
 	## Central function to set pause state - keeps solar_map in sync

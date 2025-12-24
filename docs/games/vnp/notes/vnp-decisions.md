@@ -264,5 +264,89 @@ These areas may need revisiting:
 
 ---
 
-*Document Version: 1.0*
+## Tactical Behavior Changes (December 2024)
+
+### Decision: Destroyer Kiting at Max Range
+
+**Choice**: Destroyers strafe sideways at 95% of their weapon range when they outrange targets
+
+**Rationale**:
+- Destroyers (400 range) outrange Frigates (200 range) by 200 units
+- Previous behavior: orbit at 85% range (340 units) - too close
+- New behavior: strafe at max range, backing away if enemies close in
+- Creates distinct tactical identity: "sniper" role vs Frigate's "brawler"
+
+**Implementation**: `_strafe_at_max_range()` function in `ship.gd`
+
+### Decision: Cruiser Continuous Orbital Movement
+
+**Choice**: Cruisers always orbit at 85% range, never brake to a stop
+
+**Rationale**:
+- Previous behavior: brake to `Vector2.ZERO` when in range - made Cruisers sitting ducks
+- Moving targets are harder to hit - continuous motion is survivability
+- 85% range (425 of 500) provides buffer for range fluctuation
+- Heavy, deliberate orbit speed (0.35-0.45) maintains Cruiser's weighty feel
+
+**Implementation**: Removed braking branch, always call `_orbit_target()` with slow speed
+
+### Decision: Balance Values Sync
+
+**Updated Values** (synced design.md to vnp_types.gd):
+- Frigate damage: 18 → 14 (balances DPS/cost)
+- Cruiser cost: 100e+25m → 75e+20m (more accessible)
+- Shielder cost: 90e+10m → 75e+5m (viable support)
+- Graviton cost: 120e+40m → 100e+30m (reasonable capital)
+
+---
+
+## Expansion & Factory System (December 2024)
+
+### Decision: Cruiser Missile Range Doubled
+
+**Choice**: Cruiser range increased from 500 → 1000
+
+**Rationale**:
+- Cruisers are "true artillery" - should outrange everything significantly
+- Creates distinct tactical role vs Destroyers (400 range)
+- Missiles traveling further looks more dramatic
+- Gives reason to build Cruisers for long-range bombardment
+
+### Decision: Arc Storm Fires from Factories
+
+**Choice**: Player's Arc Storm base weapon fires from home base AND all completed factories
+
+**Rationale**:
+- Creates strong incentive to expand with Harvesters
+- More factories = more Arc Storm coverage = better defense
+- Rewards territorial control beyond just resource income
+- Makes factory network feel like a power grid
+
+**Implementation**: `fire_base_weapon()` iterates over all team factories
+
+### Decision: Harvester System Fixes
+
+**Changes**:
+1. **Max 2 harvesters** - Reduced from scaling 5 to fixed 2 when expansion needed
+2. **Stay at build location** - Harvesters now actively brake to stop at target
+3. **Complete factory check** - Only count complete factories when finding targets
+4. **Camp tolerance** - Increased from 30 to 50 units for drift tolerance
+
+**Rationale**:
+- 6 harvesters flying around was excessive
+- Harvesters were leaving mid-construction because incomplete factories counted as "nearby"
+- Momentum physics caused drift exceeding camp tolerance
+
+### Decision: Expansion Body Count
+
+**Choice**: Reduced from 4-6 random to fixed 3 bodies per expansion
+
+**Rationale**:
+- 4-6 bodies per phase was overwhelming
+- Fixed count provides predictable expansion pace
+- 3 bodies evenly distributed looks cleaner
+
+---
+
+*Document Version: 1.2*
 *Last Updated: December 2024*

@@ -1,9 +1,9 @@
 # FCW (First Contact War) - Game Design Document
 
-**Version:** 2.0 (Updated December 2025)
+**Version:** 2.1 (Updated December 2025)
 **Core Fantasy:** Humanity's desperate last stand against an overwhelming alien invasion
 **Inspiration:** Halo Reach (noble sacrifice, losing battle fought with honor)
-**Gameplay:** Mindustry (production chains) + Sins of a Solar Empire (fleet allocation)
+**Gameplay:** Fleet movement strategy + Evacuation management
 
 ---
 
@@ -299,10 +299,32 @@ SHIPYARD → Converts resources to ships
 - 1 Carrier
 - 0 Dreadnoughts
 
-**Fleet Orders:**
-- **DEFEND** - Full combat power vs attackers
-- **DELAY** - Half power, slows Herald advance if successful
-- **ESCORT** - Protects evacuation convoys
+**Capital Ship Fleet Transfer:**
+
+When a capital ship (Cruiser, Carrier, or Dreadnought) departs a zone, it automatically takes a portion of the zone's frigates as escort:
+
+```
+Escort portion = 1 / (number of capital ships at zone)
+
+Example:
+  2 capital ships at Mars, 10 frigates
+  First capital ship departs → takes 5 frigates (50%)
+  Second capital ship departs → takes remaining 5 frigates (100%)
+```
+
+This creates meaningful fleet movement decisions - you're not just moving one ship, you're deploying a battle group. The escort frigates:
+- Travel with the capital ship to its destination
+- Are removed from the origin zone's defense
+- Are added to the destination zone when the capital ship arrives
+
+**Fleet Roster UI:**
+
+The UNN CAPITAL FLEET panel (top-right) shows all capital ships with:
+- Ship name and type (color-coded)
+- Current location (`@ Mars`) or destination (`→ Earth`)
+- Escort count if traveling (`+5` frigates)
+
+Click a ship in the roster to select it, then click a zone to send it there.
 
 ### Herald Forces
 
@@ -1097,6 +1119,12 @@ The new entity system runs parallel to legacy systems:
 - **Herald as entity**: Travels with realistic time between zones
 - **Entity signals**: Spawned, destroyed, arrived, intercepted
 
+#### Capital Ship Fleet System ✅ NEW
+- **Fleet roster UI**: Shows all capital ships with location/destination and escort count
+- **Click-to-select**: Click ship in roster to select, click zone to send
+- **Escort transfer**: Capital ships automatically take portion of frigates when departing
+- **Visual positioning**: Ships orbit within zone visual (not floating outside)
+
 ### What's In Progress 🟡
 
 #### Entity System Migration (~60%)
@@ -1126,9 +1154,9 @@ All major AI gaps have been addressed:
 4. ~~Time-based building~~ → Now need-based: prioritizes defense, evacuation, reserves
 
 #### Entity System Gaps
-1. **UI for entity control**: No player interface to select entities and set destinations
-2. **Route visualization**: Trajectory curves not rendered on solar map
-3. **Detection zone shading**: Probability visualization not implemented
+1. ~~**UI for entity control**: No player interface to select entities and set destinations~~ ✅ FIXED - Fleet roster click-to-select
+2. **Route visualization**: Trajectory curves rendered for selected entities ✅ PARTIAL
+3. **Detection zone shading**: Probability visualization implemented ✅ DONE
 4. **Entity-based evacuation**: Still uses legacy colony ship system
 
 #### Balance/Tuning
@@ -1153,6 +1181,11 @@ All major AI gaps have been addressed:
 | AI need-based building | `fcw_main.gd` | Prioritizes defense, evacuation, reserves instead of turn modulo |
 | AI carrier escorts | `fcw_main.gd` | Assigns 2 escorts per carrier at Earth |
 | AI emergency response | `fcw_main.gd` | Uses recall_fleet to properly reassign ships in crisis |
+| **Capital ship escort** | `fcw_reducer.gd` | Capital ships take portion of frigates when departing |
+| **Fleet roster UI** | `fcw_solar_map.gd` | Click-to-select ships, shows location + escort count |
+| **Ship orbit radius** | `fcw_solar_map.gd` | Ships stay within zone visual (0.7x radius) |
+| **Remove assign buttons** | `fcw_main.gd`, `fcw_main.tscn` | Ships travel with capital ships, no teleporting |
+| **Speed label width** | `fcw_main.tscn` | Fixed width prevents layout shift on text change |
 
 ### Recommended Improvements
 
@@ -1164,11 +1197,11 @@ All AI improvements implemented:
 - Carrier escort logic ensures transports are protected
 - Emergency response uses proper fleet reassignment
 
-#### Priority 2: Entity System (Next)
-1. Add route selection UI when clicking entities
-2. Visualize entity trajectories on solar map
-3. Show detection probability zones
-4. Migrate colony ships to entity system
+#### Priority 2: Entity System ✅ MOSTLY DONE
+1. ~~Add route selection UI when clicking entities~~ → Fleet roster click-to-select
+2. ~~Visualize entity trajectories on solar map~~ → Bezier trajectory curves
+3. ~~Show detection probability zones~~ → Concentric probability rings around Herald
+4. Migrate colony ships to entity system (still pending)
 
 #### Priority 3: Polish
 1. Tune defense ratio thresholds (0.8 critical / 1.2 marginal)

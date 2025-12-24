@@ -994,7 +994,13 @@ func _physics_process(delta):
 						if dist_to_target > 40:
 							# Move to build location
 							_dispatch_state_change("moving", factory_target)
-						# else: Stay put - we're at the build location, camping will handle building
+						else:
+							# At build location - ACTIVELY BRAKE to allow camping detection
+							current_velocity = current_velocity.lerp(Vector2.ZERO, 5.0 * delta)
+							if current_velocity.length() < 3:
+								current_velocity = Vector2.ZERO
+							velocity = current_velocity
+							move_and_slide()
 					else:
 						# No good build location - just idle near base
 						if vnp_main and vnp_main.base_nodes.has(ship_data.team):
@@ -1199,27 +1205,19 @@ func _physics_process(delta):
 						# Small ships: Constant strafing runs - never stop!
 						_strafe_around_target_tactical(target_ship_data.position, delta, tactics, current_state)
 					VnpTypes.ShipSize.MEDIUM:
-						# Medium ships: Slow orbit while firing
-						var orbit_speed = 0.4 if not tactics.rush else 0.6
-						_orbit_target(target_ship_data.position, delta, orbit_speed)
-					VnpTypes.ShipSize.LARGE:
-						# Large ships (Cruiser): Maintain distance if kiting, otherwise brake
+						# Medium ships: Kite at max range OR orbit normally
 						if tactics.keep_distance:
-							# Circle at range instead of stopping - rain missiles from afar
-							var orbit_dir = (position - target_ship_data.position).normalized().rotated(PI / 2)
-							var max_speed = ship_stats.get("speed", 100)
-							current_velocity = current_velocity.lerp(orbit_dir * max_speed * 0.5, 2.0 * delta)
-							velocity = current_velocity
-							move_and_slide()
-							_fire_side_thrusters(sign(orbit_dir.dot(Vector2.RIGHT)))
+							# Kiting: strafe sideways at maximum range
+							_strafe_at_max_range(target_ship_data.position, delta)
 						else:
-							# Brake to stop and fire (heavy with momentum)
-							current_velocity = current_velocity.lerp(Vector2.ZERO, 2.0 * delta)
-							if current_velocity.length() < 5:
-								current_velocity = Vector2.ZERO
-							velocity = current_velocity
-							move_and_slide()
-							_fire_side_thrusters(0)
+							# Normal combat: slow orbit while firing
+							var orbit_speed = 0.4 if not tactics.rush else 0.6
+							_orbit_target(target_ship_data.position, delta, orbit_speed)
+					VnpTypes.ShipSize.LARGE:
+						# Large ships (Cruiser): Always orbit at 85% range - never stop
+						# Slower orbit for heavy ships, slightly faster when keeping distance
+						var orbit_speed = 0.35 if not tactics.keep_distance else 0.45
+						_orbit_target(target_ship_data.position, delta, orbit_speed)
 					VnpTypes.ShipSize.MASSIVE:
 						# Star Bases: Completely stationary - just rotate to face target
 						current_velocity = Vector2.ZERO
@@ -1555,6 +1553,61 @@ func _orbit_target(target_pos: Vector2, delta: float, speed_mult: float = 0.5):
 	var facing_dir = Vector2.RIGHT.rotated(rotation)
 	var lateral = facing_dir.rotated(PI/2).dot(current_velocity.normalized())
 	_fire_side_thrusters(lateral * 0.7)
+
+
+func _strafe_at_max_range(target_pos: Vector2, delta: float):
+	# Max-range strafing for kiting ships (Destroyers)
+	# Move sideways at weapon range edge - never get closer than necessary
+	var to_target = target_pos - position
+	var distance = to_target.length()
+	var max_range = ship_stats.get("range", 200)
+	var optimal_range = max_range * 0.95  # Small buffer to stay in range
+
+	# Calculate perpendicular strafe direction
+	var to_target_normalized = to_target.normalized()
+	var strafe_dir = to_target_normalized.rotated(PI / 2) * strafe_direction
+
+	# Occasionally reverse strafe direction
+	strafe_angle += strafe_direction * delta * 1.5
+	if randf() < 0.012:
+		strafe_direction *= -1
+
+	# Range correction: back away if too close, close in if too far
+	var range_correction = Vector2.ZERO
+	if distance < optimal_range * 0.9:
+		# Too close - back away while strafing
+		range_correction = -to_target_normalized * (optimal_range - distance) * 0.6
+	elif distance > max_range:
+		# Too far - close in slightly
+		range_correction = to_target_normalized * (distance - max_range) * 0.4
+
+	# Combined movement: strafe + range correction
+	var thrust_dir = (strafe_dir + range_correction).normalized()
+	var strafe_thrust = thrust_dir * ship_stats.speed * THRUST_MULTIPLIER * 0.7
+	current_velocity += strafe_thrust * delta
+
+	# Apply convergence pull
+	_apply_convergence_pull(delta)
+
+	# Max speed for controlled strafing
+	var max_speed = ship_stats.speed * 0.85
+	if current_velocity.length() > max_speed:
+		current_velocity = current_velocity.normalized() * max_speed
+
+	# Moderate drag for controlled feel
+	current_velocity = current_velocity.lerp(Vector2.ZERO, SPACE_DRAG * 0.9 * delta)
+
+	velocity = current_velocity
+	move_and_slide()
+
+	# Face target while strafing
+	var target_angle = to_target.angle()
+	rotation = lerp_angle(rotation, target_angle, 3.5 * delta)
+
+	# Fire side thrusters based on lateral movement
+	var facing_dir = Vector2.RIGHT.rotated(rotation)
+	var lateral = facing_dir.rotated(PI/2).dot(current_velocity.normalized())
+	_fire_side_thrusters(lateral * 0.8)
 
 
 func _assess_threat(target_ship_data: Dictionary, state: Dictionary) -> int:
@@ -2958,20 +3011,19 @@ func _find_nearest_position(from: Vector2, positions: Array) -> Vector2:
 
 func _find_factory_build_location(state: Dictionary) -> Vector2:
 	"""Find a good location for harvester to build a factory.
-	Harvesters ONLY go for UNCLAIMED strategic points - they don't follow the battle fleet."""
+	Target: unclaimed points OR our team's points that don't have factories yet."""
 	var my_team = ship_data.team
 	var my_pos = position
 	var min_factory_distance = 150.0  # Don't build too close to existing factories
 
-	# Get existing factory positions
+	# Get COMPLETE factory positions only (ignore ones being built)
 	var factory_positions = []
 	if state.has("factories"):
 		for factory_id in state.factories:
 			var factory = state.factories[factory_id]
-			factory_positions.append(factory["position"])
+			if factory.get("complete", false):
+				factory_positions.append(factory["position"])
 
-	# ONLY target: Unclaimed strategic points (owner == null)
-	# Harvesters are expansion units - they claim new territory, not reinforce existing
 	if state.has("strategic_points"):
 		var best_point = Vector2.ZERO
 		var best_dist = INF
@@ -2979,30 +3031,45 @@ func _find_factory_build_location(state: Dictionary) -> Vector2:
 		for point_id in state.strategic_points:
 			var point = state.strategic_points[point_id]
 			var point_owner = point.get("owner", null)
-
-			# ONLY go for unclaimed points
-			if point_owner != null:
-				continue
-
 			var point_pos = point["position"]
 
-			# Check if there's already a factory nearby (someone else building)
-			var has_factory_nearby = false
-			for fac_pos in factory_positions:
-				if point_pos.distance_to(fac_pos) < min_factory_distance:
-					has_factory_nearby = true
-					break
+			# Target: unclaimed points OR our team's points without factories
+			var is_valid_target = false
+			if point_owner == null:
+				# Unclaimed - go claim it
+				is_valid_target = true
+			elif point_owner == my_team:
+				# Our point - check if it needs a factory
+				var has_factory_nearby = false
+				for fac_pos in factory_positions:
+					if point_pos.distance_to(fac_pos) < min_factory_distance:
+						has_factory_nearby = true
+						break
+				if not has_factory_nearby:
+					is_valid_target = true
 
-			if not has_factory_nearby:
-				var dist = my_pos.distance_to(point_pos)
-				if dist < best_dist:
-					best_dist = dist
-					best_point = point_pos
+			if not is_valid_target:
+				continue
+
+			# Check factory distance for unclaimed points too
+			if point_owner == null:
+				var has_factory_nearby = false
+				for fac_pos in factory_positions:
+					if point_pos.distance_to(fac_pos) < min_factory_distance:
+						has_factory_nearby = true
+						break
+				if has_factory_nearby:
+					continue
+
+			var dist = my_pos.distance_to(point_pos)
+			if dist < best_dist:
+				best_dist = dist
+				best_point = point_pos
 
 		if best_point != Vector2.ZERO:
 			return best_point
 
-	# No unclaimed points available - return zero (harvester will idle near base)
+	# No valid points available - return zero (harvester will idle near base)
 	return Vector2.ZERO
 
 

@@ -70,7 +70,7 @@ offset_bottom = -50.0
 theme_override_constants/separation = 10
 
 [node name="LeftPanel" type="VBoxContainer" parent="MainContent"]
-custom_minimum_size = Vector2(200, 0)
+custom_minimum_size = Vector2(280, 0)
 layout_mode = 2
 theme_override_constants/separation = 5
 
@@ -165,6 +165,13 @@ layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 5
 
+[node name="CenterTabBar" type="TabBar" parent="MainContent/CenterPanel"]
+layout_mode = 2
+tab_count = 3
+tab_0/title = "Colony"
+tab_1/title = "Population"
+tab_2/title = "Forecast"
+
 [node name="MCSViewPanel" type="Panel" parent="MainContent/CenterPanel"]
 layout_mode = 2
 size_flags_vertical = 3
@@ -184,6 +191,7 @@ script = ExtResource("2_view")
 visible = false
 custom_minimum_size = Vector2(0, 100)
 layout_mode = 2
+size_flags_vertical = 3
 
 [node name="Label" type="Label" parent="MainContent/CenterPanel/PopulationPanel"]
 layout_mode = 1
@@ -245,6 +253,7 @@ text = "Independence Vote"
 visible = false
 custom_minimum_size = Vector2(0, 80)
 layout_mode = 2
+size_flags_vertical = 3
 
 [node name="Label" type="Label" parent="MainContent/CenterPanel/ProjectionPanel"]
 layout_mode = 1
