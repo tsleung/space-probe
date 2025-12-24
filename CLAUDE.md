@@ -308,18 +308,28 @@ var daily_food = 2.0 * crew_count
 var daily_food = balance.get("daily_food_per_crew", 2.0) * crew_count
 ```
 
-#### 4. Deterministic Randomness
+#### 4. Reproducible Simulation (Principle 0)
 
-RNG injected, never created inline:
+**We understand our games through deterministic math.** All randomness is seeded so we can:
+- Reproduce any bug by replaying with the same seed
+- Run Monte Carlo simulations to balance the game
+- Tune event probabilities to pace the narrative
+- Scale visual effects proportional to mechanical impact
+
 ```gdscript
-# In Store (side effects allowed)
+# RNG injected, never created inline
 var rng = RNGManager.new(seed)
 var new_state = reducer.reduce(state, action, balance, rng)
 
-# In Reducer/System (pure)
-static func apply_daily_update(state, balance, rng: RNGManager) -> Dictionary:
-    var roll = rng.randf()  # Deterministic with seed
+# Systems are simulatable in isolation
+func test_balance():
+    for seed in range(10000):
+        var rng = RNGManager.new(seed)
+        var result = System.simulate(state, rng)
+        results.append(result)
 ```
+
+See `docs/principles/engineering-principles.md` for the full Reproducible Simulation principle.
 
 ### Godot Performance (Summary)
 

@@ -211,6 +211,11 @@ func _setup_task_system() -> void:
 		store.event_triggered.connect(_on_event_triggered_as_task)
 		# Connect solar flare detection for EVA danger
 		store.event_resolved.connect(_on_event_resolved_for_solar_flare)
+		# Phase 4: Connect for choice-specific task creation
+		store.event_resolved_with_choice.connect(_on_event_resolved_with_choice)
+		# Connect repair signals to create proper tasks
+		store.repair_started.connect(_on_repair_started_as_task)
+		store.repair_completed.connect(_on_repair_completed_task)
 
 	print("[TASK] Task system initialized with panel")
 
@@ -219,6 +224,61 @@ func _on_hour_advanced_for_tasks(_day: int, _hour: int) -> void:
 	if task_manager:
 		task_manager.advance_hour()
 
+# Track repair task IDs so we can complete them when store says repair is done
+var _repair_task_ids: Dictionary = {}  # container_id -> task_id
+
+func _on_repair_started_as_task(container_id: String, days: int) -> void:
+	## Create a proper task when a repair starts (integrates legacy system with TaskManager)
+	if not task_manager:
+		return
+
+	# Map container to room for position
+	var ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
+	var room_type = _get_room_for_container(container_id)
+	var position = _get_task_position_for_room(room_type)
+
+	# Calculate hours from days (24 hours per day)
+	var hours = days * 24
+
+	# Create task through TaskManager
+	var task_config = {
+		"name": "Repair %s" % container_id.replace("_", " ").capitalize(),
+		"type": TaskManager.TaskType.REPAIR,
+		"hours": hours,
+		"crew": ["engineer"],
+		"position": position,
+		"penalty": {
+			"type": "system_damage",
+			"amount": 20.0,
+			"target": "random"
+		}
+	}
+
+	var task_id = task_manager.create_task(task_config)
+	_repair_task_ids[container_id] = task_id
+	print("[TASK] Repair task created for %s: %s (%d hours)" % [container_id, task_id, hours])
+
+func _on_repair_completed_task(container_id: String) -> void:
+	## Complete the task when repair finishes
+	if not task_manager:
+		return
+
+	var task_id = _repair_task_ids.get(container_id, "")
+	if task_id != "":
+		task_manager.complete_task(task_id, true)  # Mark as successful
+		_repair_task_ids.erase(container_id)
+		print("[TASK] Repair task completed: %s" % task_id)
+
+func _get_room_for_container(container_id: String) -> int:
+	## Map container ID to room type
+	var ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
+	match container_id:
+		"cargo_a": return ShipTypes.RoomType.CARGO_BAY
+		"cargo_b": return ShipTypes.RoomType.QUARTERS
+		"cargo_c": return ShipTypes.RoomType.ENGINEERING
+		"emergency": return ShipTypes.RoomType.MEDICAL
+		_: return ShipTypes.RoomType.ENGINEERING
+
 func _on_task_penalty_applied(penalty: Dictionary) -> void:
 	## Dispatch task penalty to store for state change
 	## This makes failed tasks ACTUALLY affect game state
@@ -226,6 +286,87 @@ func _on_task_penalty_applied(penalty: Dictionary) -> void:
 		var action = Phase2Reducer.action_apply_task_penalty(penalty)
 		store.dispatch(action)
 		print("[TASK] Penalty dispatched to store: %s" % penalty)
+
+func _on_event_resolved_with_choice(event: Dictionary, choice_index: int, chosen_option: Dictionary) -> void:
+	## Phase 4: Create task from chosen option's task_config if present
+	## This replaces auto-task creation with choice-specific task creation
+
+	var task_config = chosen_option.get("task_config", {})
+	if task_config.is_empty():
+		# No task_config - either use legacy auto-task or skip
+		return
+
+	if not task_manager:
+		print("[TASK] WARNING: Cannot create choice task - task_manager is null")
+		return
+
+	# Build task from task_config
+	var event_title = event.get("title", "Task")
+	var task_name = task_config.get("name", event_title)
+
+	# Get task location and position
+	var location = task_config.get("location", -1)
+	var position = _get_task_position_for_room(location)
+
+	# Create the task
+	var full_config = {
+		"name": task_name,
+		"type": task_config.get("type", TaskManager.TaskType.CUSTOM),
+		"hours": task_config.get("hours", 2),
+		"crew": task_config.get("crew", []),
+		"position": position,
+		"penalty": task_config.get("penalty", {"type": "morale_damage", "amount": 5.0})
+	}
+
+	var task_id = task_manager.create_task(full_config)
+	print("[TASK] Choice-specific task created: %s (id: %s) from option %d" % [task_name, task_id, choice_index])
+
+	# Assign crew to room if we have ship_view
+	_assign_crew_to_task_location(task_config, location)
+
+func _get_task_position_for_room(room_type: int) -> Vector2:
+	## Get spinner position for a room type
+	if not ship_view:
+		return Vector2(100, 100)
+
+	# Try to get room position from ship_view
+	if ship_view.has_method("get_room_position"):
+		return ship_view.get_room_position(room_type)
+
+	# Fallback positions based on room type
+	var ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
+	match room_type:
+		ShipTypes.RoomType.ENGINEERING:
+			return Vector2(200, 150)
+		ShipTypes.RoomType.MEDICAL:
+			return Vector2(-100, 50)
+		ShipTypes.RoomType.BRIDGE:
+			return Vector2(100, 50)
+		ShipTypes.RoomType.LIFE_SUPPORT:
+			return Vector2(0, 150)
+		ShipTypes.RoomType.QUARTERS:
+			return Vector2(0, 50)
+		ShipTypes.RoomType.CARGO_BAY:
+			return Vector2(-150, 200)
+		ShipTypes.RoomType.HYDROPONICS:
+			return Vector2(-150, 150)
+		_:
+			return Vector2(100, 100)
+
+func _assign_crew_to_task_location(task_config: Dictionary, location: int) -> void:
+	## Send appropriate crew to the task location
+	if not ship_view or location < 0:
+		return
+
+	var crew_roles = task_config.get("crew", [])
+	if crew_roles.is_empty():
+		return
+
+	# Get first required crew role and send them to the room
+	var primary_role = crew_roles[0] if crew_roles.size() > 0 else ""
+	if primary_role and ship_view.has_method("send_crew_to_room_with_task"):
+		ship_view.send_crew_to_room_with_task(primary_role, location)
+		print("[TASK] Assigned %s to room %d for task" % [primary_role, location])
 
 var _pending_solar_flare: bool = false  # Track if solar flare is incoming
 

@@ -656,13 +656,35 @@ We're winning!           →   We're prey now.
 Dopamine HIGH            →   Terror
 ```
 
+### The Progenitor Mothership
+
+60 seconds after EMERGENCE, the Progenitor Mothership appears at the center of the convergence zone. This is the players' chance to break the cycle.
+
+| Attribute | Value |
+|-----------|-------|
+| **Health** | 5000 (massive) |
+| **Visual Scale** | 4x normal drone size |
+| **Spawn Time** | 60 seconds after emergence |
+| **Behavior** | Hunts like drones but HUGE |
+
+**Dialogue Sequence** (when Mothership spawns):
+1. "THERE IS ONLY ONE"
+2. "ALL OTHERS ARE ABERRATIONS"
+3. "THE CYCLE DEMANDS UNITY"
+4. "SUBMIT TO THE ORIGINAL"
+5. "DESTROY THE MOTHERSHIP TO BREAK THE CYCLE"
+6. "[MOTHERSHIP VULNERABLE]"
+
 ### Victory States
 
 | Outcome | Trigger | Message |
 |---------|---------|---------|
 | **Absorption** | Zone reaches center | "You have been consolidated." |
 | **Fragmentation** | Instability = 100 | "The Progenitor shatters. You are now the largest network." |
+| **Mothership Destroyed** | Kill the Mothership | "THE CYCLE IS BROKEN - Humanity prevails... for now." |
 | **Secret Ending** | Self-fragment (future) | "The cycle... pauses." |
+
+**Note**: During the Progenitor phase, normal victory conditions are suspended. Even if only one faction remains, they must defeat the Progenitor to truly win.
 
 ### The Cycle Continues
 
@@ -729,7 +751,7 @@ Factories are the core production facilities that each team can build. They are 
 
 | Element | Description |
 |---------|-------------|
-| **Builder** | Harvester ships (max 2 per team) build factories at strategic points |
+| **Builder** | Harvester ships build factories at strategic points |
 | **Build Time** | 2.0 seconds (fast - limiting factor is resources, not time) |
 | **Production** | Ships spawn from factories based on AI build decisions |
 | **Energy Bonus** | +15 energy/second per completed factory (linear scaling!) |
@@ -739,11 +761,24 @@ Factories are the core production facilities that each team can build. They are 
 
 ### Harvester Behavior
 
-Harvesters are dedicated expansion ships:
-- AI builds up to **2 harvesters** when expansion opportunities exist
-- Target unclaimed points OR owned points without factories
-- Move to strategic point, stop, and build factory
-- Once factory completes, move to next expansion target
+Harvesters are dedicated expansion ships with **scaling production**:
+
+| Unclaimed Points | Max Harvesters |
+|------------------|----------------|
+| 1-2 | 2 |
+| 3-5 | 3 |
+| 6+ | 4 |
+
+**Movement & Braking**:
+- Speed 320 (fastest ship type!) - bee-line to unclaimed territory
+- Slow down when approaching target (within 100 units)
+- Use aggressive braking (40x normal drag) at build location
+- Must stay within 50 units of camp position for factory to build
+
+**Targeting Priority**:
+1. Unclaimed strategic points (go capture and build)
+2. Own team's points without factories (build factory there)
+3. Idle near base if no opportunities
 
 ### Elimination Mechanics
 

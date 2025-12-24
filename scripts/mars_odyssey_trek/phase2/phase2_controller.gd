@@ -557,6 +557,12 @@ func _calculate_option_expected_value(option: Dictionary, event: Dictionary, con
 		elif context.power_critical or context.food_critical:
 			score += 15.0
 
+	# =========================================================================
+	# PHASE 5: RESOURCE PROJECTION - will we survive this decision?
+	# =========================================================================
+	var projection_penalty = _get_resource_projection_penalty(option, context)
+	score += projection_penalty
+
 	# Add tiny random factor for tie-breaking
 	score += randf() * 2.0
 
@@ -584,6 +590,111 @@ func _estimate_repair_hours(option: Dictionary, event: Dictionary) -> int:
 		return 4
 	else:
 		return 3  # Default repair time
+
+# ============================================================================
+# PHASE 5: RESOURCE BURN RATE PROJECTION
+# ============================================================================
+
+func _project_resource_state(hours_ahead: int) -> Dictionary:
+	## Project resource levels after hours_ahead hours
+	## Used to answer: "Will we survive if we pick this option?"
+	## Returns projected levels for food, water, power, oxygen
+
+	if not store:
+		return {"food": 100, "water": 100, "power": 100, "oxygen": 100, "survival": true}
+
+	var resources = store.get_resources()
+	var crew = store.get_crew()
+	var life_support = store.get_life_support() if store.has_method("get_life_support") else {}
+	var crew_count = crew.size()
+
+	# Current levels
+	var food_current = resources.get("food", {}).get("current", 100.0)
+	var water_current = resources.get("water", {}).get("current", 100.0)
+	var power_current = resources.get("power", {}).get("current", 100.0)
+	var oxygen_current = resources.get("oxygen", {}).get("current", 100.0)
+
+	# Get life support health for efficiency calculations
+	var hydro_health = life_support.get("hydroponics_health", 100.0) / 100.0
+	var water_health = life_support.get("water_reclaimer_health", 100.0) / 100.0
+	var solar_health = life_support.get("solar_panels_health", 100.0) / 100.0
+	var scrubber_health = life_support.get("co2_scrubber_health", 100.0) / 100.0
+
+	# Hourly consumption/production rates (from balance)
+	# Food: 0.167 per crew per hour consumed, 0.21 produced (hydroponics)
+	var food_per_hour = (0.21 * hydro_health) - (0.167 * crew_count)
+
+	# Water: 0.5 per crew per hour consumed, 92% recycled
+	var water_consumed = 0.5 * crew_count
+	var water_recycled = water_consumed * 0.92 * water_health
+	var water_per_hour = water_recycled - water_consumed
+
+	# Power: 15 generated (solar), 12 consumed (life support)
+	var power_per_hour = (15.0 * solar_health) - 12.0
+
+	# Oxygen: 0.8 generated (scrubber), tiny leak
+	var oxygen_per_hour = (0.8 * scrubber_health) - 0.004
+
+	# Project forward
+	var projected = {
+		"food": food_current + (food_per_hour * hours_ahead),
+		"water": water_current + (water_per_hour * hours_ahead),
+		"power": power_current + (power_per_hour * hours_ahead),
+		"oxygen": oxygen_current + (oxygen_per_hour * hours_ahead),
+	}
+
+	# Clamp to valid ranges
+	projected.food = max(0, projected.food)
+	projected.water = max(0, projected.water)
+	projected.power = max(0, projected.power)
+	projected.oxygen = max(0, projected.oxygen)
+
+	# Determine if we'll survive
+	projected["survival"] = projected.food > 0 and projected.water > 0 and projected.power > 0 and projected.oxygen > 10
+
+	# Add danger flags
+	projected["food_danger"] = projected.food < 10
+	projected["water_danger"] = projected.water < 10
+	projected["power_danger"] = projected.power < 5
+	projected["oxygen_danger"] = projected.oxygen < 20
+
+	return projected
+
+func _get_resource_projection_penalty(option: Dictionary, context: Dictionary) -> float:
+	## Calculate penalty based on resource projections
+	## Returns negative score if taking this option would deplete resources
+
+	var penalty = 0.0
+
+	# Estimate how long this option's task would take
+	var task_hours = 3  # Default
+	var task_config = option.get("task_config", {})
+	if not task_config.is_empty():
+		task_hours = task_config.get("hours", 3)
+	else:
+		# Estimate from label
+		task_hours = _estimate_repair_hours(option, {})
+
+	# Project resources after task completes
+	var projected = _project_resource_state(task_hours)
+
+	if not projected.survival:
+		penalty -= 200.0  # Catastrophic - this option kills us
+		print("[AI PROJECTION] Option would lead to resource death in %d hours" % task_hours)
+	else:
+		# Individual resource dangers
+		if projected.food_danger:
+			penalty -= 50.0
+			print("[AI PROJECTION] Food would be critical after %d hours" % task_hours)
+		if projected.water_danger:
+			penalty -= 50.0
+		if projected.power_danger:
+			penalty -= 100.0  # Power loss is catastrophic
+			print("[AI PROJECTION] Power would fail after %d hours" % task_hours)
+		if projected.oxygen_danger:
+			penalty -= 80.0
+
+	return penalty
 
 func _score_outcome_effects(effects: Array, context: Dictionary) -> float:
 	## Score the effects of an outcome based on current resource needs

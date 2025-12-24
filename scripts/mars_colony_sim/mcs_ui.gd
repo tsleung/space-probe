@@ -441,12 +441,12 @@ func _update_resources(resources: Dictionary):
 
 			var name_label = Label.new()
 			name_label.text = resource_name.capitalize()
-			name_label.custom_minimum_size = Vector2(100, 0)
+			name_label.custom_minimum_size = Vector2(140, 0)
 			name_label.add_theme_font_size_override("font_size", 16)
 			hbox.add_child(name_label)
 
 			var bar = ProgressBar.new()
-			bar.custom_minimum_size = Vector2(60, 20)
+			bar.custom_minimum_size = Vector2(80, 20)
 			bar.max_value = 500.0  # Cap for display
 			bar.value = minf(amount, 500.0)
 			bar.show_percentage = false

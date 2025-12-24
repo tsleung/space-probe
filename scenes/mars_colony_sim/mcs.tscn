@@ -70,7 +70,7 @@ offset_bottom = -50.0
 theme_override_constants/separation = 10
 
 [node name="LeftPanel" type="VBoxContainer" parent="MainContent"]
-custom_minimum_size = Vector2(280, 0)
+custom_minimum_size = Vector2(400, 0)
 layout_mode = 2
 theme_override_constants/separation = 5
 
@@ -99,8 +99,9 @@ offset_bottom = -5.0
 theme_override_constants/separation = 4
 
 [node name="BuildingPanel" type="Panel" parent="MainContent/LeftPanel"]
-custom_minimum_size = Vector2(0, 320)
+custom_minimum_size = Vector2(0, 400)
 layout_mode = 2
+size_flags_vertical = 3
 
 [node name="Label" type="Label" parent="MainContent/LeftPanel/BuildingPanel"]
 layout_mode = 1
@@ -121,7 +122,8 @@ offset_top = 28.0
 offset_right = -5.0
 offset_bottom = -60.0
 theme_override_font_sizes/font_size = 12
-auto_height = true
+auto_height = false
+clip_contents = true
 
 [node name="BuildButton" type="Button" parent="MainContent/LeftPanel/BuildingPanel"]
 layout_mode = 1

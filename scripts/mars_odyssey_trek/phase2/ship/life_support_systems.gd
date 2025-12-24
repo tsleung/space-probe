@@ -76,6 +76,11 @@ var solar_panel_orientation: float = 1.0  # 0-1, affects output (sun angle)
 var co2_scrubber_enabled: bool = true
 var co2_scrubber_health: float = 100.0  # 0-100
 
+# Idle crew efficiency boost
+const IDLE_CREW_BOOST = 0.10  # 10% efficiency boost per idle crew member
+var idle_crew_in_hydroponics: int = 0
+var idle_crew_in_life_support: int = 0
+
 # Visual nodes
 var hydroponics_visual: Node2D = null
 var water_reclaimer_visual: Node2D = null
@@ -414,19 +419,20 @@ func process_hour(current_power: float) -> Dictionary:
 		if available_power >= power_needed:
 			result.power_consumed += power_needed
 
-			# Grow potatoes (health affects growth rate)
+			# Grow potatoes (health affects growth rate, idle crew boosts)
 			var health_factor = hydroponics_health / 100.0
-			var growth_rate = level_config.yield_per_hour * health_factor
+			var crew_boost = get_hydroponics_boost()
+			var growth_rate = level_config.yield_per_hour * health_factor * crew_boost
 			hydroponics_growth_progress += 1.0  # 1 hour of growth
 
 			# Check for harvest
 			if hydroponics_growth_progress >= HYDROPONICS_GROWTH_CYCLE_HOURS:
 				hydroponics_growth_progress = 0.0
-				result.food_produced = HYDROPONICS_HARVEST_AMOUNT * health_factor
+				result.food_produced = HYDROPONICS_HARVEST_AMOUNT * health_factor * crew_boost
 				food_produced.emit(result.food_produced)
 				_show_harvest_effect()
 			else:
-				# Small continuous yield
+				# Small continuous yield (boosted by idle crew)
 				result.food_produced = growth_rate
 				if result.food_produced > 0:
 					food_produced.emit(result.food_produced)
@@ -452,14 +458,17 @@ func process_hour(current_power: float) -> Dictionary:
 	return result
 
 func get_current_water_efficiency() -> float:
-	## Get current water recycling efficiency based on health
+	## Get current water recycling efficiency based on health and idle crew
 	if not water_reclaimer_enabled or water_reclaimer_health <= 0:
 		return 0.0
 
 	var health_factor = water_reclaimer_health / 100.0
+	var crew_boost = get_water_reclaimer_boost()
 	var base_eff = WATER_RECLAIMER_DAMAGED_EFFICIENCY + \
 		(WATER_RECLAIMER_BASE_EFFICIENCY - WATER_RECLAIMER_DAMAGED_EFFICIENCY) * health_factor
-	return base_eff
+
+	# Cap at 98% efficiency (can't be 100%)
+	return min(base_eff * crew_boost, 0.98)
 
 func get_current_power_consumption() -> float:
 	## Get current power consumption per hour
@@ -469,6 +478,24 @@ func get_current_power_consumption() -> float:
 	if water_reclaimer_enabled:
 		power += WATER_RECLAIMER_POWER_CONSUMPTION
 	return power
+
+# ============================================================================
+# IDLE CREW PRODUCTIVITY
+# ============================================================================
+
+func set_idle_crew_counts(hydroponics_count: int, life_support_count: int) -> void:
+	## Update the count of idle crew helping with each system
+	## Called by ship_view or controller when crew positions change
+	idle_crew_in_hydroponics = hydroponics_count
+	idle_crew_in_life_support = life_support_count
+
+func get_hydroponics_boost() -> float:
+	## Get efficiency multiplier from idle crew helping in hydroponics
+	return 1.0 + (idle_crew_in_hydroponics * IDLE_CREW_BOOST)
+
+func get_water_reclaimer_boost() -> float:
+	## Get efficiency multiplier from idle crew helping in life support
+	return 1.0 + (idle_crew_in_life_support * IDLE_CREW_BOOST)
 
 # ============================================================================
 # CONTROLS

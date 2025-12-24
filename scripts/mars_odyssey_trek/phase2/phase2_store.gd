@@ -30,6 +30,7 @@ signal repair_started(container_id: String, days: int)
 signal repair_completed(container_id: String)
 signal event_triggered(event: Dictionary)
 signal event_resolved(choice_index: int)
+signal event_resolved_with_choice(event: Dictionary, choice_index: int, chosen_option: Dictionary)  # Phase 4: For task creation from choices
 signal mars_visible()
 signal arrival()
 signal log_added(entry: Dictionary)
@@ -1202,7 +1203,12 @@ func _emit_change_signals(old_state: Dictionary, new_state: Dictionary, action: 
 
 	# Event resolved
 	if not old_event.is_empty() and new_event.is_empty():
-		event_resolved.emit(action.get("choice_index", 0))
+		var choice_index = action.get("choice_index", 0)
+		event_resolved.emit(choice_index)
+		# Phase 4: Emit with full event and chosen option for task creation
+		var options = old_event.get("options", [])
+		var chosen_option = options[choice_index] if choice_index < options.size() else {}
+		event_resolved_with_choice.emit(old_event, choice_index, chosen_option)
 
 # ============================================================================
 # PERSISTENCE

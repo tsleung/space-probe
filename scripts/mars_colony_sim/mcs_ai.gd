@@ -708,6 +708,26 @@ static func calc_deficit_priority_boosts(trends: Dictionary, current_year: int) 
 
 	return boosts
 
+## Check if a building type helps address a resource crisis
+## Used to filter upgrades/construction in crisis mode
+static func _building_helps_crisis(building_type: int, critical_deficits: Array) -> bool:
+	# Production buildings that address specific deficits
+	for deficit in critical_deficits:
+		var producers = _get_producers_for_resource(deficit)
+		if building_type in producers:
+			return true
+
+	# Also allow power buildings (everything needs power)
+	if building_type in [
+		_MCSTypes.BuildingType.POWER_STATION,
+		_MCSTypes.BuildingType.SOLAR_FARM,
+		_MCSTypes.BuildingType.REACTOR,
+		_MCSTypes.BuildingType.FUSION_PLANT
+	]:
+		return true
+
+	return false
+
 # ============================================================================
 # DYNAMIC OPERATING LEVELS
 # ============================================================================
@@ -802,6 +822,25 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 
 	var state = store.get_state()
 
+	# === RESOURCE CRISIS CHECK ===
+	# Analyze resource trends and determine if we're in crisis mode
+	var resource_trends = analyze_resource_trends(state)
+	var crisis_mode = false
+	var critical_deficits: Array = []
+
+	for resource_name in ["food", "water", "oxygen", "building_materials", "machine_parts"]:
+		var trend = resource_trends.get(resource_name, {})
+		var urgency = trend.get("urgency", 0)
+		var years_left = trend.get("years_until_depleted", INF)
+
+		# Crisis mode if ANY vital resource will deplete within 3 years
+		if urgency >= 3 or years_left < 3:
+			crisis_mode = true
+			critical_deficits.append(resource_name)
+
+	if crisis_mode:
+		actions.append("CRISIS MODE: Low %s - limiting expansion" % ", ".join(critical_deficits))
+
 	# 1. Resolve any active events
 	var active_events = state.get("active_events", [])
 	for event in active_events:
@@ -836,6 +875,23 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 	var upgraded_this_year = 0
 	var max_upgrades = maxi(10, buildings.size() / 2)  # Scale with colony size, minimum 10
 
+	# === RESERVE CALCULATION ===
+	# Always keep a safety reserve - don't spend all resources!
+	# BUT cap reserves at 60% of current stockpile to avoid blocking all construction
+	var colonists = state.get("colonists", [])
+	var pop_count = _MCSPopulation.count_alive(colonists)
+	var raw_reserve_materials = maxi(200, pop_count * 3)  # Ideal reserve scales with pop
+	var raw_reserve_parts = maxi(50, pop_count)
+	# Cap reserves to 60% of current stockpile - ensures we can still build expensive buildings
+	var reserve_materials = mini(raw_reserve_materials, int(resources.get("building_materials", 0) * 0.6))
+	var reserve_parts = mini(raw_reserve_parts, int(resources.get("machine_parts", 0) * 0.6))
+
+	# In crisis mode, double the reserve
+	if crisis_mode:
+		reserve_materials *= 2
+		reserve_parts *= 2
+		max_upgrades = 3  # Limit upgrades in crisis mode
+
 	# Calculate which buildings give best ROI for upgrading
 	var upgrade_candidates: Array = []
 	for building in buildings:
@@ -848,12 +904,22 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 		var roi = _calculate_upgrade_roi(building, state)
 		var costs = _MCSTypes.get_upgrade_cost(target_tier)
 
-		# Check if we can afford this upgrade
+		# In crisis mode, only upgrade production buildings that address deficits
+		if crisis_mode:
+			var building_type = building.get("type", 0)
+			var helps_crisis = _building_helps_crisis(building_type, critical_deficits)
+			if not helps_crisis:
+				continue  # Skip non-essential upgrades in crisis
+
+		# Check if we can afford this upgrade WITH RESERVE
 		var can_afford = true
-		for resource_name in costs.keys():
-			if resources.get(resource_name, 0) < costs[resource_name]:
-				can_afford = false
-				break
+		var materials_needed = costs.get("building_materials", 0)
+		var parts_needed = costs.get("machine_parts", 0)
+		var available_materials = resources.get("building_materials", 0) - reserve_materials
+		var available_parts = resources.get("machine_parts", 0) - reserve_parts
+
+		if available_materials < materials_needed or available_parts < parts_needed:
+			can_afford = false
 
 		if can_afford and roi > 0:
 			upgrade_candidates.append({
@@ -923,33 +989,32 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 					resources = state.get("resources", {})
 
 	# 5. BUILD SUPERSTRUCTURES - One every 5 years, targeting 10 by year 50
-	# Count existing superstructures
-	var superstructure_count = 0
-	for b in buildings:
-		var btype = b.get("type", -1)
-		if btype in [_MCSTypes.BuildingType.MASS_DRIVER, _MCSTypes.BuildingType.FUSION_PLANT, _MCSTypes.BuildingType.SPACE_ELEVATOR]:
-			superstructure_count += 1
+	# SKIP in crisis mode - superstructures are expensive!
+	if not crisis_mode:
+		# Count existing superstructures
+		var superstructure_count = 0
+		for b in buildings:
+			var btype = b.get("type", -1)
+			if btype in [_MCSTypes.BuildingType.MASS_DRIVER, _MCSTypes.BuildingType.FUSION_PLANT, _MCSTypes.BuildingType.SPACE_ELEVATOR]:
+				superstructure_count += 1
 
-	# How many should we have by now? (1 per 5 years, starting at year 5)
-	var target_count = maxi(0, current_year / 5)
+		# How many should we have by now? (1 per 5 years, starting at year 5)
+		var target_count = maxi(0, current_year / 5)
 
-	# Build if we're behind schedule
-	if current_year >= 5 and superstructure_count < target_count:
-		var superstructure = _choose_superstructure(state, rng.randf())
-		if superstructure >= 0:
-			var cost = _get_building_cost(superstructure)
-			resources = state.get("resources", {})  # Refresh from state
-			var can_afford = true
-			for resource_name in cost:
-				if resources.get(resource_name, 0.0) < cost[resource_name]:
-					can_afford = false
-					break
-			if can_afford:
-				store.start_construction(superstructure)
-				actions.append("SUPERSTRUCTURE: Started %s (catching up - have %d, need %d)" % [_MCSTypes.get_building_name(superstructure), superstructure_count, target_count])
-				state = store.get_state()
+		# Build if we're behind schedule AND we have reserves
+		if current_year >= 5 and superstructure_count < target_count:
+			var superstructure = _choose_superstructure(state, rng.randf())
+			if superstructure >= 0:
+				var cost = _get_building_cost(superstructure)
+				resources = state.get("resources", {})  # Refresh from state
+				var available_materials = resources.get("building_materials", 0) - reserve_materials
+				var available_parts = resources.get("machine_parts", 0) - reserve_parts
+				if available_materials >= cost.get("building_materials", 0) and available_parts >= cost.get("machine_parts", 0):
+					store.start_construction(superstructure)
+					actions.append("SUPERSTRUCTURE: Started %s (catching up - have %d, need %d)" % [_MCSTypes.get_building_name(superstructure), superstructure_count, target_count])
+					state = store.get_state()
 
-	# 5. BUILD NEW - Slow early growth, earn your colony!
+	# 6. BUILD NEW - Slow early growth, earn your colony!
 	var building_count = buildings.size()
 
 	# SLOW progression: start tiny, grow gradually over decades
@@ -970,6 +1035,10 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 	else:
 		base_builds = 4 + rng.randi() % 4  # Years 60+: 4-7 buildings (mega-colony)
 
+	# In crisis mode, limit construction to 1-2 essential buildings
+	if crisis_mode:
+		base_builds = mini(base_builds, 2)
+
 	var buildings_this_year = 0
 	var max_buildings = base_builds
 
@@ -980,6 +1049,20 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 
 		var building_type = choose_building(state, personality, rng.randf())
 		if building_type >= 0:
+			# In crisis mode, only build production buildings that help
+			if crisis_mode and not _building_helps_crisis(building_type, critical_deficits):
+				break  # Don't build non-essential in crisis
+
+			# Check if we have enough AFTER reserve
+			var cost = _get_building_cost(building_type)
+			resources = state.get("resources", {})
+			var available_materials = resources.get("building_materials", 0) - reserve_materials
+			var available_parts = resources.get("machine_parts", 0) - reserve_parts
+
+			if available_materials < cost.get("building_materials", 0) or available_parts < cost.get("machine_parts", 0):
+				actions.append("Skipped %s - maintaining reserve" % _MCSTypes.get_building_name(building_type))
+				break
+
 			store.start_construction(building_type)
 			actions.append("Started construction: %s" % _MCSTypes.get_building_name(building_type))
 			state = store.get_state()  # Refresh state after each build

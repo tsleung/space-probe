@@ -351,6 +351,7 @@ static func create_event(overrides: Dictionary = {}) -> Dictionary:
 static func create_event_option(overrides: Dictionary = {}) -> Dictionary:
 	## Create an event option with FTL-style weighted outcomes
 	## Blue options require prerequisites (crew role, resource, or equipment)
+	## task_config: If present, creates a task when this option is chosen
 	var option = {
 		"label": "",
 		"description": "",
@@ -363,7 +364,12 @@ static func create_event_option(overrides: Dictionary = {}) -> Dictionary:
 		"requires_crew": "",        # CrewRole name: "engineer", "medical", etc.
 		"requires_resource": "",    # Resource: "spare_parts", "medical_supplies"
 		"requires_min": 0,          # Minimum amount of resource
-		"is_blue_option": false     # Visual indicator for special options
+		"is_blue_option": false,    # Visual indicator for special options
+		# Task creation from choice (Phase 4 - choice-specific tasks)
+		# If task_config is set, choosing this option creates a task
+		# Example: {"type": TaskType.REPAIR, "hours": 4, "location": RoomType.ENGINEERING,
+		#           "crew": ["engineer"], "penalty": {"type": "system_damage", "amount": 15}}
+		"task_config": {}
 	}
 
 	for key in overrides:

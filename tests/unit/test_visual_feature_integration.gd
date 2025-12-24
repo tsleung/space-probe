@@ -335,3 +335,87 @@ func test_morale_roi_boosts_lifestyle_upgrades():
 		print("RECREATION not found - test inconclusive")
 
 	assert_true(recreation_building != null, "Should have a RECREATION building")
+
+func test_reserve_cap_allows_starport():
+	# Test that the reserve calculation fix allows expensive buildings to be built
+	# With the old code, reserves could exceed stockpile, blocking all construction
+	_store.start_new_colony(24)
+
+	# Simulate mid-game scenario: good resources but high population
+	var state = _store.get_state()
+
+	# Give colony enough resources but simulate high pop (which would over-reserve with old code)
+	# Old code: reserve_materials = max(200, pop*3) = max(200, 300*3) = 900
+	# With only 800 materials, available = 800-900 = NEGATIVE (blocked!)
+	# New code: reserve = min(900, 800*0.6) = 480, available = 320 (can build!)
+
+	print("\n=== RESERVE CAP TEST ===")
+
+	# Run 20 years and check if STARPORT gets built
+	var starport_year = -1
+
+	for year in range(1, 25):
+		MCSAI.run_ai_turn(_store, MCSAI.Personality.VISIONARY, _rng)
+		_store.advance_year()
+
+		state = _store.get_state()
+
+		# Check for STARPORT
+		if starport_year < 0:
+			for b in state.buildings:
+				if b.type == MCSTypes.BuildingType.STARPORT:
+					starport_year = year
+					break
+
+		# Print resource state every 5 years
+		if year % 5 == 0:
+			var resources = state.resources
+			var pop = state.colonists.filter(func(c): return c.is_alive).size()
+			print("Year %d: Pop %d, Materials %d, Parts %d" % [
+				year, pop,
+				resources.get("building_materials", 0),
+				resources.get("machine_parts", 0)
+			])
+
+	print("STARPORT built: %s" % ("Year %d" % starport_year if starport_year > 0 else "NOT BUILT"))
+
+	# With the reserve fix, STARPORT should be built by year 20
+	# (It has priority 92 and unlocks at year 5)
+	assert_gt(starport_year, 0, "STARPORT should be built with fixed reserve calculation")
+	if starport_year > 0:
+		assert_lt(starport_year, 20, "STARPORT should be built before year 20")
+
+func test_orbital_buildings_unlock_sky_visuals():
+	# Test that building orbital infrastructure triggers sky visual drawing
+	# This is a logic test - ensures the view code has buildings to draw
+	_store.start_new_colony(24)
+
+	# Manually add a STARPORT to verify the visual trigger logic
+	# (This tests the visual code path, not AI building decisions)
+	_store.start_construction(MCSTypes.BuildingType.STARPORT)
+
+	# Construction completes over 52 weeks - run weekly ticks
+	for _week in range(52):
+		_store.advance_week()
+
+	var state = _store.get_state()
+
+	# Count operational starports
+	var operational_starports = 0
+	for b in state.buildings:
+		if b.type == MCSTypes.BuildingType.STARPORT and b.is_operational:
+			operational_starports += 1
+
+	print("\n=== ORBITAL VISUAL TRIGGER TEST ===")
+	print("Operational STARPORTS: %d" % operational_starports)
+
+	# If we have an operational starport, the view code should draw:
+	# - Starport ships ascending/descending
+	# - Satellites
+	# - Eventually orbital station (if ORBITAL built)
+
+	assert_gt(operational_starports, 0, "Should have at least 1 operational STARPORT")
+
+	# Also verify STARPORT is in the buildings list (view iterates this)
+	var starport_count = state.buildings.filter(func(b): return b.type == MCSTypes.BuildingType.STARPORT).size()
+	assert_gt(starport_count, 0, "STARPORT should be in buildings array for view to find")

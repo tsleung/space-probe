@@ -43,6 +43,10 @@ var is_wandering: bool = false
 var wander_target: Vector2 = Vector2.ZERO
 var current_room_node: Node = null  # Reference to ShipRoom we're in
 
+# Idle productivity state
+var is_idle_working: bool = false
+var idle_work_activity: String = ""
+
 # Waypoint-based pathfinding
 var waypoint_path: Array[Vector2] = []
 var waypoint_index: int = 0
@@ -57,6 +61,19 @@ var path_index: int = 0
 var sprite: Polygon2D
 var role_label: Label
 var item_indicator: Polygon2D
+
+# Task progress bar (above crew when working)
+var task_bar_bg: ColorRect
+var task_bar_fill: ColorRect
+var task_label: Label
+var current_task_name: String = ""
+
+# Path indicator (animated line showing where crew is going)
+var path_indicator: Node2D
+var path_dots: Array[Polygon2D] = []
+var path_animation_time: float = 0.0
+const PATH_DOT_COUNT: int = 6
+const PATH_DOT_SPEED: float = 2.0  # How fast dots animate along path
 
 # ============================================================================
 # TILE-BASED MOVEMENT (CRISIS Mode)
@@ -193,6 +210,63 @@ func _setup_visuals() -> void:
 	item_indicator.visible = false
 	add_child(item_indicator)
 
+	# Create task progress bar (above crew when working)
+	_setup_task_progress_bar(crew_color)
+
+	# Create path indicator container
+	_setup_path_indicator(crew_color)
+
+func _setup_task_progress_bar(crew_color: Color) -> void:
+	## Create a progress bar that appears above crew when working
+	var bar_width = 40.0
+	var bar_height = 5.0
+	var bar_y = -32.0  # Above the crew head
+
+	# Background bar
+	task_bar_bg = ColorRect.new()
+	task_bar_bg.size = Vector2(bar_width, bar_height)
+	task_bar_bg.position = Vector2(-bar_width / 2, bar_y)
+	task_bar_bg.color = Color(0.1, 0.1, 0.1, 0.8)
+	task_bar_bg.visible = false
+	add_child(task_bar_bg)
+
+	# Fill bar
+	task_bar_fill = ColorRect.new()
+	task_bar_fill.size = Vector2(0, bar_height - 2)
+	task_bar_fill.position = Vector2(-bar_width / 2 + 1, bar_y + 1)
+	task_bar_fill.color = crew_color.lightened(0.2)
+	task_bar_fill.visible = false
+	add_child(task_bar_fill)
+
+	# Task label (small text above bar)
+	task_label = Label.new()
+	task_label.text = ""
+	task_label.position = Vector2(-bar_width / 2, bar_y - 12)
+	task_label.add_theme_font_size_override("font_size", 7)
+	task_label.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+	task_label.visible = false
+	add_child(task_label)
+
+func _setup_path_indicator(crew_color: Color) -> void:
+	## Create animated path dots to show where crew is moving
+	## Each dot is top_level so it renders in world coordinates
+	path_indicator = Node2D.new()
+	path_indicator.name = "PathIndicator_" + role
+	path_indicator.visible = false
+	add_child(path_indicator)
+
+	# Pre-create path dots as top_level for world-space positioning
+	var dot_color = crew_color.lightened(0.3)
+	for i in range(PATH_DOT_COUNT):
+		var dot = Polygon2D.new()
+		dot.polygon = _create_circle(6, 12)  # Larger, smoother dots
+		dot.color = dot_color
+		dot.top_level = true  # Each dot renders at world coordinates
+		dot.z_index = 8  # Above floor (0), below crew (10)
+		dot.visible = false
+		path_indicator.add_child(dot)
+		path_dots.append(dot)
+
 func _create_rounded_rect(size: Vector2, radius: float) -> PackedVector2Array:
 	## Create a simple rounded rectangle polygon
 	var points = PackedVector2Array()
@@ -284,6 +358,12 @@ func _physics_process(delta: float) -> void:
 
 	_update_visuals()
 
+	# Update path indicator animation when moving
+	if current_state == ShipTypes.CrewState.MOVING or current_state == ShipTypes.CrewState.EMERGENCY:
+		_update_path_indicator(delta)
+	elif current_state == ShipTypes.CrewState.EVA and waypoint_path.size() > 0:
+		_update_path_indicator(delta)
+
 func _process_eva(delta: float) -> void:
 	## EVA movement - same as normal but slower and floaty
 	if waypoint_path.size() > 0:
@@ -321,6 +401,9 @@ func _process_tethered(delta: float) -> void:
 	sprite.rotation += delta * 0.5
 
 func _process_idle(delta: float) -> void:
+	# Check for idle productivity opportunities
+	_check_idle_productivity()
+
 	# Occasional wandering within the room when idle
 	if is_wandering:
 		_process_wandering(delta)
@@ -334,6 +417,67 @@ func _process_idle(delta: float) -> void:
 		# 40% chance to wander to a new spot
 		if randf() < 0.4 and current_room_node and current_room_node.has_method("get_random_idle_position"):
 			_start_wander()
+
+func _check_idle_productivity() -> void:
+	## Check if crew can help with life support systems while idle
+	var new_activity = ""
+
+	match current_room:
+		ShipTypes.RoomType.HYDROPONICS:
+			# Crew helps tend the plants
+			new_activity = "Tending plants"
+		ShipTypes.RoomType.LIFE_SUPPORT:
+			# Crew monitors the water reclaimer
+			new_activity = "Checking systems"
+		ShipTypes.RoomType.ENGINEERING:
+			# Engineer/scientist can do maintenance
+			if role == "engineer" or role == "scientist":
+				new_activity = "Maintenance"
+		ShipTypes.RoomType.MEDICAL:
+			# Medical officer organizes supplies
+			if role == "medical":
+				new_activity = "Organizing meds"
+		ShipTypes.RoomType.BRIDGE:
+			# Commander monitors status
+			if role == "commander":
+				new_activity = "Monitoring"
+		_:
+			new_activity = ""
+
+	# Update idle work state
+	if new_activity != idle_work_activity:
+		idle_work_activity = new_activity
+		is_idle_working = (new_activity != "")
+
+		# Show/hide idle activity label
+		if is_idle_working:
+			_show_idle_activity(new_activity)
+		else:
+			_hide_idle_activity()
+
+func _show_idle_activity(activity: String) -> void:
+	## Show subtle idle activity indicator
+	if not task_label:
+		return
+
+	# Use the task label but with dimmer styling for idle work
+	task_label.text = activity
+	task_label.add_theme_color_override("font_color", Color(0.6, 0.7, 0.6, 0.8))
+	task_label.visible = true
+
+	# Don't show the progress bar for idle activities
+	if task_bar_bg:
+		task_bar_bg.visible = false
+	if task_bar_fill:
+		task_bar_fill.visible = false
+
+func _hide_idle_activity() -> void:
+	## Hide idle activity indicator
+	if task_label and is_idle_working:
+		task_label.visible = false
+
+	is_idle_working = false
+	idle_work_activity = ""
 
 func _start_wander() -> void:
 	## Start wandering to a random spot in current room
@@ -400,12 +544,16 @@ func _arrive_at_waypoint_destination() -> void:
 	current_room = target_room
 	current_room_node = destination_room_node
 	destination_room_node = null
+	_hide_path_indicator()  # Hide path dots when we arrive
 	set_state(ShipTypes.CrewState.IDLE)
 	arrived_at_destination.emit(current_room)
 
 func _process_working(delta: float) -> void:
 	if task_duration > 0:
 		task_progress += delta
+		# Update progress bar
+		var progress = clamp(task_progress / task_duration, 0.0, 1.0)
+		update_task_progress(progress)
 		if task_progress >= task_duration:
 			_complete_task()
 
@@ -496,6 +644,7 @@ func _arrive_at_tile_destination() -> void:
 	current_room = tile_grid.get_room_at_tile(current_tile) if tile_grid else current_room
 	tile_path.clear()
 	tile_path_index = 0
+	_hide_path_indicator()  # Hide path dots when we arrive
 	set_state(ShipTypes.CrewState.IDLE)
 	arrived_at_destination.emit(current_room)
 
@@ -626,6 +775,11 @@ func is_at_tile(tile: Vector2i) -> bool:
 func set_state(new_state: ShipTypes.CrewState) -> void:
 	if current_state == new_state:
 		return
+
+	# Hide idle activity when leaving IDLE state
+	if current_state == ShipTypes.CrewState.IDLE and new_state != ShipTypes.CrewState.IDLE:
+		_hide_idle_activity()
+
 	current_state = new_state
 	state_changed.emit(new_state)
 
@@ -638,6 +792,7 @@ func move_to_room(room_type: ShipTypes.RoomType, room_position: Vector2, emergen
 	waypoint_index = 0
 
 	nav_agent.target_position = room_position
+	_show_path_indicator()  # Show animated path dots
 	set_state(ShipTypes.CrewState.EMERGENCY if emergency else ShipTypes.CrewState.MOVING)
 
 func move_along_path(room_type: ShipTypes.RoomType, path: Array[Vector2], room_node: Node, emergency: bool = false) -> void:
@@ -653,6 +808,7 @@ func move_along_path(room_type: ShipTypes.RoomType, path: Array[Vector2], room_n
 	# Start moving to first waypoint
 	if waypoint_path.size() > 0:
 		target_position = waypoint_path[0]
+		_show_path_indicator()  # Show animated path dots
 		set_state(ShipTypes.CrewState.EMERGENCY if emergency else ShipTypes.CrewState.MOVING)
 	else:
 		# No path needed (already there)
@@ -665,14 +821,26 @@ func start_task(task_type: ShipTypes.TaskType) -> void:
 
 	if task_type == ShipTypes.TaskType.REST:
 		set_state(ShipTypes.CrewState.RESTING)
+		show_task_progress(_get_task_text(), 0.0)  # Show "Resting" bar
 	else:
 		set_state(ShipTypes.CrewState.WORKING)
+		show_task_progress(_get_task_text(), 0.0)
 
 	task_started.emit(task_type)
+
+func start_named_task(task_name: String, duration: float) -> void:
+	## Start a task with a custom name (from TaskManager)
+	current_task_name = task_name
+	task_progress = 0.0
+	task_duration = duration
+	set_state(ShipTypes.CrewState.WORKING)
+	show_task_progress(task_name, 0.0)
+	task_started.emit(ShipTypes.TaskType.MONITOR)  # Generic task type
 
 func _arrive_at_destination() -> void:
 	current_room = target_room
 	_find_current_room_node()
+	_hide_path_indicator()  # Hide path dots when we arrive
 	set_state(ShipTypes.CrewState.IDLE)
 	arrived_at_destination.emit(current_room)
 
@@ -686,8 +854,10 @@ func _find_current_room_node() -> void:
 func _complete_task() -> void:
 	var completed_task = current_task
 	current_task = ShipTypes.TaskType.MONITOR
+	current_task_name = ""
 	task_progress = 0.0
 	task_duration = 0.0
+	hide_task_progress()
 	set_state(ShipTypes.CrewState.IDLE)
 	task_completed.emit(completed_task)
 
@@ -730,6 +900,64 @@ func start_resting() -> void:
 func finish_task() -> void:
 	## External call to finish current task early
 	_complete_task()
+
+# ============================================================================
+# TASK PROGRESS BAR
+# ============================================================================
+
+func show_task_progress(task_name: String, progress: float) -> void:
+	## Show task progress bar with name and initial progress
+	if not task_bar_bg:
+		return
+
+	current_task_name = task_name
+	task_bar_bg.visible = true
+	task_bar_fill.visible = true
+	task_label.visible = true
+	task_label.text = task_name
+	update_task_progress(progress)
+
+func update_task_progress(progress: float) -> void:
+	## Update the task progress bar fill (0.0 to 1.0)
+	if not task_bar_fill:
+		return
+
+	var max_width = task_bar_bg.size.x - 2
+	task_bar_fill.size.x = max_width * clamp(progress, 0.0, 1.0)
+
+	# Color transitions: crew color -> lighter as progress increases
+	var base_color = ShipTypes.get_crew_color(role)
+	if progress < 0.5:
+		# Darker at start
+		task_bar_fill.color = base_color.darkened(0.2)
+	elif progress < 0.9:
+		# Normal in middle
+		task_bar_fill.color = base_color.lightened(0.1)
+	else:
+		# Bright green near completion
+		task_bar_fill.color = Color(0.3, 0.9, 0.3)
+
+func hide_task_progress() -> void:
+	## Hide the task progress bar
+	if task_bar_bg:
+		task_bar_bg.visible = false
+	if task_bar_fill:
+		task_bar_fill.visible = false
+	if task_label:
+		task_label.visible = false
+
+func set_task_progress_external(progress: float, task_name: String = "") -> void:
+	## Set task progress from external source (TaskManager)
+	## Used when TaskManager controls task timing instead of CrewMember
+	if task_name != "":
+		current_task_name = task_name
+		if task_label:
+			task_label.text = task_name
+
+	if not task_bar_bg or not task_bar_bg.visible:
+		show_task_progress(current_task_name if current_task_name else "Working", progress)
+	else:
+		update_task_progress(progress)
 
 # ============================================================================
 # VISUALS
@@ -793,6 +1021,83 @@ func _get_task_text() -> String:
 		ShipTypes.TaskType.EVA_REPAIR: return "EVA Repair"
 		ShipTypes.TaskType.EVA_RESCUE: return "EVA Rescue"
 		_: return "Working"
+
+# ============================================================================
+# PATH INDICATOR
+# ============================================================================
+
+func _update_path_indicator(delta: float) -> void:
+	## Animate path dots along the remaining waypoint path
+	if waypoint_path.is_empty() or waypoint_index >= waypoint_path.size():
+		_hide_path_indicator()
+		return
+
+	path_animation_time += delta * PATH_DOT_SPEED
+
+	# Build remaining path from current position
+	var remaining_path: Array[Vector2] = [global_position]
+	for i in range(waypoint_index, waypoint_path.size()):
+		remaining_path.append(waypoint_path[i])
+
+	# Calculate total path length
+	var total_length = 0.0
+	var segment_lengths: Array[float] = []
+	for i in range(remaining_path.size() - 1):
+		var seg_len = remaining_path[i].distance_to(remaining_path[i + 1])
+		segment_lengths.append(seg_len)
+		total_length += seg_len
+
+	if total_length < 20.0:
+		# Path too short, hide indicator
+		_hide_path_indicator()
+		return
+
+	# Position dots along path with animation offset
+	var dot_spacing = total_length / float(PATH_DOT_COUNT + 1)
+	var animation_offset = fmod(path_animation_time, 1.0) * dot_spacing
+
+	for i in range(PATH_DOT_COUNT):
+		var dot = path_dots[i]
+		var target_dist = animation_offset + (i + 1) * dot_spacing
+
+		# Skip if beyond path
+		if target_dist >= total_length:
+			dot.visible = false
+			continue
+
+		# Find position along path and set directly
+		var pos = _get_position_along_path(remaining_path, segment_lengths, target_dist)
+		dot.global_position = pos
+		dot.visible = true
+
+		# Fade dots: bright in middle, fade at ends
+		var path_progress = target_dist / total_length
+		var fade = 1.0 - abs(path_progress - 0.5) * 1.2  # Brightest in middle
+		fade = clamp(fade, 0.3, 1.0)
+		dot.modulate.a = fade
+
+func _get_position_along_path(path_points: Array[Vector2], segment_lengths: Array[float], distance: float) -> Vector2:
+	## Get a position along the path at the given distance from start
+	var remaining_dist = distance
+	for i in range(segment_lengths.size()):
+		if remaining_dist <= segment_lengths[i]:
+			var t = remaining_dist / segment_lengths[i]
+			return path_points[i].lerp(path_points[i + 1], t)
+		remaining_dist -= segment_lengths[i]
+	# Return last point if we exceeded path length
+	return path_points[path_points.size() - 1]
+
+func _hide_path_indicator() -> void:
+	## Hide all path dots
+	if path_indicator:
+		path_indicator.visible = false
+		for dot in path_dots:
+			dot.visible = false
+
+func _show_path_indicator() -> void:
+	## Show path indicator when movement starts
+	path_animation_time = 0.0
+	# Dots will be made visible in _update_path_indicator when positions are calculated
 
 # ============================================================================
 # NAVIGATION CALLBACKS

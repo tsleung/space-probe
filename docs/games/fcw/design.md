@@ -1098,6 +1098,8 @@ The new entity system runs parallel to legacy systems:
 - **Ships in transit**: Bezier curve paths with smooth interpolation
 - **Combat effects**: Lasers, explosions, warp flashes, screen shake
 - **Herald mothership**: Multi-section design with energy tendrils
+- **Map zoom**: Mouse wheel/trackpad zoom toward cursor (1.0-4.0x), zoom out returns to default view
+- **Battle duration**: 2.0 seconds per phase for smaller fleet sizes (doubled from 1.0s)
 
 #### Spectator Features
 - **Auto-pause on major events**: Game pauses when zones fall or battles occur
@@ -1164,6 +1166,35 @@ All major AI gaps have been addressed:
 2. **Travel times**: Zone ID mapping was fixed but needs gameplay testing
 3. **Resource generation**: May be too generous or too sparse
 
+#### Fixed Issues ✅
+
+**Zone Signature Display Bug (December 2025)**
+- **Problem**: Zone signatures were showing 7699%, population accumulating unbounded
+- **Root Cause**: `fcw_herald_ai.gd:update_zone_signatures()` was adding population without limits
+- **Solution**: Population now sets a clamped baseline (max 0.15), final signature clamped to 0.0-1.0
+- **File**: `scripts/first_contact_war/fcw_herald_ai.gd`
+
+**Click Handling in Route Selection (December 2025)**
+- **Problem**: Clicking Mars in route selection mode was selecting ships at Mars instead of the zone
+- **Root Cause**: Entity click handling wasn't checking route selection state
+- **Solution**: Entity clicks now skipped when in route selection mode
+- **File**: `scripts/first_contact_war/fcw_solar_map.gd`
+
+**Attack Status Label (December 2025)**
+- **Problem**: "UNDER ATTACK" showing when Herald was approaching but not yet arrived
+- **Root Cause**: Status logic didn't distinguish approaching vs attacking
+- **Solution**: Now shows "INCOMING" when Herald is approaching, "UNDER ATTACK" when arrived
+- **File**: `scripts/first_contact_war/fcw_solar_map.gd`
+
+**ORDERS System Fixed (December 2025)**
+- **Problem**: GO DARK, MAX EVAC, BLOCKADE orders not working with new entity system
+- **Root Cause**: Orders were using old `zone.assigned_fleet` system, incompatible with capital ship entities
+- **Solution**:
+  - GO DARK: Switches all burning entities to COASTING
+  - MAX EVAC: Finds Carrier entities and dispatches to Earth
+  - BLOCKADE: Finds Cruiser/Dreadnought entities and dispatches to Mars
+- **File**: `scripts/first_contact_war/fcw_main.gd`
+
 ### Recent Infrastructure Fixes (This Session)
 
 | Fix | File | Issue |
@@ -1186,6 +1217,12 @@ All major AI gaps have been addressed:
 | **Ship orbit radius** | `fcw_solar_map.gd` | Ships stay within zone visual (0.7x radius) |
 | **Remove assign buttons** | `fcw_main.gd`, `fcw_main.tscn` | Ships travel with capital ships, no teleporting |
 | **Speed label width** | `fcw_main.tscn` | Fixed width prevents layout shift on text change |
+| **Zone signature bug** | `fcw_herald_ai.gd` | Fixed unbounded accumulation (7699%) |
+| **Route selection clicks** | `fcw_solar_map.gd` | Skip entity clicks when in route selection mode |
+| **Attack status label** | `fcw_solar_map.gd` | INCOMING vs UNDER ATTACK distinction |
+| **ORDERS system** | `fcw_main.gd` | Fixed GO DARK, MAX EVAC, BLOCKADE for entity system |
+| **Map zoom** | `fcw_solar_map.gd` | Mouse wheel/trackpad zoom (1.0-4.0x) |
+| **Battle duration** | `fcw_battle_view.gd` | Doubled to 2.0 seconds per phase |
 
 ### Recommended Improvements
 

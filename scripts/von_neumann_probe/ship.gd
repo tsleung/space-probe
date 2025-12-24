@@ -995,12 +995,8 @@ func _physics_process(delta):
 							# Move to build location
 							_dispatch_state_change("moving", factory_target)
 						else:
-							# At build location - ACTIVELY BRAKE to allow camping detection
-							current_velocity = current_velocity.lerp(Vector2.ZERO, 5.0 * delta)
-							if current_velocity.length() < 3:
-								current_velocity = Vector2.ZERO
-							velocity = current_velocity
-							move_and_slide()
+							# At build location - HARD BRAKE to allow camping detection
+							_harvester_brake(delta)
 					else:
 						# No good build location - just idle near base
 						if vnp_main and vnp_main.base_nodes.has(ship_data.team):
@@ -1091,7 +1087,9 @@ func _physics_process(delta):
 						var dist_to_target = position.distance_to(factory_target)
 						if dist_to_target > 40:
 							_dispatch_state_change("moving", factory_target)
-						# else: Stay put - camping will handle building
+						else:
+							# At build location - HARD BRAKE to allow camping detection
+							_harvester_brake(delta)
 					return
 
 				var target_id = _find_nearest_enemy_for_formation(current_state)
@@ -1246,7 +1244,14 @@ func _physics_process(delta):
 func _move_to(target_position):
 	# Asteroids-style thrust movement
 	var direction = position.direction_to(target_position)
-	var thrust_force = direction * ship_stats.speed * THRUST_MULTIPLIER
+	var distance = position.distance_to(target_position)
+
+	# Harvesters slow down as they approach target to avoid overshooting
+	var speed_mult = 1.0
+	if ship_data.type == VnpTypes.ShipType.HARVESTER and distance < 100:
+		speed_mult = max(0.3, distance / 100.0)  # Slow to 30% when very close
+
+	var thrust_force = direction * ship_stats.speed * THRUST_MULTIPLIER * speed_mult
 
 	# Apply thrust as acceleration
 	current_velocity += thrust_force * get_physics_process_delta_time()
@@ -1255,12 +1260,25 @@ func _move_to(target_position):
 	_apply_convergence_pull(get_physics_process_delta_time())
 
 	# Clamp to max speed
-	var max_speed = ship_stats.speed * 1.2  # Slight overspeed allowed with momentum
+	var max_speed = ship_stats.speed * 1.2 * speed_mult  # Slight overspeed allowed with momentum
 	if current_velocity.length() > max_speed:
 		current_velocity = current_velocity.normalized() * max_speed
 
 	# Apply space drag (subtle friction)
 	current_velocity = current_velocity.lerp(Vector2.ZERO, SPACE_DRAG * get_physics_process_delta_time())
+
+	velocity = current_velocity
+	move_and_slide()
+
+
+func _harvester_brake(delta: float):
+	"""Hard brake for harvesters at build location - need to stay still for camping detection"""
+	# VERY aggressive braking - 40x stronger than normal space drag
+	current_velocity = current_velocity.lerp(Vector2.ZERO, 40.0 * delta)
+
+	# Snap to zero when slow enough
+	if current_velocity.length() < 8:
+		current_velocity = Vector2.ZERO
 
 	velocity = current_velocity
 	move_and_slide()
@@ -2292,6 +2310,12 @@ func _apply_styles():
 			# Large alien hunter - organic and terrifying
 			# Massive tendrils reaching forward like grasping claws
 			var drone_scale = ship_stats.get("scale", 1.8)
+
+			# MOTHERSHIP is MASSIVE
+			var is_mothership = ship_data.get("is_mothership", false)
+			if is_mothership:
+				drone_scale = VnpTypes.MOTHERSHIP_CONFIG.get("visual_scale", 4.0)
+
 			polygon.polygon = _scale_polygon([
 				Vector2(24, 0), Vector2(16, -5), Vector2(10, -14), Vector2(4, -8),
 				Vector2(-4, -16), Vector2(-10, -6), Vector2(-16, -10), Vector2(-12, 0),

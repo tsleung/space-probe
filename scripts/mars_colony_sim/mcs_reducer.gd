@@ -561,6 +561,13 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 			"log_type": "crisis"
 		})
 
+	# === EMERGENCY SUPPLY SHIPS (if STARPORT exists) ===
+	var supply_result = _apply_emergency_supplies(updates["resources"], buildings, new_year)
+	if supply_result.supplies_delivered:
+		updates["resources"] = supply_result.resources
+		for log_entry in supply_result.log_entries:
+			new_log.append(log_entry)
+
 	# === BUILDING MAINTENANCE ===
 	var maint_rand_count = buildings.size() + 5
 	var maint_rand_values = random_values.slice(rand_idx, rand_idx + maint_rand_count)
@@ -700,6 +707,14 @@ static func _reduce_advance_week(state: Dictionary, action: Dictionary) -> Dicti
 			})
 
 	updates["resources"] = resources
+
+	# === EMERGENCY SUPPLY CHECK (weekly) ===
+	var supply_result = _apply_emergency_supplies(updates["resources"], buildings, current_year)
+	if supply_result.supplies_delivered:
+		updates["resources"] = supply_result.resources
+		for log_entry in supply_result.log_entries:
+			log_entry["week"] = new_week  # Add week to log entry
+			new_log.append(log_entry)
 
 	# === CONSTRUCTION PROGRESS (1/52 per week = ~1 year to build) ===
 	for i in range(buildings.size()):
@@ -1596,6 +1611,60 @@ static func _check_victory_conditions(colonists: Array, politics: Dictionary, ye
 
 	# No end condition reached
 	return {"game_over": false, "is_victory": false, "reason": ""}
+
+## Emergency supply ship mechanic - delivers critical supplies when STARPORT exists
+## Returns: {supplies_delivered: bool, resources: Dictionary, log_entries: Array}
+static func _apply_emergency_supplies(resources: Dictionary, buildings: Array, year: int) -> Dictionary:
+	var result = {
+		"supplies_delivered": false,
+		"resources": resources.duplicate(true),
+		"log_entries": []
+	}
+
+	# Check if STARPORT exists and is operational
+	var has_starport = false
+	var starport_tier = 0
+	for building in buildings:
+		if building.get("type", -1) == _MCSTypes.BuildingType.STARPORT:
+			if building.get("is_operational", false) and not building.get("is_under_construction", true):
+				has_starport = true
+				starport_tier = building.get("tier", 1)
+				break
+
+	if not has_starport:
+		return result
+
+	# Emergency supply thresholds and amounts (scaled by starport tier)
+	var tier_multiplier = 1.0 + (starport_tier - 1) * 0.25  # T1=1.0, T2=1.25, T3=1.5, T4=1.75, T5=2.0
+	var emergency_thresholds = {
+		"food": {"threshold": 100, "supply": 500 * tier_multiplier},
+		"water": {"threshold": 50, "supply": 200 * tier_multiplier},
+		"oxygen": {"threshold": 25, "supply": 100 * tier_multiplier},
+		"building_materials": {"threshold": 50, "supply": 150 * tier_multiplier},
+		"machine_parts": {"threshold": 20, "supply": 50 * tier_multiplier},
+		"medicine": {"threshold": 10, "supply": 30 * tier_multiplier}
+	}
+
+	var supplies_delivered: Array = []
+
+	for resource_name in emergency_thresholds:
+		var config = emergency_thresholds[resource_name]
+		var current = result.resources.get(resource_name, 0)
+
+		if current < config.threshold:
+			var supply_amount = config.supply
+			result.resources[resource_name] = current + supply_amount
+			supplies_delivered.append("%d %s" % [int(supply_amount), resource_name])
+
+	if supplies_delivered.size() > 0:
+		result.supplies_delivered = true
+		result.log_entries.append({
+			"year": year,
+			"message": "EMERGENCY RESUPPLY: Orbital cargo ship delivered %s!" % ", ".join(supplies_delivered),
+			"log_type": "success"
+		})
+
+	return result
 
 ## Immutable-style field update
 static func _with_field(dict: Dictionary, key: String, value) -> Dictionary:

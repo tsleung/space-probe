@@ -62,6 +62,7 @@ var tethers: Dictionary = {}  # crew_role -> Line2D
 
 # Drift state
 var drifting_crew: Dictionary = {}  # crew_role -> drift state
+var drift_alarms: Dictionary = {}  # crew_role -> alarm visual node
 
 # ============================================================================
 # INITIALIZATION
@@ -953,13 +954,41 @@ func _begin_exterior_work(crew_role: String, target_waypoint: int) -> bool:
 	await get_tree().create_timer(0.3).timeout
 
 	var work_time = ShipTypes.TASK_DURATIONS.get(ShipTypes.TaskType.EVA_REPAIR, 6.0)
-	print("[EVA-DEBUG] Working on %s for %.1fs..." % [
-		ShipNavigation.get_exterior_name(target_waypoint), work_time])
+	var surface_name = ShipNavigation.get_exterior_name(target_waypoint)
+	var task_name = "EVA: %s" % surface_name
+	print("[EVA-DEBUG] Working on %s for %.1fs..." % [surface_name, work_time])
+
+	# Show EVA task progress on crew member
+	if crew_member.has_method("show_task_progress"):
+		crew_member.show_task_progress(task_name, 0.0)
 
 	# Start work animation
 	_start_work_animation(target_waypoint)
-	await get_tree().create_timer(work_time).timeout
+
+	# Run work loop with progress updates instead of single timer
+	var elapsed = 0.0
+	var update_interval = 0.1  # Update progress every 0.1 seconds
+	while elapsed < work_time:
+		await get_tree().create_timer(update_interval).timeout
+		elapsed += update_interval
+
+		# Update progress bar
+		var progress = clamp(elapsed / work_time, 0.0, 1.0)
+		if crew_member.has_method("update_task_progress"):
+			crew_member.update_task_progress(progress)
+
+		# Check if EVA was cancelled
+		if not active_eva.has(crew_role):
+			if crew_member.has_method("hide_task_progress"):
+				crew_member.hide_task_progress()
+			_stop_work_animation(target_waypoint)
+			return false
+
 	_stop_work_animation(target_waypoint)
+
+	# Hide progress bar
+	if crew_member.has_method("hide_task_progress"):
+		crew_member.hide_task_progress()
 
 	# Close maintenance panel
 	print("[EVA-DEBUG] Closing maintenance panel...")
@@ -1377,6 +1406,10 @@ func _process(_delta: float) -> void:
 	# Update visual elements only (tethers)
 	for role in active_eva:
 		_update_tether(role)
+	# Also update tethers for drifting crew (they may no longer be in active_eva)
+	for role in drifting_crew:
+		if not active_eva.has(role):
+			_update_tether(role)
 
 func _physics_process(delta: float) -> void:
 	# Process drift physics in physics_process for framerate-independent behavior
@@ -1390,10 +1423,91 @@ func _update_tether(crew_role: String) -> void:
 	if not tether or not crew_member:
 		return
 
-	# Add wave motion to tether
+	var is_drifting_now = drifting_crew.has(crew_role)
 	var time = Time.get_ticks_msec() / 1000.0
-	var wave = Vector2(sin(time * 2.0) * 2.0, cos(time * 3.0) * 2.0)
-	tether.set_point_position(1, crew_member.global_position + wave)
+
+	# Update tether color and style based on drift state
+	if is_drifting_now:
+		# Flash red when drifting!
+		var flash = 0.5 + sin(time * 10.0) * 0.5
+		tether.default_color = Color(1.0, flash * 0.3, 0.0, 0.95)  # Pulsing red-orange
+		tether.width = 3.0  # Thicker when stressed
+		# Taut tether - less wave motion
+		var taut_wave = Vector2(sin(time * 8.0) * 0.5, cos(time * 10.0) * 0.5)
+		tether.set_point_position(1, crew_member.global_position + taut_wave)
+		# Update alarm visual
+		_update_drift_alarm(crew_role, crew_member.global_position)
+	else:
+		# Normal yellow tether
+		tether.default_color = Color(0.9, 0.85, 0.2, 0.9)
+		tether.width = 2.0
+		# Relaxed wave motion
+		var wave = Vector2(sin(time * 2.0) * 2.0, cos(time * 3.0) * 2.0)
+		tether.set_point_position(1, crew_member.global_position + wave)
+		# Remove alarm if exists
+		_remove_drift_alarm(crew_role)
+
+func _update_drift_alarm(crew_role: String, crew_pos: Vector2) -> void:
+	## Update or create the drift alarm visual near the drifting crew
+	var time = Time.get_ticks_msec() / 1000.0
+
+	if not drift_alarms.has(crew_role):
+		# Create alarm visual
+		var alarm = Node2D.new()
+		alarm.name = "DriftAlarm_" + crew_role
+		alarm.z_index = 20  # Above everything
+		add_child(alarm)
+
+		# Warning triangle
+		var triangle = Polygon2D.new()
+		triangle.polygon = PackedVector2Array([
+			Vector2(0, -12), Vector2(-10, 8), Vector2(10, 8)
+		])
+		triangle.color = Color(1.0, 0.3, 0.0)
+		triangle.name = "Triangle"
+		alarm.add_child(triangle)
+
+		# Exclamation mark
+		var exclaim = Label.new()
+		exclaim.text = "!"
+		exclaim.position = Vector2(-3, -10)
+		exclaim.add_theme_font_size_override("font_size", 14)
+		exclaim.add_theme_color_override("font_color", Color.WHITE)
+		exclaim.name = "Exclaim"
+		alarm.add_child(exclaim)
+
+		# "DRIFT" label
+		var label = Label.new()
+		label.text = "DRIFT"
+		label.position = Vector2(-18, 10)
+		label.add_theme_font_size_override("font_size", 8)
+		label.add_theme_color_override("font_color", Color(1.0, 0.5, 0.0))
+		label.name = "DriftLabel"
+		alarm.add_child(label)
+
+		drift_alarms[crew_role] = alarm
+
+	# Update alarm position and animation
+	var alarm = drift_alarms[crew_role]
+	alarm.position = crew_pos + Vector2(20, -30)  # Offset above crew
+
+	# Pulsing animation
+	var pulse = 0.8 + sin(time * 8.0) * 0.2
+	alarm.scale = Vector2(pulse, pulse)
+
+	# Flash the triangle
+	var triangle = alarm.get_node_or_null("Triangle")
+	if triangle:
+		var flash = 0.5 + sin(time * 12.0) * 0.5
+		triangle.color = Color(1.0, flash * 0.5, 0.0)
+
+func _remove_drift_alarm(crew_role: String) -> void:
+	## Remove drift alarm visual
+	if drift_alarms.has(crew_role):
+		var alarm = drift_alarms[crew_role]
+		if is_instance_valid(alarm):
+			alarm.queue_free()
+		drift_alarms.erase(crew_role)
 
 func complete_eva(crew_role: String, success: bool = true) -> void:
 	## Complete an EVA and return crew inside
@@ -1540,6 +1654,8 @@ func _complete_rescue(crew_role: String) -> void:
 		" (rescued by %s)" % rescuer.capitalize() if rescuer else " (self-rescued)"
 	])
 
+	# Clean up drift state and alarm
+	_remove_drift_alarm(crew_role)
 	drifting_crew.erase(crew_role)
 
 	# Complete EVA for rescued crew

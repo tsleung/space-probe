@@ -760,32 +760,41 @@ func _draw_zone(zone_id: int, _rect: Rect2, offset: Vector2) -> void:
 	elif zone_id == _hovered_zone:
 		draw_circle(pos, base_size + 6, Color(1.0, 1.0, 1.0, 0.15))
 
-	# Herald target indicator - TERRIFYING ATTACK WARNING
+	# Herald target indicator - Warning for incoming or active attack
 	if zone_id == _herald_target_zone and status != FCWTypes.ZoneStatus.FALLEN:
 		var target_pulse = sin(_attack_flash_timer * 3.0) * 0.4 + 0.6
 		var fast_pulse = sin(_attack_flash_timer * 8.0) * 0.5 + 0.5
+
+		# Check if Herald has arrived (transit empty) vs approaching (in transit)
+		var herald_arrived = _herald_transit.is_empty() and _herald_current_zone == _herald_target_zone
+		var herald_approaching = not _herald_transit.is_empty()
+
+		# Different visual intensity for approaching vs attacking
+		var ring_alpha = 0.9 if herald_arrived else 0.5
+		var label_text = "⚠ UNDER ATTACK ⚠" if herald_arrived else "⚠ INCOMING ⚠"
+		var label_color = Color(1.0, 0.2, 0.1) if herald_arrived else Color(1.0, 0.6, 0.2)
 
 		# Outer danger zone - large pulsing red ring
 		draw_arc(pos, base_size + 30, 0, TAU, 48, Color(1.0, 0.0, 0.0, target_pulse * 0.4), 4.0)
 		draw_arc(pos, base_size + 35, 0, TAU, 48, Color(1.0, 0.0, 0.0, target_pulse * 0.2), 2.0)
 
 		# Multiple warning rings - closing in
-		draw_arc(pos, base_size + 15, 0, TAU, 32, Color(1.0, 0.2, 0.1, target_pulse * 0.9), 3.0)
-		draw_arc(pos, base_size + 20, 0, TAU, 32, Color(1.0, 0.1, 0.0, target_pulse * 0.6), 2.0)
+		draw_arc(pos, base_size + 15, 0, TAU, 32, label_color * Color(1, 1, 1, target_pulse * ring_alpha), 3.0)
+		draw_arc(pos, base_size + 20, 0, TAU, 32, label_color * Color(1, 1, 1, target_pulse * 0.6), 2.0)
 
 		# Rotating warning segments
 		var rot = _global_time * 2.0
 		for i in range(6):
 			var start_angle = rot + i * TAU / 6
-			draw_arc(pos, base_size + 40, start_angle, start_angle + 0.2, 8, Color(1.0, 0.3, 0.1, fast_pulse * 0.8), 3.0)
+			draw_arc(pos, base_size + 40, start_angle, start_angle + 0.2, 8, label_color * Color(1, 1, 1, fast_pulse * 0.8), 3.0)
 
-		# ATTACK LABEL - BIG and SCARY
+		# ATTACK/INCOMING LABEL
 		var font = ThemeDB.fallback_font
 		var label_pos = pos + Vector2(-50, -base_size - 50)
 		var label_bg = Rect2(label_pos - Vector2(5, 12), Vector2(100, 18))
-		draw_rect(label_bg, Color(0.5, 0.0, 0.0, fast_pulse * 0.9))
-		draw_rect(label_bg, Color(1.0, 0.3, 0.2, fast_pulse), false, 2.0)
-		draw_string(font, label_pos, "⚠ UNDER ATTACK ⚠", HORIZONTAL_ALIGNMENT_CENTER, 100, 12, Color(1.0, 1.0, 1.0, fast_pulse))
+		draw_rect(label_bg, label_color * Color(0.5, 0.5, 0.5, fast_pulse * 0.9))
+		draw_rect(label_bg, label_color * Color(1, 1, 1, fast_pulse), false, 2.0)
+		draw_string(font, label_pos, label_text, HORIZONTAL_ALIGNMENT_CENTER, 100, 12, Color(1.0, 1.0, 1.0, fast_pulse))
 
 		# Show overwhelming numbers if herald is stronger
 		if _herald_strength > 0:

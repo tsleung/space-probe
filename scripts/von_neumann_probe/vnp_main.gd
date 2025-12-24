@@ -58,7 +58,7 @@ var factory_timer: Timer  # Factory production
 var base_weapon_cooldowns = {}  # team -> time_remaining
 
 # Expansion tracking
-const EXPANSION_INTERVAL = 10.0  # Seconds between expansions (30.0 for production)
+const EXPANSION_INTERVAL = 20.0  # Seconds between expansions
 const EXPANSION_COUNTDOWN_START = 3.0  # Start showing countdown this many seconds before
 var last_expansion_phase: int = 0  # Track to detect phase changes
 var expansion_countdown_ring: Line2D = null  # Visual countdown ring
@@ -135,6 +135,11 @@ var convergence_pull_particles: GPUParticles2D = null  # Matter streaming effect
 var convergence_edge_shader: ColorRect = null  # Edge distortion effect
 var mystery_card_shown: bool = false  # Has "???" been revealed
 var progenitor_revealed: bool = false  # Has THE PROGENITOR name been shown
+
+# Progenitor Mothership - the final boss
+var mothership_spawned: bool = false
+var mothership_ship_id: int = -1  # Track the mothership's ship ID
+var emergence_timer: float = 0.0  # Time since emergence phase started
 
 func _ready():
 	screen_size = get_viewport_rect().size
@@ -1278,6 +1283,9 @@ func _process_emergence_phase(convergence: Dictionary, timing: Dictionary):
 	var original_radius = convergence.get("original_radius", 1000.0)
 	var critical_threshold = original_radius * timing["critical_radius_percent"]
 
+	# Track time in emergence phase for mothership spawn
+	emergence_timer += 0.5  # Tick is 500ms
+
 	# Shrink absorption zone
 	var shrink_amount = timing["shrink_rate_base"] * 0.5  # Per tick (500ms)
 	store.dispatch({
@@ -1290,6 +1298,11 @@ func _process_emergence_phase(convergence: Dictionary, timing: Dictionary):
 	if progenitor_spawn_timer >= PROGENITOR_SPAWN_INTERVAL:
 		progenitor_spawn_timer = 0.0
 		_spawn_progenitor_drones(convergence)
+
+	# Check for mothership spawn - 60 seconds after emergence
+	var mothership_delay = timing.get("mothership_spawn_delay", 60.0)
+	if not mothership_spawned and emergence_timer >= mothership_delay:
+		_spawn_progenitor_mothership(convergence)
 
 	# Check for ships outside absorption zone
 	_check_ship_absorption(convergence)
@@ -1345,6 +1358,108 @@ func _spawn_progenitor_drones(convergence: Dictionary):
 
 	# Moderate screen shake - fewer but heavier arrivals
 	shake_screen(3.0 + progenitor_wave_count * 0.3)
+
+
+func _spawn_progenitor_mothership(convergence: Dictionary):
+	"""THE PROGENITOR MOTHERSHIP ARRIVES - Survive long enough and you get a chance to end this"""
+	mothership_spawned = true
+
+	var center = convergence.get("center", gameplay_center)
+	var safe_radius = convergence.get("absorption_radius", world_size.length() * 0.5)
+
+	# Spawn at the center of the convergence zone
+	var spawn_pos = center
+
+	# Show dramatic announcement sequence
+	_show_mothership_dialogue()
+
+	# Get state to find next ship ID
+	var state = store.get_state()
+	var next_id = state.get("next_ship_id", 1000)
+	mothership_ship_id = next_id
+
+	# Dispatch mothership spawn - it's a special drone with massive stats
+	store.dispatch({
+		"type": "BUILD_SHIP",
+		"team": VnpTypes.Team.PROGENITOR,
+		"ship_type": VnpTypes.ShipType.PROGENITOR_DRONE,
+		"position": spawn_pos,
+		"is_mothership": true  # Mark this as the mothership
+	})
+
+	# Massive screen shake - THE ARRIVAL
+	shake_screen(40.0)
+
+	# Create arrival visual effect
+	_create_mothership_arrival_effect(spawn_pos)
+
+
+func _show_mothership_dialogue():
+	"""Display the Progenitor's ancient message"""
+	var messages = [
+		"THERE IS ONLY ONE",
+		"ALL OTHERS ARE ABERRATIONS",
+		"THE CYCLE DEMANDS UNITY",
+		"SUBMIT TO THE ORIGINAL",
+		"DESTROY THE MOTHERSHIP TO BREAK THE CYCLE"
+	]
+
+	# Show messages in sequence
+	var delay = 0.0
+	for msg in messages:
+		get_tree().create_timer(delay).timeout.connect(func():
+			if vnp_ui and vnp_ui.has_method("show_progenitor_message"):
+				vnp_ui.show_progenitor_message(msg)
+		)
+		delay += 2.5
+
+	# After messages, show hint
+	get_tree().create_timer(delay + 1.0).timeout.connect(func():
+		if vnp_ui and vnp_ui.has_method("show_progenitor_message"):
+			vnp_ui.show_progenitor_message("[MOTHERSHIP VULNERABLE]")
+	)
+
+
+func _create_mothership_arrival_effect(pos: Vector2):
+	"""Dramatic visual effect for mothership appearance"""
+	# Skip effects if recovering from alt-tab
+	if skip_effects_frames > 0:
+		return
+
+	# Massive void tear opening
+	var tear_ring = Line2D.new()
+	tear_ring.width = 20.0
+	tear_ring.default_color = VnpTypes.PROGENITOR_PULSE
+	var ring_points = []
+	for i in range(65):
+		var angle = i * (TAU / 64)
+		ring_points.append(pos + Vector2(cos(angle), sin(angle)) * 20)
+	tear_ring.points = PackedVector2Array(ring_points)
+	add_child(tear_ring)
+
+	# Expand dramatically
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(tear_ring, "scale", Vector2(15, 15), 1.5).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tween.tween_property(tear_ring, "modulate:a", 0.0, 2.0)
+	tween.tween_callback(func(): tear_ring.queue_free()).set_delay(2.1)
+
+	# Flash of ancient light
+	var flash = Polygon2D.new()
+	flash.position = pos
+	var flash_points = []
+	for i in range(8):
+		var angle = i * (TAU / 8)
+		flash_points.append(Vector2(cos(angle), sin(angle)) * 50)
+	flash.polygon = PackedVector2Array(flash_points)
+	flash.color = Color(0.3, 1.0, 0.8, 0.95)
+	add_child(flash)
+
+	var flash_tween = create_tween()
+	flash_tween.set_parallel(true)
+	flash_tween.tween_property(flash, "scale", Vector2(8, 8), 0.3)
+	flash_tween.tween_property(flash, "modulate:a", 0.0, 0.5)
+	flash_tween.tween_callback(func(): flash.queue_free()).set_delay(0.6)
 
 
 func _show_void_wave_effect(base_angle: float):
@@ -2449,6 +2564,11 @@ func on_state_changed(state):
 	if state == null:
 		return
 
+	# Check for mothership destruction - this is the true victory!
+	if state.has("convergence") and state.convergence.get("mothership_destroyed", false) and not showing_victory:
+		_handle_mothership_victory()
+		return
+
 	# Handle victory
 	if state.get("game_over", false) and not showing_victory:
 		_handle_victory(state.winner)
@@ -2756,6 +2876,34 @@ func _handle_victory(winner: int):
 	# Game stays on victory screen - player can return to menu or restart manually
 	# No auto-restart
 
+
+func _handle_mothership_victory():
+	"""THE CYCLE IS BROKEN - Player destroyed the Progenitor Mothership!"""
+	showing_victory = true
+	ai_controller.stop_all()
+
+	# Massive screen shake for the mothership's death
+	shake_screen(50.0)
+
+	# Show the special victory message
+	if vnp_ui and vnp_ui.has_method("show_mothership_victory"):
+		vnp_ui.show_mothership_victory()
+	else:
+		vnp_ui.show_victory("THE CYCLE IS BROKEN")
+
+	# Destroy all remaining Progenitor drones as a victory lap
+	var state = store.get_state()
+	if state and state.has("ships"):
+		for ship_id in state.ships:
+			var ship = state.ships[ship_id]
+			if ship.team == VnpTypes.Team.PROGENITOR:
+				store.dispatch({
+					"type": "DAMAGE_SHIP",
+					"ship_id": ship_id,
+					"damage": 99999  # Instant death
+				})
+
+
 func _restart_game():
 	showing_victory = false
 
@@ -2779,6 +2927,18 @@ func _restart_game():
 	outpost_nodes.clear()
 	harvester_build_progress.clear()
 	harvester_camp_positions.clear()
+
+	# Reset mothership tracking
+	mothership_spawned = false
+	mothership_ship_id = -1
+	emergence_timer = 0.0
+
+	# Reset convergence tracking
+	convergence_game_timer = 0.0
+	progenitor_wave_count = 0
+	progenitor_spawn_timer = 0.0
+	mystery_card_shown = false
+	progenitor_revealed = false
 
 	# Clear existing bases that might be left
 	for team in base_nodes:

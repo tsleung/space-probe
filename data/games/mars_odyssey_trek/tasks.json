@@ -1,0 +1,179 @@
+{
+  "_comment": "Task definitions for Mars Odyssey Trek Phase 2",
+  "_version": "1.0.0",
+
+  "task_types": {
+    "repair": {
+      "name": "Repair Task",
+      "base_hours": 4,
+      "crew_required": ["engineer"],
+      "default_location": "engineering",
+      "penalty": {
+        "type": "system_damage",
+        "amount": 20,
+        "target": "random"
+      },
+      "fatigue_scaling": {
+        "threshold_50": 0.25,
+        "threshold_70": 0.50,
+        "threshold_90": 1.00
+      }
+    },
+    "medical": {
+      "name": "Medical Treatment",
+      "base_hours": 3,
+      "crew_required": ["medical"],
+      "default_location": "medical",
+      "penalty": {
+        "type": "health_damage",
+        "amount": 15,
+        "target": "random"
+      },
+      "fatigue_scaling": {
+        "threshold_50": 0.25,
+        "threshold_70": 0.50,
+        "threshold_90": 1.00
+      }
+    },
+    "eva": {
+      "name": "EVA Mission",
+      "base_hours": 6,
+      "crew_required": ["engineer"],
+      "default_location": "cargo_bay",
+      "penalty": {
+        "type": "system_damage",
+        "amount": 25,
+        "target": "solar_panels"
+      },
+      "fatigue_scaling": {
+        "threshold_50": 0.30,
+        "threshold_70": 0.60,
+        "threshold_90": 1.20
+      }
+    },
+    "research": {
+      "name": "Research Task",
+      "base_hours": 4,
+      "crew_required": ["scientist"],
+      "default_location": "bridge",
+      "penalty": {
+        "type": "morale_damage",
+        "amount": 10,
+        "target": "all"
+      },
+      "fatigue_scaling": {
+        "threshold_50": 0.20,
+        "threshold_70": 0.40,
+        "threshold_90": 0.80
+      }
+    },
+    "crisis": {
+      "name": "Crisis Response",
+      "base_hours": 2,
+      "crew_required": ["commander", "engineer"],
+      "default_location": "bridge",
+      "penalty": {
+        "type": "efficiency_loss",
+        "amount": 30
+      },
+      "fatigue_scaling": {
+        "threshold_50": 0.15,
+        "threshold_70": 0.30,
+        "threshold_90": 0.60
+      }
+    },
+    "maintenance": {
+      "name": "Maintenance Task",
+      "base_hours": 3,
+      "crew_required": ["engineer"],
+      "default_location": "life_support",
+      "penalty": {
+        "type": "system_damage",
+        "amount": 15,
+        "target": "random"
+      },
+      "fatigue_scaling": {
+        "threshold_50": 0.25,
+        "threshold_70": 0.50,
+        "threshold_90": 1.00
+      }
+    },
+    "custom": {
+      "name": "Custom Task",
+      "base_hours": 2,
+      "crew_required": [],
+      "default_location": "quarters",
+      "penalty": {
+        "type": "morale_damage",
+        "amount": 5,
+        "target": "all"
+      },
+      "fatigue_scaling": {
+        "threshold_50": 0.25,
+        "threshold_70": 0.50,
+        "threshold_90": 1.00
+      }
+    }
+  },
+
+  "escalation_events": {
+    "_comment": "When a task fails, spawn an escalation event",
+    "repair": {
+      "escalation_type": "component_critical",
+      "description": "System at 50% efficiency, urgent repair required",
+      "time_limit_hours": 2,
+      "additional_penalty": {
+        "type": "system_damage",
+        "amount": 15
+      }
+    },
+    "medical": {
+      "escalation_type": "medical_critical",
+      "description": "Crew member incapacitated",
+      "time_limit_hours": 8,
+      "additional_penalty": {
+        "type": "health_damage",
+        "amount": 25,
+        "target": "random"
+      }
+    },
+    "crisis": {
+      "escalation_type": "catastrophic_failure",
+      "description": "Multiple systems damaged",
+      "time_limit_hours": 1,
+      "additional_penalty": {
+        "type": "morale_damage",
+        "amount": 20,
+        "target": "all"
+      }
+    },
+    "maintenance": {
+      "escalation_type": "system_cascade",
+      "description": "Adjacent system also failing",
+      "time_limit_hours": 3,
+      "additional_penalty": {
+        "type": "efficiency_loss",
+        "amount": 20
+      }
+    }
+  },
+
+  "location_mapping": {
+    "engineering": 1,
+    "medical": 3,
+    "bridge": 0,
+    "life_support": 2,
+    "quarters": 4,
+    "cargo_bay": 5,
+    "hydroponics": 6
+  },
+
+  "balance": {
+    "_comment": "Tuning values for 90% AI win rate",
+    "max_concurrent_tasks": 4,
+    "task_overload_threshold": 3,
+    "fatigue_penalty_threshold": 70,
+    "exhaustion_threshold": 90,
+    "default_task_hours": 3
+  }
+}

@@ -95,15 +95,92 @@ var next_task_id: int = 0
 # Parent node for spinners
 var spinner_parent: Node = null
 
+# Data-driven task definitions (Phase 6)
+var task_data: Dictionary = {}  # Loaded from JSON
+var balance_data: Dictionary = {}  # Balance tuning values
+
 # ============================================================================
 # INITIALIZATION
 # ============================================================================
 
 func _ready() -> void:
-	pass
+	_load_task_data()
 
 func setup(parent: Node) -> void:
 	spinner_parent = parent
+
+func _load_task_data() -> void:
+	## Load task definitions from JSON (Phase 6: Data-driven tasks)
+	var file_path = "res://data/games/mars_odyssey_trek/tasks.json"
+	if not FileAccess.file_exists(file_path):
+		print("[TASK] No tasks.json found, using hardcoded defaults")
+		return
+
+	var file = FileAccess.open(file_path, FileAccess.READ)
+	if not file:
+		push_warning("[TASK] Failed to open tasks.json")
+		return
+
+	var json = JSON.new()
+	var error = json.parse(file.get_as_text())
+	file.close()
+
+	if error != OK:
+		push_warning("[TASK] Failed to parse tasks.json: %s" % json.get_error_message())
+		return
+
+	var data = json.get_data()
+	if data is Dictionary:
+		task_data = data.get("task_types", {})
+		balance_data = data.get("balance", {})
+		print("[TASK] Loaded %d task types from JSON" % task_data.size())
+
+func get_task_type_config(task_type: int) -> Dictionary:
+	## Get config for a task type, preferring JSON data over hardcoded
+	var type_name = _task_type_to_string(task_type)
+
+	# Try JSON data first
+	if task_data.has(type_name):
+		var json_config = task_data[type_name]
+		return {
+			"base_hours": json_config.get("base_hours", 3),
+			"crew_required": json_config.get("crew_required", []),
+			"penalty_type": json_config.get("penalty", {}).get("type", "morale_damage"),
+			"penalty_amount": json_config.get("penalty", {}).get("amount", 5.0),
+			"penalty_target": json_config.get("penalty", {}).get("target", "random"),
+			"fatigue_scaling": json_config.get("fatigue_scaling", {}),
+			"color": TASK_CONFIGS.get(task_type, {}).get("color", Color(0.6, 0.6, 0.6))
+		}
+
+	# Fallback to hardcoded
+	return TASK_CONFIGS.get(task_type, TASK_CONFIGS[TaskType.CUSTOM])
+
+func _task_type_to_string(task_type: int) -> String:
+	## Convert TaskType enum to JSON key name
+	match task_type:
+		TaskType.REPAIR: return "repair"
+		TaskType.MEDICAL: return "medical"
+		TaskType.EVA: return "eva"
+		TaskType.MAINTENANCE: return "maintenance"
+		TaskType.RESEARCH: return "research"
+		TaskType.CRISIS: return "crisis"
+		TaskType.CUSTOM: return "custom"
+		_: return "custom"
+
+func get_fatigue_multiplier(task_type: int, fatigue: float) -> float:
+	## Get task duration multiplier based on crew fatigue
+	## Fatigued crew takes longer but always succeeds (Phase design decision)
+	var config = get_task_type_config(task_type)
+	var scaling = config.get("fatigue_scaling", {})
+
+	if fatigue < 50:
+		return 1.0  # No penalty
+	elif fatigue < 70:
+		return 1.0 + scaling.get("threshold_50", 0.25)
+	elif fatigue < 90:
+		return 1.0 + scaling.get("threshold_70", 0.50)
+	else:
+		return 1.0 + scaling.get("threshold_90", 1.00)  # 100% slower when exhausted
 
 # ============================================================================
 # TASK CREATION
@@ -114,32 +191,48 @@ func create_task(config: Dictionary) -> String:
 	## Config should include:
 	##   - name: Display name
 	##   - type: TaskType enum value
-	##   - hours: Duration in hours (optional, uses default)
+	##   - hours: Duration in hours (optional, uses default from JSON/config)
 	##   - crew: Array of crew roles assigned (optional)
 	##   - position: Vector2 for spinner placement
 	##   - penalty: Custom penalty config (optional)
 	##   - on_complete: Callable to run on completion (optional)
 	##   - on_fail: Callable to run on failure (optional)
+	##   - fatigue: Crew fatigue level for duration scaling (optional)
 
 	var task_id = "task_%d" % next_task_id
 	next_task_id += 1
 
 	var task_type = config.get("type", TaskType.CUSTOM)
-	var type_config = TASK_CONFIGS.get(task_type, TASK_CONFIGS[TaskType.CUSTOM])
+	# Phase 6: Use data-driven config (prefers JSON over hardcoded)
+	var type_config = get_task_type_config(task_type)
+
+	# Calculate actual duration based on crew fatigue
+	var base_hours = config.get("hours", type_config.get("base_hours", 3))
+	var fatigue = config.get("fatigue", 0.0)
+	var fatigue_multiplier = get_fatigue_multiplier(task_type, fatigue)
+	var actual_hours = base_hours * fatigue_multiplier
+
+	# Build penalty config from JSON or config override
+	var penalty = config.get("penalty", {})
+	if penalty.is_empty():
+		penalty = {
+			"type": type_config.get("penalty_type", "morale_damage"),
+			"amount": type_config.get("penalty_amount", 5.0),
+			"target": type_config.get("penalty_target", "random")
+		}
 
 	var task = {
 		"id": task_id,
 		"name": config.get("name", "Task"),
 		"type": task_type,
-		"total_hours": config.get("hours", type_config.base_hours),
+		"total_hours": actual_hours,
+		"base_hours": base_hours,  # Store original for reference
 		"elapsed_hours": 0.0,
-		"crew": config.get("crew", type_config.crew_required),
+		"crew": config.get("crew", type_config.get("crew_required", [])),
 		"position": config.get("position", Vector2.ZERO),
-		"color": config.get("color", type_config.color),
-		"penalty": config.get("penalty", {
-			"type": type_config.penalty_type,
-			"amount": type_config.penalty_amount
-		}),
+		"color": config.get("color", type_config.get("color", Color(0.6, 0.6, 0.6))),
+		"penalty": penalty,
+		"fatigue_multiplier": fatigue_multiplier,
 		"on_complete": config.get("on_complete", Callable()),
 		"on_fail": config.get("on_fail", Callable()),
 		"started_at": Time.get_ticks_msec(),
@@ -152,6 +245,7 @@ func create_task(config: Dictionary) -> String:
 	_create_task_spinner(task)
 
 	task_started.emit(task)
+	print("[TASK] Created task '%s' - %d hours (%.1fx fatigue)" % [task.name, actual_hours, fatigue_multiplier])
 	return task_id
 
 func _create_task_spinner(task: Dictionary) -> void:

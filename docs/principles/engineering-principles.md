@@ -12,6 +12,96 @@ We invest in robust infrastructure so we can move fast during game design sessio
 
 ---
 
+## 0. Reproducible Simulation
+
+> **We understand our games through deterministic math.**
+
+### The Philosophy
+
+Every SpaceProbe game is fundamentally a **simulation** that we must be able to reproduce, analyze, and understand. Even when randomness creates variety, we must be able to:
+
+1. **Reproduce any run** - Given a seed and player inputs, recreate the exact game state
+2. **Simulate outcomes** - Run thousands of games to understand probability distributions
+3. **Analyze emergent behavior** - See how systems interact at scale
+4. **Validate balance** - Prove mathematically that the game is fair and tunable
+
+### Why This Matters
+
+| Capability | What It Enables |
+|------------|-----------------|
+| **Seeded Replay** | Debug any bug by replaying the exact sequence |
+| **Monte Carlo Simulation** | Balance the game by running 10,000 simulated playthroughs |
+| **Story Pacing** | Tune event probabilities to create narrative arcs |
+| **Visual Calibration** | Scale visual effects proportional to actual impact |
+| **Regression Testing** | Verify balance changes don't break edge cases |
+
+### The Mathematical Contract
+
+Every system that involves chance must:
+
+```gdscript
+# 1. Accept RNG as a parameter (never create internally)
+static func resolve_combat(attacker: Dictionary, defender: Dictionary, rng: RNGManager) -> Dictionary:
+    var hit_roll = rng.randf()  # Reproducible with same seed
+    var damage_roll = rng.randf()
+    # ...
+
+# 2. Document the probability model
+## Hit chance: base_accuracy * (1 - evasion/100)
+## Damage: base_damage * (0.8 + roll * 0.4) for ±20% variance
+## Critical: 5% chance for 2x damage
+
+# 3. Be simulatable in isolation
+func test_combat_balance():
+    var results = []
+    for seed in range(10000):
+        var rng = RNGManager.new(seed)
+        var result = CombatSystem.resolve_combat(attacker, defender, rng)
+        results.append(result)
+
+    var win_rate = calculate_win_rate(results)
+    assert_between(win_rate, 0.45, 0.55, "Combat should be roughly balanced")
+```
+
+### Simulation-First Design
+
+When designing a new system, ask:
+
+1. **Can I write the formula?** - If you can't express it mathematically, you don't understand it
+2. **Can I simulate 10,000 runs?** - If not, you can't balance it
+3. **Can I reproduce a specific outcome?** - If not, you can't debug it
+4. **Can I explain the variance?** - Players should understand why outcomes differ
+
+### Visual Effects Follow Math
+
+Visual spectacle must be **proportional to mechanical impact**:
+
+```gdscript
+# Effect intensity scales with actual damage dealt
+var damage_ratio = actual_damage / target_max_health
+var effect_scale = lerp(0.5, 2.0, damage_ratio)  # 50% to 200% intensity
+
+# A 5% health hit gets subtle effects
+# A 50% health hit gets dramatic effects
+# Players learn to read visual language
+```
+
+This prevents:
+- Underwhelming critical hits (big number, small effect)
+- Misleading minor damage (small number, big effect)
+- Visual fatigue from constant maximum effects
+
+### The Simulation Toolkit
+
+Every game should have:
+
+1. **Headless mode** - Run without rendering for fast simulation
+2. **Seed logging** - Record seeds for every playthrough
+3. **Replay system** - Reconstruct game from seed + inputs
+4. **Balance scripts** - Monte Carlo analysis tools
+
+---
+
 ## 1. Pure Functions Everywhere
 
 ### What It Means
@@ -472,6 +562,7 @@ static func consume_daily(state: Dictionary, balance: Dictionary, rng: RNGManage
 
 Before committing code, verify:
 
+- [ ] **Reproducible**: RNG injected, never created inline; can simulate 10K runs
 - [ ] All logic functions are pure (no side effects)
 - [ ] State updates are immutable (duplicate, don't mutate)
 - [ ] Errors return Result, not null/-1/false
@@ -482,3 +573,4 @@ Before committing code, verify:
 - [ ] Dependencies passed as parameters
 - [ ] Functions focused (<50 lines)
 - [ ] Assumptions documented
+- [ ] Visual effects scale with mechanical impact

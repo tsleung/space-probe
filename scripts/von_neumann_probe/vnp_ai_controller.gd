@@ -129,8 +129,16 @@ func _choose_ship_type(team: int, energy: int, state: Dictionary) -> int:
 	var harvester_mass = harvester_stats.get("mass_cost", 0)
 	var can_afford_harvester = energy >= harvester_energy and mass >= harvester_mass
 
-	# Build up to 2 harvesters if there are expansion opportunities
-	if can_afford_harvester and unclaimed_points > 0 and harvester_count < 2:
+	# Scale harvester cap based on expansion opportunities
+	# More unclaimed points = need more harvesters to expand
+	var max_harvesters = 2
+	if unclaimed_points >= 6:
+		max_harvesters = 4
+	elif unclaimed_points >= 3:
+		max_harvesters = 3
+
+	# Build harvesters if there are expansion opportunities
+	if can_afford_harvester and unclaimed_points > 0 and harvester_count < max_harvesters:
 		return VnpTypes.ShipType.HARVESTER
 
 	# === COMPOSITION-BASED BUILDING ===

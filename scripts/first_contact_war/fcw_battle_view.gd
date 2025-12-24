@@ -1861,10 +1861,10 @@ func start_battle(zone_name: String, player_ships: Array, herald_count: int, wil
 	# Determine if this is a major battle (for visual effects)
 	_is_major_battle = total_ships >= 8 or herald_count >= 6 or zone_name in ["Jupiter", "Saturn", "Earth", "Mars"]
 
-	# Fast 1-second phases - battle ends when one side is eliminated
+	# 2-second phases for longer battles with small fleets
 	# No duration timer needed - combat resolution handles everything
-	_phase_duration = 1.0
-	_battle_duration = 60.0  # Fallback max (should never be reached)
+	_phase_duration = 2.0
+	_battle_duration = 120.0  # Fallback max (should never be reached)
 
 	# Clear all
 	_player_ships.clear()

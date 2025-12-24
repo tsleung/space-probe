@@ -41,6 +41,88 @@ Core principles:
 
 ---
 
+## 2025-12-24: ORDERS System Migration to Entity System
+
+**Context**: ORDERS system (GO DARK, MAX EVAC, BLOCKADE) stopped working after migration to capital ship entity system. Orders were still using old `zone.assigned_fleet` dictionary which is now deprecated.
+
+**Options Considered**:
+1. Keep dual systems - maintain both `assigned_fleet` and entity system
+2. Migrate ORDERS to use entity system directly
+3. Remove ORDERS system entirely
+
+**Decision**: Migrate ORDERS to use entity system (Option 2).
+
+**Implementation**:
+- GO DARK: Iterate all entities, switch BURNING to COASTING (reduce signature)
+- MAX EVAC: Find all Carrier entities, dispatch to Earth for evacuation
+- BLOCKADE: Find all Cruiser/Dreadnought entities, dispatch to Mars chokepoint
+
+**Consequences**:
+- ORDERS now work with capital ship entities instead of abstract fleet counts
+- More realistic - you're ordering specific ships, not abstract fleets
+- Maintains strategic preset functionality while being compatible with new architecture
+- No dual system to maintain, cleaner codebase
+
+---
+
+## 2025-12-24: Zone Signature Calculation Bug Fix
+
+**Context**: Zone signatures were displaying as 7699%, causing visual confusion and breaking Herald detection visualization.
+
+**Root Cause**: `fcw_herald_ai.gd:update_zone_signatures()` was accumulating population contribution without bounds. Each tick was *adding* population instead of *setting* it, causing exponential growth.
+
+**Options Considered**:
+1. Cap display at 100% but keep underlying value unbounded (hide the problem)
+2. Fix accumulation logic - population sets baseline, other factors add on top
+3. Redesign entire signature system
+
+**Decision**: Fix accumulation logic (Option 2).
+
+**Implementation**:
+```gdscript
+# Before (wrong):
+signature += population * 0.0001  # Accumulates forever
+
+# After (correct):
+var pop_baseline = min(population * 0.0001, 0.15)  # Capped contribution
+signature = pop_baseline + traffic + burning_ships
+signature = clamp(signature, 0.0, 1.0)  # Final clamp
+```
+
+**Consequences**:
+- Zone signatures now correctly represent detection probability (0-100%)
+- Herald detection visualization works properly
+- Population contributes a baseline but doesn't dominate
+- Traffic and burning ships can push signature higher
+- More balanced detection mechanics overall
+
+---
+
+## 2025-12-24: Map Zoom Implementation
+
+**Context**: Players wanted ability to zoom in on specific regions during intense moments.
+
+**Options Considered**:
+1. Fixed zoom levels (1x, 2x, 4x) with buttons
+2. Smooth zoom with mouse wheel toward cursor
+3. Picture-in-picture only (already implemented)
+
+**Decision**: Smooth zoom with mouse wheel toward cursor (Option 2).
+
+**Implementation**:
+- Zoom range: 1.0-4.0x
+- Zoom toward mouse cursor position using transform math
+- Zoom out beyond 1.0x returns to default centered view
+- Uses `_apply_map_zoom()` and `_inverse_map_zoom()` transforms
+
+**Consequences**:
+- More intuitive than buttons
+- Allows precise focus on critical areas
+- Complements picture-in-picture system
+- Adds strategic value - can see detailed positions during crisis
+
+---
+
 ## 2024-12-23: Documentation Restructure
 
 **Context**: Documentation was scattered across multiple directories.

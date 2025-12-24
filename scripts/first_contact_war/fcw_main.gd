@@ -1063,31 +1063,41 @@ func _build_evacuation_progress_text(state: Dictionary) -> String:
 # ============================================================================
 
 func _on_go_dark_pressed() -> void:
-	## GO DARK: Cancel all fleet movement to minimize signatures
-	## Strategy: Reduce detection by halting all burns
+	## GO DARK: Switch all burning ships to coasting to minimize signatures
+	## Strategy: Sacrifice speed for stealth - ships coast silently instead of burning
 	var state = store.get_state()
-	var fleets_in_transit = state.get("fleets_in_transit", [])
 
-	if fleets_in_transit.is_empty():
-		_add_log_entry("GO DARK: No fleets in transit to cancel.")
-		return
+	# Find all entities currently burning and switch them to coasting
+	var darkened = 0
+	var ship_names = []
+	for entity in state.get("entities", []):
+		# Skip if not burning (already dark or orbiting)
+		if entity.get("movement_state", -1) != FCWTypes.MovementState.BURNING:
+			continue
+		# Skip Herald (can't control enemy ships)
+		if entity.id == FCWTypes.HERALD_ENTITY_ID:
+			continue
 
-	# Cancel all transits by recalling ships
-	# Note: This is simplified - in reality we'd need a proper cancel action
-	var cancelled = 0
-	for transit in fleets_in_transit:
-		# Ships in transit can't be instantly recalled, but we log the order
-		cancelled += transit.get("count", 1)
+		# Switch to coasting - slower but stealthy
+		store.dispatch_set_entity_movement_state(entity.id, FCWTypes.MovementState.COASTING)
+		darkened += 1
+		ship_names.append(entity.get("name", entity.id))
 
-	_add_log_entry("[color=cyan]GO DARK ORDER ISSUED[/color]: Fleet movement halted. Signatures will decay over time.")
-	_add_log_entry("Note: Ships currently in transit cannot be recalled mid-flight.")
+	if darkened > 0:
+		_add_log_entry("[color=cyan]GO DARK ORDER ISSUED[/color]: %d ships cutting engines." % darkened)
+		for sname in ship_names:
+			_add_log_entry("  → %s now coasting silently" % sname)
+		_add_log_entry("Ships will coast to destinations. Slower but harder to detect.")
+	else:
+		_add_log_entry("GO DARK: No ships currently burning. All signatures minimal.")
+
 	_sync_ui()
 
 func _on_create_decoy_pressed() -> void:
 	## CREATE DECOY: Send frigates to Saturn to raise its signature
 	## Strategy: Draw Herald away from Earth/Mars by creating a false target
 	var state = store.get_state()
-	var free_frigates = store.get_free_ships(FCWTypes.ShipType.FRIGATE)
+	var free_frigates = store.get_available_ships().get(FCWTypes.ShipType.FRIGATE, 0)
 
 	if free_frigates < 3:
 		_add_log_entry("DECOY FAILED: Need at least 3 free frigates (have %d)." % free_frigates)
@@ -1117,29 +1127,37 @@ func _on_max_evac_pressed() -> void:
 		_add_log_entry("MAX EVAC FAILED: Earth has fallen.")
 		return
 
-	# Find carriers not at Earth
+	# Find carrier entities not at Earth and currently orbiting
 	var moved_carriers = 0
-	for zone_id in FCWTypes.ZoneId.values():
-		if zone_id == FCWTypes.ZoneId.EARTH:
+	var carrier_names = []
+	for entity in state.get("entities", []):
+		# Skip non-carriers
+		if entity.get("ship_type", -1) != FCWTypes.ShipType.CARRIER:
+			continue
+		# Skip if already at Earth
+		if entity.get("current_zone", -1) == FCWTypes.ZoneId.EARTH:
+			continue
+		# Skip if already in transit (not orbiting)
+		if entity.get("movement_state", -1) != FCWTypes.MovementState.ORBITING:
 			continue
 
-		var zone = state.zones.get(zone_id, {})
-		if zone.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
-			continue
-
-		var assigned = zone.get("assigned_fleet", {})
-		var carriers = assigned.get(FCWTypes.ShipType.CARRIER, 0)
-		if carriers > 0:
-			# Recall to reserve (-1) then assign to Earth
-			store.dispatch_recall_fleet(zone_id, -1, FCWTypes.ShipType.CARRIER, carriers)
-			store.dispatch_assign_fleet(FCWTypes.ZoneId.EARTH, FCWTypes.ShipType.CARRIER, carriers)
-			moved_carriers += carriers
+		# Dispatch this carrier to Earth via direct route (fast)
+		store.dispatch_set_entity_destination(entity.id, FCWTypes.ZoneId.EARTH, "direct")
+		moved_carriers += 1
+		carrier_names.append(entity.get("name", entity.id))
 
 	if moved_carriers > 0:
 		_add_log_entry("[color=green]MAX EVAC ORDER ISSUED[/color]: %d Carriers redirecting to Earth." % moved_carriers)
+		for cname in carrier_names:
+			_add_log_entry("  → %s burning for Earth" % cname)
 		_add_log_entry("Evacuation capacity maximized. Save as many as possible.")
 	else:
-		var earth_carriers = earth_zone.get("assigned_fleet", {}).get(FCWTypes.ShipType.CARRIER, 0)
+		# Count carriers already at Earth
+		var earth_carriers = 0
+		for entity in state.get("entities", []):
+			if entity.get("ship_type", -1) == FCWTypes.ShipType.CARRIER:
+				if entity.get("current_zone", -1) == FCWTypes.ZoneId.EARTH:
+					earth_carriers += 1
 		_add_log_entry("MAX EVAC: All carriers already at Earth (%d stationed)." % earth_carriers)
 
 	_sync_ui()
@@ -1155,33 +1173,42 @@ func _on_blockade_pressed() -> void:
 		_add_log_entry("BLOCKADE FAILED: Mars has fallen.")
 		return
 
-	# Move all combat ships (Cruisers, Dreadnoughts) to Mars
+	# Combat ship types to move to Mars
+	var combat_types = [FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.DREADNOUGHT]
+
+	# Find combat ship entities not at Mars and currently orbiting
 	var moved_ships = 0
-	var ship_types_to_move = [FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.DREADNOUGHT, FCWTypes.ShipType.FRIGATE]
-
-	for zone_id in FCWTypes.ZoneId.values():
-		if zone_id == FCWTypes.ZoneId.MARS:
+	var ship_names = []
+	for entity in state.get("entities", []):
+		var ship_type = entity.get("ship_type", -1)
+		# Skip non-combat ships (carriers stay for evac, frigates are expendable)
+		if ship_type not in combat_types:
+			continue
+		# Skip if already at Mars
+		if entity.get("current_zone", -1) == FCWTypes.ZoneId.MARS:
+			continue
+		# Skip if already in transit (not orbiting)
+		if entity.get("movement_state", -1) != FCWTypes.MovementState.ORBITING:
 			continue
 
-		var zone = state.zones.get(zone_id, {})
-		if zone.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
-			continue
-
-		var assigned = zone.get("assigned_fleet", {})
-		for ship_type in ship_types_to_move:
-			var count = assigned.get(ship_type, 0)
-			if count > 0:
-				# Recall to reserve (-1) then assign to Mars
-				store.dispatch_recall_fleet(zone_id, -1, ship_type, count)
-				store.dispatch_assign_fleet(FCWTypes.ZoneId.MARS, ship_type, count)
-				moved_ships += count
+		# Dispatch this ship to Mars via direct route (fast, combat priority)
+		store.dispatch_set_entity_destination(entity.id, FCWTypes.ZoneId.MARS, "direct")
+		moved_ships += 1
+		ship_names.append(entity.get("name", entity.id))
 
 	if moved_ships > 0:
 		_add_log_entry("[color=red]BLOCKADE ORDER ISSUED[/color]: %d ships converging on Mars." % moved_ships)
+		for sname in ship_names:
+			_add_log_entry("  → %s burning for Mars" % sname)
 		_add_log_entry("Mars defense maximized. This is our Thermopylae.")
 	else:
-		var mars_defense = store.get_zone_defense(FCWTypes.ZoneId.MARS)
-		_add_log_entry("BLOCKADE: All combat ships already at Mars (DEF: %d)." % mars_defense)
+		# Count combat ships already at Mars
+		var mars_combat = 0
+		for entity in state.get("entities", []):
+			if entity.get("ship_type", -1) in combat_types:
+				if entity.get("current_zone", -1) == FCWTypes.ZoneId.MARS:
+					mars_combat += 1
+		_add_log_entry("BLOCKADE: All combat ships already at Mars (%d stationed)." % mars_combat)
 
 	_sync_ui()
 

@@ -666,7 +666,27 @@ func process_life_support_hour(current_power: float) -> Dictionary:
 	## Returns: {food_produced, water_efficiency, power_consumed}
 	if not life_support_sys:
 		return {"food_produced": 0.0, "water_efficiency": 0.85, "power_consumed": 0.0}
+
+	# Update idle crew counts for efficiency boost
+	_update_idle_crew_counts()
+
 	return life_support_sys.process_hour(current_power)
+
+func _update_idle_crew_counts() -> void:
+	## Count idle crew in hydroponics and life support rooms
+	var hydroponics_count = 0
+	var life_support_count = 0
+
+	for role in crew:
+		var member = crew[role]
+		if member.current_state == ShipTypes.CrewState.IDLE:
+			if member.current_room == ShipTypes.RoomType.HYDROPONICS:
+				hydroponics_count += 1
+			elif member.current_room == ShipTypes.RoomType.LIFE_SUPPORT:
+				life_support_count += 1
+
+	if life_support_sys:
+		life_support_sys.set_idle_crew_counts(hydroponics_count, life_support_count)
 
 func set_hydroponics_power_level(level: int) -> void:
 	## Set hydroponics power level (0=OFF, 1=LOW, 2=NORMAL, 3=HIGH)

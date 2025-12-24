@@ -361,5 +361,95 @@ These areas may need revisiting:
 
 ---
 
-*Document Version: 1.3*
+## Progenitor Mothership (December 2024)
+
+### Decision: Mothership as Win Condition
+
+**Choice**: Progenitor Mothership spawns 60 seconds after emergence; destroying it breaks the cycle
+
+**Rationale**:
+- Gives players a tangible goal during Progenitor phase
+- "Survive long enough and you get a shot" creates tension
+- Normal victory suspended during Progenitor phase prevents anticlimactic wins
+- 5000 HP mothership is a serious challenge but achievable
+
+**Implementation**:
+- `mothership_spawn_delay: 60.0` in CONVERGENCE_TIMING
+- `MOTHERSHIP_CONFIG` defines stats (5000 HP, 4x visual scale)
+- Destroying mothership sets `mothership_destroyed = true` in convergence state
+- `_handle_mothership_victory()` shows special victory screen
+
+### Decision: Victory Suspension During Progenitor
+
+**Choice**: Normal victory conditions don't trigger while Progenitor is active with ships
+
+**Rationale**:
+- Prevents anticlimactic "Nemesis Wins!" when player is fighting the Progenitor
+- Forces players to actually deal with the existential threat
+- The real battle is against the cycle, not other factions
+
+**Implementation**: `CHECK_VICTORY` in reducer checks `progenitor_active and progenitor_has_ships`
+
+---
+
+## Harvester Improvements (December 2024)
+
+### Decision: Scaling Harvester Cap
+
+**Choice**: Max harvesters scales based on unclaimed territory (2/3/4 based on 1-2/3-5/6+ points)
+
+**Rationale**:
+- Fixed cap of 2 was too slow when many expansion opportunities exist
+- More unclaimed points = more harvesters needed to expand
+- Prevents AI from building harvesters when there's nothing to claim
+
+**Implementation**: `_decide_ship_to_build()` in `vnp_ai_controller.gd`
+
+### Decision: Aggressive Harvester Braking
+
+**Choice**: Harvesters use 40x stronger braking at build locations
+
+**Rationale**:
+- Asteroids-style momentum caused harvesters to overshoot targets
+- Camp tolerance (50 units) was too tight for drifting ships
+- Factory building requires staying still - momentum was preventing this
+
+**Implementation**:
+- `_harvester_brake()` function in `ship.gd` with 40x drag
+- `_move_to()` slows harvesters to 30% when within 100 units of target
+- Snap to zero velocity when speed < 8
+
+### Decision: Harvester Speed Boost
+
+**Choice**: Harvesters have speed 320 (fastest ship type, up from 200)
+
+**Rationale**:
+- Harvesters need to "bee-line" to unclaimed territory
+- Expansion pace was too slow with standard ship speed
+- Faster harvesters with stronger braking = quick transit + precise stop
+- Creates distinct tactical role: dedicated expansion ships
+
+**Implementation**: `SHIP_STATS[ShipType.HARVESTER]["speed"] = 320` in `vnp_types.gd`
+
+---
+
+## Performance (December 2024)
+
+### Decision: Alt-Tab Effect Skip
+
+**Choice**: Skip visual effects for 2 frames after window regains focus
+
+**Rationale**:
+- When alt-tabbed, game logic continues but rendering pauses
+- Returning causes explosion backlog to fire simultaneously = lag spike
+- Skipping effects briefly prevents the spike without affecting gameplay
+
+**Implementation**:
+- `_notification(NOTIFICATION_APPLICATION_FOCUS_IN)` sets `skip_effects_frames = 2`
+- All spawn functions check `skip_effects_frames > 0` before creating particles
+- Ships still die, damage still happens - only visuals skipped
+
+---
+
+*Document Version: 1.5*
 *Last Updated: December 2024*

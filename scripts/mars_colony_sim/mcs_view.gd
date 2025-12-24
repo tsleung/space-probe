@@ -594,6 +594,9 @@ func _draw():
 	# Energy beams between major structures
 	_draw_energy_network()
 
+	# Elevated transit system (monorail)
+	_draw_transit_system()
+
 	# City spotlights (on tall buildings)
 	_draw_city_spotlights()
 
@@ -860,35 +863,38 @@ func _get_building_max_tier(building_type: int) -> int:
 
 func _draw_orbital_elements():
 	"""Draw satellites, space stations, skyhook, and orbital ring in the sky"""
-	# Only show orbital stuff in later tiers
-	if _colony_tier == "survival":
-		return
-
 	var sky_center = Vector2(size.x * 0.5, size.y * 0.15)
 
-	# Satellites orbiting
-	var num_sats = 3 if _colony_tier == "growth" else 6
-	for i in range(num_sats):
-		var orbit_t = fmod(_time * 0.2 + i * (1.0 / num_sats), 1.0)
-		var orbit_r = 80 + i * 15
-		var sat_x = sky_center.x + cos(orbit_t * TAU) * orbit_r
-		var sat_y = sky_center.y + sin(orbit_t * TAU) * orbit_r * 0.3  # Flattened orbit
-		# Solar panel glint
-		var glint = max(0, sin(orbit_t * TAU * 4 + i))
-		draw_circle(Vector2(sat_x, sat_y), 2, Color(0.8, 0.85, 0.9, 0.5 + glint * 0.5))
+	# Check for actual orbital buildings
+	var starport_tier = _get_building_max_tier(_MCSTypes.BuildingType.STARPORT)
+	var orbital_tier = _get_building_max_tier(_MCSTypes.BuildingType.ORBITAL)
+	var catcher_tier = _get_building_max_tier(_MCSTypes.BuildingType.CATCHER)
 
-	# Space station (independence tier)
-	if _colony_tier in ["independence", "transcendence"]:
-		var station_t = fmod(_time * 0.08, 1.0)
-		var station_x = sky_center.x + cos(station_t * TAU) * 120
-		var station_y = sky_center.y + sin(station_t * TAU) * 40
-		# Station body
-		draw_rect(Rect2(station_x - 8, station_y - 2, 16, 4), Color(0.7, 0.72, 0.75, 0.7))
-		# Solar arrays
-		draw_rect(Rect2(station_x - 20, station_y - 1, 10, 2), Color(0.3, 0.4, 0.6, 0.6))
-		draw_rect(Rect2(station_x + 10, station_y - 1, 10, 2), Color(0.3, 0.4, 0.6, 0.6))
+	# STARPORT - Shows landing/launching ships from surface
+	if starport_tier > 0:
+		_draw_starport_ships(sky_center, starport_tier)
 
-	# LARGE ORBITAL SHIPS - freighters, liners, cruisers
+	# ORBITAL STATION - Large space station in orbit
+	if orbital_tier > 0:
+		_draw_orbital_station(sky_center, orbital_tier)
+
+	# ASTEROID CATCHER - Cargo catching facility with asteroids
+	if catcher_tier > 0:
+		_draw_asteroid_catcher(sky_center, catcher_tier)
+
+	# Satellites orbiting (show if any orbital infrastructure exists)
+	if starport_tier > 0 or orbital_tier > 0 or _colony_tier != "survival":
+		var num_sats = 2 + starport_tier + orbital_tier
+		for i in range(num_sats):
+			var orbit_t = fmod(_time * 0.2 + i * (1.0 / maxf(num_sats, 1)), 1.0)
+			var orbit_r = 80 + i * 15
+			var sat_x = sky_center.x + cos(orbit_t * TAU) * orbit_r
+			var sat_y = sky_center.y + sin(orbit_t * TAU) * orbit_r * 0.3  # Flattened orbit
+			# Solar panel glint
+			var glint = max(0, sin(orbit_t * TAU * 4 + i))
+			draw_circle(Vector2(sat_x, sat_y), 2, Color(0.8, 0.85, 0.9, 0.5 + glint * 0.5))
+
+	# LARGE ORBITAL SHIPS - freighters, liners, cruisers (tied to starport)
 	if not _orbital_ships.is_empty():
 		_draw_orbital_ships(sky_center)
 
@@ -1056,6 +1062,177 @@ func _draw_orbital_ships(sky_center: Vector2):
 				for i in range(3):
 					var ey = pos.y - ship_size * 0.25 + i * ship_size * 0.25
 					draw_circle(Vector2(pos.x - ship_size * 1.05, ey), 2, Color(0.3, 0.5, 0.9, 0.7))
+
+func _draw_starport_ships(sky_center: Vector2, tier: int):
+	"""Draw ships ascending/descending from starport - visible in the sky"""
+	# Multiple ships based on tier
+	var ship_count = 1 + tier
+	for i in range(ship_count):
+		# Each ship has a different phase offset
+		var phase_offset = i * 3.7  # Stagger the ships
+		var cycle_time = 12.0 - tier  # Faster cycles at higher tiers
+		var ship_phase = fmod(_time + phase_offset, cycle_time) / cycle_time
+
+		# Ship travels from horizon to orbit and back
+		var ascending = ship_phase < 0.5
+		var t = ship_phase * 2.0 if ascending else (1.0 - ship_phase) * 2.0
+
+		# Curved path from surface to orbit
+		var start_x = size.x * (0.3 + i * 0.15)
+		var start_y = size.y * 0.85
+		var end_x = sky_center.x + (i - ship_count * 0.5) * 40
+		var end_y = sky_center.y + 30
+
+		# Bezier curve for realistic ascent/descent
+		var control_x = lerp(start_x, end_x, 0.5)
+		var control_y = size.y * 0.4
+		var ship_x = lerp(lerp(start_x, control_x, t), lerp(control_x, end_x, t), t)
+		var ship_y = lerp(lerp(start_y, control_y, t), lerp(control_y, end_y, t), t)
+		var ship_pos = Vector2(ship_x, ship_y)
+
+		# Ship size gets smaller as it ascends (perspective)
+		var ship_scale = lerp(1.0, 0.3, t)
+		var ship_size = (8 + tier * 2) * ship_scale
+
+		# Draw ship body
+		var ship_color = Color(0.75, 0.78, 0.82, 0.9)
+		var nose_dir = -1 if ascending else 1
+		var nose = ship_pos + Vector2(0, nose_dir * ship_size)
+		var left = ship_pos + Vector2(-ship_size * 0.5, -nose_dir * ship_size * 0.4)
+		var right = ship_pos + Vector2(ship_size * 0.5, -nose_dir * ship_size * 0.4)
+		var hull = PackedVector2Array([nose, left, right])
+		if _is_valid_polygon(hull):
+			draw_polygon(hull, [ship_color])
+
+		# Engine flame
+		var flame_size = ship_size * 0.6 * (1.0 if ascending else 0.3)
+		var flame_pos = ship_pos + Vector2(0, -nose_dir * ship_size * 0.5)
+		var flame_color = Color(1.0, 0.6, 0.2, 0.8) if ascending else Color(0.3, 0.6, 1.0, 0.5)
+		draw_circle(flame_pos, flame_size, flame_color)
+		if ascending:
+			# Exhaust trail
+			for j in range(5):
+				var trail_t = j * 0.15
+				var trail_pos = ship_pos + Vector2(0, -nose_dir * (ship_size * 0.6 + j * ship_size * 0.3))
+				draw_circle(trail_pos, flame_size * (1.0 - trail_t * 0.5), Color(1.0, 0.5, 0.1, 0.4 - trail_t * 0.3))
+
+func _draw_orbital_station(sky_center: Vector2, tier: int):
+	"""Draw large orbital space station"""
+	# Station orbits slowly
+	var orbit_t = fmod(_time * 0.05, 1.0)
+	var orbit_r = 100 + tier * 20
+	var station_x = sky_center.x + cos(orbit_t * TAU) * orbit_r
+	var station_y = sky_center.y + sin(orbit_t * TAU) * orbit_r * 0.3
+	var pos = Vector2(station_x, station_y)
+
+	# Station size based on tier
+	var station_size = 12 + tier * 6
+
+	# Main hub (rotating)
+	var hub_rotation = _time * 0.2
+	var hub_color = Color(0.7, 0.72, 0.75, 0.85)
+	draw_circle(pos, station_size * 0.4, hub_color)
+
+	# Rotating ring (habitat ring)
+	var ring_radius = station_size
+	var ring_segments = 8 + tier * 4
+	for i in range(ring_segments):
+		var angle = hub_rotation + i * TAU / ring_segments
+		var ring_pos = pos + Vector2(cos(angle), sin(angle) * 0.4) * ring_radius
+		var segment_size = 2 + tier
+		draw_circle(ring_pos, segment_size, Color(0.6, 0.65, 0.7, 0.7))
+
+	# Solar arrays (4 large panels)
+	var panel_color = Color(0.2, 0.3, 0.5, 0.7)
+	var panel_length = station_size * 1.5
+	var panel_width = station_size * 0.3
+	for i in range(4):
+		var panel_angle = i * TAU / 4 + _time * 0.02  # Slow tracking rotation
+		var panel_dir = Vector2(cos(panel_angle), sin(panel_angle) * 0.4)
+		var panel_start = pos + panel_dir * station_size * 0.5
+		var panel_end = pos + panel_dir * (station_size * 0.5 + panel_length)
+		draw_line(panel_start, panel_end, panel_color, panel_width)
+		# Panel glint
+		var glint = maxf(0, sin(panel_angle + _time))
+		if glint > 0.8:
+			draw_circle(panel_end, 3, Color(0.8, 0.9, 1.0, glint - 0.8))
+
+	# Docking ports with occasional ship
+	if tier >= 2:
+		var dock_angle = _time * 0.1
+		var dock_pos = pos + Vector2(cos(dock_angle), sin(dock_angle) * 0.4) * station_size * 0.6
+		draw_rect(Rect2(dock_pos.x - 4, dock_pos.y - 2, 8, 4), Color(0.5, 0.55, 0.6, 0.8))
+
+	# Station lights (blinking)
+	var blink = sin(_time * 3.0) > 0.5
+	if blink:
+		draw_circle(pos + Vector2(0, -station_size * 0.5), 2, Color(1.0, 0.2, 0.2, 0.9))
+		draw_circle(pos + Vector2(0, station_size * 0.5), 2, Color(0.2, 1.0, 0.2, 0.9))
+
+func _draw_asteroid_catcher(sky_center: Vector2, tier: int):
+	"""Draw asteroid catcher facility with incoming asteroids"""
+	# Position in higher orbit
+	var orbit_t = fmod(_time * 0.03, 1.0)
+	var orbit_r = 150 + tier * 15
+	var catcher_x = sky_center.x + cos(orbit_t * TAU + PI * 0.7) * orbit_r
+	var catcher_y = sky_center.y + sin(orbit_t * TAU + PI * 0.7) * orbit_r * 0.25
+	var pos = Vector2(catcher_x, catcher_y)
+
+	var catcher_size = 10 + tier * 4
+
+	# Main structure - net/scoop shape
+	var scoop_color = Color(0.6, 0.55, 0.5, 0.8)
+	var scoop_open = catcher_size * 1.5
+	var scoop_depth = catcher_size * 0.8
+
+	# Draw scoop arms
+	var arm_left = pos + Vector2(-scoop_open * 0.5, -scoop_depth * 0.5)
+	var arm_right = pos + Vector2(scoop_open * 0.5, -scoop_depth * 0.5)
+	var scoop_back = pos + Vector2(0, scoop_depth * 0.5)
+	draw_line(arm_left, scoop_back, scoop_color, 2)
+	draw_line(arm_right, scoop_back, scoop_color, 2)
+	draw_line(arm_left, arm_right, scoop_color, 1)
+
+	# Net lines
+	for i in range(3):
+		var t = (i + 1) * 0.25
+		var net_left = arm_left.lerp(scoop_back, t)
+		var net_right = arm_right.lerp(scoop_back, t)
+		draw_line(net_left, net_right, Color(0.5, 0.5, 0.5, 0.4), 1)
+
+	# Processing module at back
+	draw_circle(scoop_back, catcher_size * 0.3, Color(0.65, 0.6, 0.55, 0.8))
+
+	# Incoming asteroids (multiple based on tier)
+	var asteroid_count = tier
+	for i in range(asteroid_count):
+		var asteroid_phase = fmod(_time * 0.15 + i * 2.3, 1.0)
+		# Asteroids come from upper right
+		var ast_start = Vector2(size.x * 0.9, size.y * 0.05)
+		var ast_end = pos + Vector2(0, -scoop_depth * 0.3)
+
+		var ast_t = asteroid_phase
+		var ast_pos = ast_start.lerp(ast_end, ast_t)
+		var ast_size = 3 + tier + sin(i * 1.7) * 2
+
+		# Asteroid (irregular shape simulated with multiple circles)
+		var ast_color = Color(0.5, 0.45, 0.4, 0.7 + ast_t * 0.3)
+		draw_circle(ast_pos, ast_size, ast_color)
+		draw_circle(ast_pos + Vector2(ast_size * 0.3, -ast_size * 0.2), ast_size * 0.6, ast_color.darkened(0.1))
+
+		# Trail
+		if ast_t > 0.1:
+			for j in range(3):
+				var trail_t = ast_t - j * 0.05
+				if trail_t > 0:
+					var trail_pos = ast_start.lerp(ast_end, trail_t)
+					draw_circle(trail_pos, ast_size * (0.5 - j * 0.1), Color(0.6, 0.5, 0.4, 0.2 - j * 0.05))
+
+	# Catching flash effect
+	var catch_phase = fmod(_time, 5.0)
+	if catch_phase < 0.3:
+		var flash_alpha = (0.3 - catch_phase) * 3.0
+		draw_circle(pos, catcher_size * 0.8, Color(1.0, 0.9, 0.5, flash_alpha * 0.5))
 
 func _draw_landing_ships():
 	"""Draw ships landing/taking off from the colony"""
@@ -1263,6 +1440,79 @@ func _draw_energy_network():
 
 		draw_line(power.pos, center, beam_color, 2.0)
 		draw_circle(mid_point, 4, Color(beam_color.r, beam_color.g, beam_color.b, 0.8))
+
+func _draw_transit_system():
+	"""Draw elevated monorail/transit tubes connecting major buildings"""
+	# Only for established colonies (15+ buildings)
+	if _building_layout.size() < 15:
+		return
+
+	# Find transit hub buildings (STARPORT, RECREATION, HABITAT clusters)
+	var hubs: Array = []
+
+	for bid in _building_layout:
+		var layout = _building_layout[bid]
+		for b in _buildings:
+			if b.get("id", "") == bid:
+				var btype = b.get("type", 0)
+				var is_operational = b.get("is_operational", false)
+				if not is_operational:
+					continue
+				# Hub buildings get transit connections
+				if btype in [_MCSTypes.BuildingType.STARPORT, _MCSTypes.BuildingType.RECREATION,
+							_MCSTypes.BuildingType.HABITAT, _MCSTypes.BuildingType.QUARTERS,
+							_MCSTypes.BuildingType.MEDICAL, _MCSTypes.BuildingType.RESEARCH]:
+					hubs.append({
+						"pos": Vector2(layout.world_x, layout.world_y),
+						"height": layout.height,
+						"type": btype
+					})
+				break
+
+	if hubs.size() < 3:
+		return
+
+	# Sort hubs by position for consistent connections
+	hubs.sort_custom(func(a, b): return a.pos.x + a.pos.y < b.pos.x + b.pos.y)
+
+	# Draw transit rails connecting hubs (every 3rd hub for cleaner visuals)
+	var rail_color = Color(0.6, 0.65, 0.7, 0.8)
+	var support_color = Color(0.4, 0.45, 0.5, 0.9)
+	var rail_height = 25.0  # Elevated above buildings
+
+	for i in range(mini(hubs.size() - 1, 6)):  # Max 6 connections
+		var hub_a = hubs[i]
+		var hub_b = hubs[(i + 2) % hubs.size()]  # Skip one for longer spans
+
+		var start_3d = _iso_transform(hub_a.pos.x, hub_a.pos.y, rail_height)
+		var end_3d = _iso_transform(hub_b.pos.x, hub_b.pos.y, rail_height)
+
+		# Support pylons at each end
+		var start_ground = _iso_transform(hub_a.pos.x, hub_a.pos.y, 0)
+		var end_ground = _iso_transform(hub_b.pos.x, hub_b.pos.y, 0)
+		draw_line(start_ground, start_3d, support_color, 3.0 * _camera_zoom)
+		draw_line(end_ground, end_3d, support_color, 3.0 * _camera_zoom)
+
+		# Middle support pylon
+		var mid_pos = hub_a.pos.lerp(hub_b.pos, 0.5)
+		var mid_3d = _iso_transform(mid_pos.x, mid_pos.y, rail_height)
+		var mid_ground = _iso_transform(mid_pos.x, mid_pos.y, 0)
+		draw_line(mid_ground, mid_3d, support_color, 2.5 * _camera_zoom)
+
+		# Rail line (double track)
+		draw_line(start_3d + Vector2(0, -2), end_3d + Vector2(0, -2), rail_color, 2.0 * _camera_zoom)
+		draw_line(start_3d + Vector2(0, 2), end_3d + Vector2(0, 2), rail_color, 2.0 * _camera_zoom)
+
+		# Moving pod along the rail
+		var pod_t = fmod(_time * 0.15 + i * 0.3, 1.0)
+		var pod_pos = start_3d.lerp(end_3d, pod_t)
+		# Pod body
+		var pod_color = Color(0.9, 0.85, 0.8, 0.95)
+		draw_circle(pod_pos, 5 * _camera_zoom, pod_color)
+		# Pod windows
+		var window_color = Color(0.3, 0.7, 1.0, 0.8)
+		draw_circle(pod_pos + Vector2(-2, 0) * _camera_zoom, 2 * _camera_zoom, window_color)
+		draw_circle(pod_pos + Vector2(2, 0) * _camera_zoom, 2 * _camera_zoom, window_color)
 
 func _draw_atmosphere_effects():
 	"""Draw aurora, meteor showers, and other atmospheric phenomena"""
@@ -1988,6 +2238,10 @@ func _draw_building_obj(obj: Dictionary):
 		if not is_operational and fmod(_time, 0.8) < 0.4:
 			light_color.a = 0.2
 		draw_circle(light_pos, 3.0 * _camera_zoom, light_color)
+
+	# RIM LIGHTING - dramatic sun-facing edge highlight
+	if progress >= 1.0 and is_operational:
+		_draw_rim_light(bx, by, BUILDING_RADIUS, draw_height, shape)
 
 func _draw_building_perspective(obj: Dictionary, shape: BuildingShape, draw_height: float,
 		top_color: Color, left_color: Color, right_color: Color,
@@ -3643,6 +3897,67 @@ func _draw_drone_obj(obj: Dictionary):
 		draw_circle(light_pos, drone_size * 0.4, light_color)
 
 # =============================================================================
+# RIM LIGHTING
+# =============================================================================
+
+func _draw_rim_light(cx: float, cy: float, radius: float, height: float, shape: int):
+	"""Draw dramatic sun-facing rim lighting on buildings"""
+	# Rim light color - warm golden highlight from sun
+	var rim_color = Color(1.0, 0.95, 0.85, 0.5)
+
+	# Sun direction (from upper-left in isometric view)
+	var sun_offset = radius * 0.8
+
+	# Different shapes need different rim treatments
+	match shape:
+		BuildingShape.HEX_PRISM, BuildingShape.TOWER:
+			# Draw highlight on upper-left edges of hex
+			var top_left = _iso_transform(cx - sun_offset, cy - sun_offset * 0.5, height)
+			var top_center = _iso_transform(cx, cy, height)
+			var mid_left = _iso_transform(cx - sun_offset, cy - sun_offset * 0.5, height * 0.5)
+			# Top edge glow
+			draw_line(top_left, top_center, rim_color, 2.5 * _camera_zoom)
+			# Vertical edge glow
+			draw_line(top_left, mid_left, rim_color, 2.0 * _camera_zoom)
+
+		BuildingShape.DOME, BuildingShape.ARCOLOGY:
+			# Arc highlight on dome surface
+			var arc_start = _iso_transform(cx - radius * 0.7, cy - radius * 0.3, height * 0.6)
+			var arc_mid = _iso_transform(cx - radius * 0.3, cy - radius * 0.5, height * 0.85)
+			var arc_end = _iso_transform(cx + radius * 0.2, cy - radius * 0.4, height * 0.7)
+			draw_line(arc_start, arc_mid, rim_color, 2.5 * _camera_zoom)
+			draw_line(arc_mid, arc_end, rim_color, 2.0 * _camera_zoom)
+
+		BuildingShape.GREENHOUSE:
+			# Triangular highlight on glass panels
+			var panel_top = _iso_transform(cx, cy, height + 3)
+			var panel_edge = _iso_transform(cx - radius * 0.8, cy - radius * 0.4, 3)
+			draw_line(panel_top, panel_edge, rim_color.lightened(0.2), 2.0 * _camera_zoom)
+
+		BuildingShape.PROCEDURAL_SKYSCRAPER:
+			# Multiple edge highlights for skyscrapers (more dramatic)
+			var rim_bright = Color(1.0, 0.98, 0.9, 0.7)
+			# Main vertical edge
+			var sk_top = _iso_transform(cx - radius * 0.6, cy - radius * 0.3, height * 1.5)
+			var sk_mid = _iso_transform(cx - radius * 0.6, cy - radius * 0.3, height * 0.75)
+			var sk_bot = _iso_transform(cx - radius * 0.6, cy - radius * 0.3, 0)
+			draw_line(sk_top, sk_mid, rim_bright, 3.0 * _camera_zoom)
+			draw_line(sk_mid, sk_bot, rim_color, 2.0 * _camera_zoom)
+			# Top edge
+			var sk_top_right = _iso_transform(cx + radius * 0.3, cy - radius * 0.4, height * 1.5)
+			draw_line(sk_top, sk_top_right, rim_bright, 2.5 * _camera_zoom)
+
+		BuildingShape.STADIUM:
+			# Curved rim on stadium bowl
+			for i in range(5):
+				var t = float(i) / 4.0
+				var ang = -PI * 0.6 + t * PI * 0.4
+				var r = radius * 2.2
+				var p1 = _iso_transform(cx + cos(ang) * r, cy + sin(ang) * r * 0.5, height * 0.4)
+				var p2 = _iso_transform(cx + cos(ang + 0.2) * r, cy + sin(ang + 0.2) * r * 0.5, height * 0.4)
+				draw_line(p1, p2, rim_color, 2.0 * _camera_zoom)
+
+# =============================================================================
 # HEX PRISM DRAWING
 # =============================================================================
 
@@ -3693,7 +4008,36 @@ func _draw_ellipse(center: Vector2, rx: float, ry: float, color: Color):
 	for i in range(20):
 		var angle = i * TAU / 20.0
 		points.append(center + Vector2(cos(angle) * rx, sin(angle) * ry))
-	draw_polygon(points, [color])
+	if _is_valid_polygon(points):
+		draw_polygon(points, [color])
+
+func _is_valid_polygon(points: PackedVector2Array) -> bool:
+	"""Check if polygon points form a valid drawable polygon.
+	Returns false if points are degenerate (NaN, too close together, or collinear)."""
+	if points.size() < 3:
+		return false
+
+	# Check for NaN or INF values and calculate bounding box
+	var min_x = INF
+	var max_x = -INF
+	var min_y = INF
+	var max_y = -INF
+
+	for point in points:
+		if is_nan(point.x) or is_nan(point.y) or is_inf(point.x) or is_inf(point.y):
+			return false
+		min_x = minf(min_x, point.x)
+		max_x = maxf(max_x, point.x)
+		min_y = minf(min_y, point.y)
+		max_y = maxf(max_y, point.y)
+
+	# Check if polygon has meaningful area (not too small)
+	var width = max_x - min_x
+	var height = max_y - min_y
+	if width < 0.5 or height < 0.5:
+		return false
+
+	return true
 
 # =============================================================================
 # BUILDING SHAPE VARIANTS
@@ -3767,6 +4111,22 @@ func _draw_dome(cx: float, cy: float, radius: float, height: float, base_color: 
 	# Draw base hex
 	_draw_hex_prism(cx, cy, radius, 4.0, base_color, base_color.darkened(0.2), base_color.darkened(0.1))
 
+	# INTERIOR GLOW - warm light from inside the dome
+	var glow_intensity = 0.25 + sin(_time * 1.5) * 0.08
+	var interior_glow = Color(1.0, 0.95, 0.85, glow_intensity)
+	var glow_pos = _iso_transform(cx, cy, 4.0 + height * 0.4)
+	draw_circle(glow_pos, radius * 0.7 * _camera_zoom, interior_glow)
+
+	# WINDOW LIGHTS - small bright dots around the dome base
+	for i in range(6):
+		var win_angle = i * TAU / 6.0
+		var win_x = cx + cos(win_angle) * radius * 0.85
+		var win_y = cy + sin(win_angle) * radius * 0.85
+		var win_pos = _iso_transform(win_x, win_y, 6.0)
+		# Twinkling effect
+		var twinkle = 0.6 + sin(_time * 3.0 + i * 1.2) * 0.3
+		draw_circle(win_pos, 3 * _camera_zoom, Color(1.0, 0.95, 0.8, twinkle))
+
 	# Draw dome as series of rings
 	var rings = 6
 	for ring in range(rings):
@@ -3789,9 +4149,10 @@ func _draw_dome(cx: float, cy: float, radius: float, height: float, base_color: 
 	var apex = _iso_transform(cx, cy, 4.0 + height)
 	draw_circle(apex, radius * 0.3 * _camera_zoom, dome_color)
 
-	# Apex light
-	var glow_alpha = 0.5 + sin(_time * 2.0) * 0.3
-	draw_circle(apex, 5 * _camera_zoom, Color(0.5, 0.9, 1.0, glow_alpha))
+	# Apex light - brighter pulsing
+	var glow_alpha = 0.6 + sin(_time * 2.0) * 0.3
+	draw_circle(apex, 6 * _camera_zoom, Color(0.5, 0.9, 1.0, glow_alpha))
+	draw_circle(apex, 3 * _camera_zoom, Color(0.8, 1.0, 1.0, glow_alpha * 0.8))
 
 func _draw_space_elevator(cx: float, cy: float, height: float):
 	"""Draw space elevator - THE CENTERPIECE megastructure"""
@@ -4001,15 +4362,25 @@ func _draw_greenhouse(cx: float, cy: float, radius: float, height: float):
 		draw_line(b1, apex, frame_color, 2.0 * _camera_zoom)
 		draw_line(b2, apex, frame_color, 2.0 * _camera_zoom)
 
-	# Plants inside (visible through glass)
-	for i in range(8):
-		var px = cx + randf_range(-radius * 0.6, radius * 0.6)
-		var py = cy + randf_range(-radius * 0.6, radius * 0.6)
-		# Use deterministic "random" based on position
-		var plant_h = 4.0 + sin(px * 0.5 + py * 0.3) * 3.0
+	# Plants inside (visible through glass) - deterministic positions
+	for i in range(12):
+		# Deterministic spiral layout for plant positions
+		var angle = i * TAU / 12.0 + 0.3
+		var dist = radius * 0.35 * (0.5 + float(i % 3) * 0.25)
+		var px = cx + cos(angle) * dist
+		var py = cy + sin(angle) * dist
+		# Varied heights based on index
+		var plant_h = 5.0 + sin(i * 0.9) * 4.0
 		var plant_pos = _iso_transform(px, py, 3.0 + plant_h)
-		var plant_color = plant_green.lerp(Color(0.3, 0.8, 0.2), sin(px + py) * 0.5 + 0.5)
-		draw_circle(plant_pos, (3 + sin(px) * 1.5) * _camera_zoom, plant_color)
+		# Bright green gradient
+		var plant_color = plant_green.lerp(Color(0.2, 0.9, 0.3), float(i) / 12.0)
+		# Larger, more visible plants
+		var plant_size = (5 + sin(i * 1.5) * 2) * _camera_zoom
+		draw_circle(plant_pos, plant_size, plant_color)
+		# Add stem for taller plants
+		if plant_h > 6:
+			var stem_base = _iso_transform(px, py, 3.0)
+			draw_line(stem_base, plant_pos, Color(0.15, 0.5, 0.2, 0.7), 1.5 * _camera_zoom)
 
 	# Sunlight reflection on glass
 	var sun_pos = _iso_transform(cx - radius * 0.3, cy - radius * 0.3, 3.0 + height * 0.6)
@@ -4203,8 +4574,8 @@ func _draw_stadium(cx: float, cy: float, radius: float, height: float):
 			var angle = i * TAU / 16.0
 			tier_points.append(_iso_transform(cx + cos(angle) * tier_r, cy + sin(angle) * tier_r, tier_z))
 
-		# Draw tier as polygon
-		if tier_points.size() >= 3:
+		# Draw tier as polygon (with validation)
+		if tier_points.size() >= 3 and _is_valid_polygon(tier_points):
 			draw_polygon(tier_points, [seat_color.lerp(wall_color, t)])
 
 	# Inner field (at bowl bottom)
@@ -4212,7 +4583,7 @@ func _draw_stadium(cx: float, cy: float, radius: float, height: float):
 	for i in range(16):
 		var angle = i * TAU / 16.0
 		field_points.append(_iso_transform(cx + cos(angle) * inner_r * 0.9, cy + sin(angle) * inner_r * 0.9, bowl_h * 0.1))
-	if field_points.size() >= 3:
+	if field_points.size() >= 3 and _is_valid_polygon(field_points):
 		draw_polygon(field_points, [field_color])
 
 	# Field markings
@@ -4237,6 +4608,13 @@ func _draw_stadium(cx: float, cy: float, radius: float, height: float):
 
 func _draw_perspective_stadium(base_pos: Vector2, width: float, height: float, scale: float, depth_ratio: float, tier: int = 1):
 	"""Draw stadium in perspective view"""
+	var w = width * scale
+	var h = height * scale
+
+	# Skip drawing if too small (prevents degenerate polygon errors)
+	if w < 2.0 or h < 2.0:
+		return
+
 	var wall_color = Color(0.7, 0.72, 0.75)
 	var field_color = Color(0.35, 0.55, 0.35)
 	var seat_color = Color(0.5, 0.4, 0.35)
@@ -4247,20 +4625,20 @@ func _draw_perspective_stadium(base_pos: Vector2, width: float, height: float, s
 	field_color = field_color.lerp(Color(0.5, 0.5, 0.45), haze)
 	seat_color = seat_color.lerp(Color(0.55, 0.52, 0.48), haze)
 
-	var w = width * scale
-	var h = height * scale
-
 	# Elliptical bowl - front rim lower, back rim higher
 	var bowl_front = base_pos + Vector2(0, -h * 0.3)
 	var bowl_back = base_pos + Vector2(0, -h * 0.8)
 
-	# Draw seating area (simplified ellipse)
+	# Draw seating area (simplified ellipse) - use fewer points for small scales
+	var point_count = 17 if w > 20 else 9
 	var outer_points = PackedVector2Array()
-	for i in range(17):
-		var angle = i * PI / 16  # Half ellipse (front facing)
-		var rim_y = lerp(bowl_front.y, bowl_back.y, 0.5 + sin(angle) * 0.5)
+	for i in range(point_count):
+		var angle = i * PI / (point_count - 1)  # Half ellipse (front facing)
+		var rim_y = lerpf(bowl_front.y, bowl_back.y, 0.5 + sin(angle) * 0.5)
 		outer_points.append(Vector2(base_pos.x + cos(angle - PI/2) * w, rim_y))
-	if outer_points.size() >= 3:
+
+	# Validate polygon before drawing
+	if outer_points.size() >= 3 and _is_valid_polygon(outer_points):
 		draw_polygon(outer_points, [seat_color])
 
 	# Inner field
@@ -4285,7 +4663,8 @@ func _draw_perspective_stadium(base_pos: Vector2, width: float, height: float, s
 			field_center + Vector2(-field_w * 0.3, 0),
 			field_center + Vector2(field_w * 0.3, 0)
 		])
-		draw_polygon(cone, [Color(1.0, 0.98, 0.9, 0.05)])
+		if _is_valid_polygon(cone):
+			draw_polygon(cone, [Color(1.0, 0.98, 0.9, 0.05)])
 
 func _draw_procedural_skyscraper(cx: float, cy: float, radius: float, height: float, seed_val: int):
 	"""Draw procedurally generated skyscraper (isometric)"""

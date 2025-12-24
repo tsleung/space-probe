@@ -43,6 +43,18 @@ const CONVERGENCE_TIMING = {
 	"instability_threshold": 80.0,       # Triggers fragmentation (need ~27 drone kills)
 	"instability_natural_rate": 0.5,     # Natural growth per tick in CRITICAL (slow)
 	"critical_radius_percent": 0.3,      # 30% of original = critical phase
+	"mothership_spawn_delay": 60.0,      # 60 seconds after emergence, mothership appears
+}
+
+# Progenitor Mothership - the final boss
+const MOTHERSHIP_CONFIG = {
+	"health": 5000,                      # Massive health pool
+	"size": ShipSize.MASSIVE,
+	"speed": 40,                         # Slow, deliberate movement
+	"damage": 200,                       # Devastating attacks
+	"range": 600,                        # Long range
+	"fire_rate": 0.5,                    # Slow but powerful
+	"visual_scale": 4.0,                 # 4x larger than normal ships
 }
 
 # Progenitor spawn configuration
@@ -214,7 +226,7 @@ const SHIP_STATS = {
 		"name": "Harvester",
 		"cost": 60,
 		"mass_cost": 0,
-		"speed": 200,
+		"speed": 320,  # FAST - bee-line to unclaimed territory
 		"health": 60,
 		"capacity": 100,
 	},

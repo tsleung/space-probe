@@ -91,6 +91,11 @@ func reduce(state, action):
 				var health_bonus = _get_team_health_bonus(new_state, team)
 				var final_health = int(base_health * (1.0 + health_bonus))
 
+				# Check if this is the Progenitor Mothership - massive stats boost
+				var is_mothership = action.get("is_mothership", false)
+				if is_mothership:
+					final_health = VnpTypes.MOTHERSHIP_CONFIG["health"]
+
 				new_state["ships"][ship_id] = {
 					"id": ship_id,
 					"team": team,
@@ -99,6 +104,7 @@ func reduce(state, action):
 					"health": final_health,
 					"state": "idle", # e.g., idle, moving, attacking, harvesting
 					"target": null, # Target can be a ship ID or a planet ID
+					"is_mothership": is_mothership,  # Track if this is THE mothership
 				}
 		
 		"SET_SHIP_STATE":
@@ -117,6 +123,13 @@ func reduce(state, action):
 			if new_state["ships"].has(ship_id):
 				new_state["ships"][ship_id]["health"] -= action["damage"]
 				if new_state["ships"][ship_id]["health"] <= 0:
+					# Check if this is the MOTHERSHIP dying - breaks the cycle!
+					var is_mothership = new_state["ships"][ship_id].get("is_mothership", false)
+					if is_mothership:
+						new_state["convergence"]["mothership_destroyed"] = true
+						# The cycle is broken - Progenitor is defeated
+						new_state["convergence"]["phase"] = VnpTypes.ConvergencePhase.FRAGMENTATION
+
 					# Check if this is a Progenitor drone dying - adds instability to the cycle
 					var ship_type = new_state["ships"][ship_id].get("type", -1)
 					if ship_type == VnpTypes.ShipType.PROGENITOR_DRONE:
@@ -258,8 +271,13 @@ func reduce(state, action):
 					else:
 						new_state["winner"] = -1  # Mutual destruction
 				elif teams_alive.size() == 1:
-					new_state["game_over"] = true
-					new_state["winner"] = teams_alive[0]
+					# If Progenitor is active, don't declare normal victory
+					# Must defeat the Progenitor mothership first
+					if progenitor_active and progenitor_has_ships:
+						pass  # Battle continues - Progenitor is the real threat
+					else:
+						new_state["game_over"] = true
+						new_state["winner"] = teams_alive[0]
 
 		"RESET_GAME":
 			new_state = get_initial_state()

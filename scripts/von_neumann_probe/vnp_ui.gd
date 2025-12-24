@@ -1096,3 +1096,52 @@ func show_cycle_ending():
 func is_convergence_active() -> bool:
 	"""Check if convergence is happening (for button behavior changes)"""
 	return convergence_active
+
+
+var progenitor_message_label: Label = null
+
+func show_progenitor_message(message: String):
+	"""Display dramatic Progenitor messages in the center of the screen"""
+	# Create label if it doesn't exist
+	if progenitor_message_label == null:
+		progenitor_message_label = Label.new()
+		progenitor_message_label.name = "ProgenitorMessage"
+		progenitor_message_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+		progenitor_message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		progenitor_message_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		progenitor_message_label.add_theme_font_size_override("font_size", 36)
+		progenitor_message_label.add_theme_color_override("font_color", VnpTypes.PROGENITOR_PULSE)
+		progenitor_message_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.2, 0.15))
+		progenitor_message_label.add_theme_constant_override("shadow_offset_x", 3)
+		progenitor_message_label.add_theme_constant_override("shadow_offset_y", 3)
+		progenitor_message_label.visible = false
+		add_child(progenitor_message_label)
+
+	# Set message and show
+	progenitor_message_label.text = message
+	progenitor_message_label.visible = true
+	progenitor_message_label.modulate.a = 0
+
+	# Animate in
+	var tween = create_tween()
+	tween.tween_property(progenitor_message_label, "modulate:a", 1.0, 0.3)
+	tween.tween_interval(2.0)  # Display for 2 seconds
+	tween.tween_property(progenitor_message_label, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(func(): progenitor_message_label.visible = false)
+
+
+func show_mothership_victory():
+	"""Display victory message for defeating the Progenitor Mothership"""
+	if victory_label:
+		victory_label.text = "THE CYCLE IS BROKEN\n\nThe Progenitor Mothership is destroyed.\nHumanity prevails... for now.\n\n[Press R to restart | ESC for menu]"
+		victory_label.add_theme_color_override("font_color", Color(0.3, 1.0, 0.6))
+		victory_label.add_theme_font_size_override("font_size", 36)
+		victory_label.visible = true
+
+		var tween = create_tween()
+		victory_label.modulate.a = 0
+		victory_label.scale = Vector2(0.5, 0.5)
+		victory_label.pivot_offset = victory_label.size / 2
+		tween.set_parallel(true)
+		tween.tween_property(victory_label, "modulate:a", 1.0, 0.5)
+		tween.tween_property(victory_label, "scale", Vector2.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
