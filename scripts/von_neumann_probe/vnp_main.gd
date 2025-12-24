@@ -41,6 +41,10 @@ const HARVESTER_CAMP_TOLERANCE = 50.0  # How far harvester can drift while "camp
 var projectile_pool: Array = []
 const PROJECTILE_POOL_SIZE = 100
 
+# Performance: Cached progenitor drone positions (updated once per frame, not per ship)
+var cached_progenitor_drones: Array = []  # Array of {id, position}
+var progenitor_cache_frame: int = -1  # Frame when cache was last updated
+
 # AI Controller
 var ai_controller = null
 
@@ -1695,6 +1699,30 @@ func _absorb_factory(factory_id: String):
 
 	# Bigger screen shake for factory
 	shake_screen(8.0)
+
+
+func get_cached_progenitor_drones() -> Array:
+	"""Get cached list of progenitor drones for performance.
+	Returns array of {id: int, position: Vector2}.
+	Cache is updated once per frame, so all ships share the same search result."""
+	var current_frame = Engine.get_physics_frames()
+	if progenitor_cache_frame != current_frame:
+		# Update cache
+		progenitor_cache_frame = current_frame
+		cached_progenitor_drones.clear()
+
+		var state = store.get_state()
+		if state != null and state.has("ships"):
+			for ship_id in state.ships:
+				var ship = state.ships[ship_id]
+				if ship.type == VnpTypes.ShipType.PROGENITOR_DRONE:
+					var pos = ship.position
+					# Use actual node position if available
+					if ship_nodes.has(ship_id) and is_instance_valid(ship_nodes[ship_id]):
+						pos = ship_nodes[ship_id].global_position
+					cached_progenitor_drones.append({"id": ship_id, "position": pos})
+
+	return cached_progenitor_drones
 
 
 func _absorb_ship(ship_id: int):

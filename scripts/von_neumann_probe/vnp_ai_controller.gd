@@ -49,6 +49,11 @@ var team_adherence = {
 	VnpTypes.Team.NEMESIS: VnpTypes.FleetAdherence.LOOSE,
 }
 
+# Performance: Cache fleet calculations (updated once per frame)
+var cached_fleet_centers = {}  # team -> Vector2
+var cached_front_lines = {}  # team -> Vector2
+var fleet_cache_frame: int = -1
+
 # Ship production priorities per team - multipliers for weighted selection
 # Values: 1 = normal, 2 = double, 3 = triple, 100 = almost exclusive
 const PRIORITY_CYCLE = [1, 2, 3, 100]  # Cycle through these values
@@ -438,20 +443,56 @@ func get_adherence(team: int) -> int:
 	return team_adherence.get(team, VnpTypes.FleetAdherence.LOOSE)
 
 
-func get_fleet_center(team: int) -> Vector2:
-	"""Get center of gravity for a team's fleet, biased toward rally point for attack-move"""
+func _update_fleet_cache_if_needed():
+	"""Update fleet calculation cache once per frame"""
+	var current_frame = Engine.get_physics_frames()
+	if fleet_cache_frame == current_frame:
+		return  # Already updated this frame
+
+	fleet_cache_frame = current_frame
+	cached_fleet_centers.clear()
+	cached_front_lines.clear()
+
 	var state = store.get_state()
 	if state == null or not state.has("ships"):
-		return base_positions.get(team, Vector2.ZERO)
-	var formation = get_formation(team)
-	var base_pos = base_positions.get(team, Vector2.ZERO)
-	var rally_point = get_rally_point(team)
-	var include_base_anchor = formation == VnpTypes.FleetFormation.DEFENSIVE
+		return
 
-	# Use pure function from VnpSystems
-	return VnpSystems.calculate_fleet_center(
-		team, state.ships, base_pos, rally_point, include_base_anchor
-	)
+	# Calculate fleet centers for all teams
+	for team in VnpTypes.Team.values():
+		var formation = get_formation(team)
+		var base_pos = base_positions.get(team, Vector2.ZERO)
+		var rally_point = get_rally_point(team)
+		var include_base_anchor = formation == VnpTypes.FleetFormation.DEFENSIVE
+
+		cached_fleet_centers[team] = VnpSystems.calculate_fleet_center(
+			team, state.ships, base_pos, rally_point, include_base_anchor
+		)
+
+	# Calculate front lines for all teams
+	for team in VnpTypes.Team.values():
+		var fleet_center = cached_fleet_centers.get(team, Vector2.ZERO)
+		var nearest_enemy_center = Vector2.ZERO
+		var nearest_dist = INF
+
+		for enemy_team in VnpTypes.Team.values():
+			if enemy_team == team:
+				continue
+			var enemy_center = cached_fleet_centers.get(enemy_team, Vector2.ZERO)
+			var dist = fleet_center.distance_to(enemy_center)
+			if dist < nearest_dist:
+				nearest_dist = dist
+				nearest_enemy_center = enemy_center
+
+		if nearest_dist == INF:
+			cached_front_lines[team] = fleet_center
+		else:
+			cached_front_lines[team] = fleet_center.lerp(nearest_enemy_center, 0.4)
+
+
+func get_fleet_center(team: int) -> Vector2:
+	"""Get center of gravity for a team's fleet (cached per frame)"""
+	_update_fleet_cache_if_needed()
+	return cached_fleet_centers.get(team, base_positions.get(team, Vector2.ZERO))
 
 
 func get_rally_point(team: int) -> Vector2:
@@ -467,30 +508,9 @@ func get_rally_point(team: int) -> Vector2:
 
 
 func get_fleet_front_line(team: int) -> Vector2:
-	"""Get the front line of engagement - where the fighting is happening"""
-	var state = store.get_state()
-	if state == null or not state.has("ships"):
-		return get_fleet_center(team)
-	var fleet_center = get_fleet_center(team)
-
-	# Find nearest enemy
-	var nearest_enemy_center = Vector2.ZERO
-	var nearest_dist = INF
-
-	for enemy_team in VnpTypes.Team.values():
-		if enemy_team == team:
-			continue
-		var enemy_center = get_fleet_center(enemy_team)
-		var dist = fleet_center.distance_to(enemy_center)
-		if dist < nearest_dist:
-			nearest_dist = dist
-			nearest_enemy_center = enemy_center
-
-	if nearest_dist == INF:
-		return fleet_center
-
-	# Front line is between our center and enemy center
-	return fleet_center.lerp(nearest_enemy_center, 0.4)
+	"""Get the front line of engagement (cached per frame)"""
+	_update_fleet_cache_if_needed()
+	return cached_front_lines.get(team, get_fleet_center(team))
 
 
 func get_formation_position(team: int, ship_type: int, current_pos: Vector2) -> Vector2:

@@ -2891,25 +2891,23 @@ func _draw_perspective_dome(base_pos: Vector2, width: float, height: float,
 		var segments = 12 if depth_ratio < 0.5 else 8
 		var points = PackedVector2Array()
 
+		# Half-dome arc from right base, over top, to left base
 		for i in range(segments + 1):
 			var angle = PI * float(i) / segments
 			var x = dome_pos.x + cos(angle) * this_radius
 			var y = dome_pos.y - sin(angle) * this_height
 			points.append(Vector2(x, y))
-
-		points.append(dome_pos + Vector2(this_radius, 0))
-		points.append(dome_pos + Vector2(-this_radius, 0))
+		# Polygon closes automatically from left-base back to right-base
 
 		# Interior greenery (for greenhouses with visible crops)
 		if has_crops or upgrade_key == "greenhouse":
 			var green_points = PackedVector2Array()
+			# Interior arc - smaller than dome, closes automatically
 			for i in range(segments + 1):
 				var angle = PI * float(i) / segments
 				var x = dome_pos.x + cos(angle) * this_radius * 0.85
 				var y = dome_pos.y - sin(angle) * this_height * 0.7
 				green_points.append(Vector2(x, y))
-			green_points.append(dome_pos + Vector2(this_radius * 0.85, 0))
-			green_points.append(dome_pos + Vector2(-this_radius * 0.85, 0))
 			# More vibrant green at higher tiers
 			var green_intensity = 0.4 + tier * 0.1
 			if _is_valid_polygon(green_points):

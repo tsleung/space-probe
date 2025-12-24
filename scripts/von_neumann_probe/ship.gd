@@ -927,6 +927,9 @@ func deselect():
 	selection_indicator.visible = false
 
 func _physics_process(delta):
+	# Increment global frame counter (shared across all ships)
+	global_frame_count += 1
+
 	# Decrement target cache timer
 	if target_cache_timer > 0:
 		target_cache_timer -= delta
@@ -961,17 +964,24 @@ func _physics_process(delta):
 	elif my_current_data.state == "moving":
 		if my_current_data.target is Vector2 and position.distance_to(my_current_data.target) > 1:
 			look_at(my_current_data.target)
-	
-	# Defensive ships run PDC/shield/gravity continuously
-	if ship_data.type == VnpTypes.ShipType.DEFENDER:
-		_run_pdc_defense(delta)
-	elif ship_data.type == VnpTypes.ShipType.SHIELDER:
-		_run_shield_defense(delta, current_state)
-	elif ship_data.type == VnpTypes.ShipType.GRAVITON:
-		_run_gravity_defense(delta, current_state)
+
+	# Check if this is our AI frame (staggered to spread load)
+	var is_ai_frame = (global_frame_count % AI_STAGGER_FRAMES) == ai_frame_offset
+
+	# Defensive ships run PDC/shield/gravity - staggered for performance
+	if is_ai_frame:
+		if ship_data.type == VnpTypes.ShipType.DEFENDER:
+			_run_pdc_defense(delta * AI_STAGGER_FRAMES)  # Compensate for stagger
+		elif ship_data.type == VnpTypes.ShipType.SHIELDER:
+			_run_shield_defense(delta * AI_STAGGER_FRAMES, current_state)
+		elif ship_data.type == VnpTypes.ShipType.GRAVITON:
+			_run_gravity_defense(delta * AI_STAGGER_FRAMES, current_state)
 
 	match my_current_data.state:
 		"idle":
+			# Skip AI decision-making on non-AI frames for performance
+			if not is_ai_frame:
+				return
 			# Check adherence mode - LOOSE = old simple behavior, TIGHT = formation-aware
 			var is_loose = true
 			if ai_controller:
@@ -2721,26 +2731,22 @@ func _is_progenitor_active(state: Dictionary) -> bool:
 	return phase >= VnpTypes.ConvergencePhase.EMERGENCE
 
 
-func _find_nearest_progenitor_drone(state: Dictionary) -> int:
-	"""Find the nearest Progenitor drone to attack"""
+func _find_nearest_progenitor_drone(_state: Dictionary) -> int:
+	"""Find the nearest Progenitor drone to attack.
+	Uses cached drone list from vnp_main for performance."""
+	if not vnp_main:
+		return -1
+
 	var nearest_id = -1
 	var nearest_dist = INF
 
-	for other_id in state.ships:
-		var other = state.ships[other_id]
-		if other.type != VnpTypes.ShipType.PROGENITOR_DRONE:
-			continue
-
-		var other_pos = other.position
-		if vnp_main and vnp_main.ship_nodes.has(other_id):
-			var node = vnp_main.ship_nodes[other_id]
-			if is_instance_valid(node):
-				other_pos = node.global_position
-
-		var dist = position.distance_to(other_pos)
+	# Use cached drone list (updated once per frame in vnp_main)
+	var drones = vnp_main.get_cached_progenitor_drones()
+	for drone_data in drones:
+		var dist = position.distance_to(drone_data.position)
 		if dist < nearest_dist:
 			nearest_dist = dist
-			nearest_id = other_id
+			nearest_id = drone_data.id
 
 	return nearest_id
 
