@@ -264,20 +264,23 @@ func _process(delta: float):
 
 			# Year-end actions (when year changes)
 			if year_after > year_before:
-				# Auto-assign workers each year for smooth operation
-				_colony_store.auto_assign_workers()
+				# Run full AI turn - handles repairs, UPGRADES, superstructures, and new buildings
+				var rng = RandomNumberGenerator.new()
+				rng.seed = int(Time.get_unix_time_from_system()) + year_after
+				var ai_result = _MCSAI.run_ai_turn(_colony_store, _ai_personality, rng)
 
-				# Auto-repair broken buildings (idle mode convenience)
-				_auto_repair_all()
+				# Log AI actions to chronicle
+				for action in ai_result.actions:
+					if "UPGRADE" in action or "SUPERSTRUCTURE" in action:
+						_colony_store.add_log_entry({
+							"year": year_after,
+							"message": action,
+							"log_type": "ai_action"
+						})
 
-				# AI building - 60% base chance, Visionary builds more aggressively
-				var build_chance = 0.6 if _ai_personality == _MCSAI.Personality.VISIONARY else 0.4
-				if randf() < build_chance:
-					var building = _MCSAI.choose_building(_colony_store.get_state(), _ai_personality, randf())
-					if building >= 0:
-						_colony_store.start_construction(building)
-						if colony_view:
-							colony_view.trigger_event_effect("construction", 2.0)
+				# Trigger construction visual if buildings were started
+				if colony_view and ai_result.actions.size() > 0:
+					colony_view.trigger_event_effect("construction", 2.0)
 
 				# Random ambient events for visual interest (10% chance per year)
 				if randf() < 0.1:
@@ -504,8 +507,8 @@ func _update_buildings(buildings: Array):
 		var building_type = building.get("type", 0)
 		var name = _MCSTypes.get_building_name(building_type)
 
-		# Add production/consumption info
-		var output_text = _get_building_output_text(building_type, is_operational)
+		# Add production/consumption info (using full building for tier-aware stats)
+		var output_text = _get_building_output_text(building)
 
 		building_list.add_item("%s%s%s %s" % [name, worker_text, status, output_text])
 
@@ -514,60 +517,88 @@ func _update_buildings(buildings: Array):
 		if not is_operational:
 			building_list.set_item_custom_fg_color(idx, Color.ORANGE if construction_progress < 1.0 else Color.RED)
 
-func _get_building_output_text(building_type: int, is_operational: bool) -> String:
-	"""Get a short description of what this building produces/consumes"""
+func _get_building_output_text(building: Dictionary) -> String:
+	"""Get a short description based on ACTUAL tier stats"""
+	var building_type = building.get("type", 0)
+	var is_operational = building.get("is_operational", true)
+	var tier = building.get("tier", 1)
+
 	if not is_operational:
-		return ""
+		return "[OFFLINE]"
+
+	# Get tier stats for accurate production values
+	var stats = _MCSTypes.get_tier_stats(building_type, tier)
+	var tier_label = " T%d" % tier if tier > 1 else ""
+
+	# Show upgrading status
+	if building.get("upgrading", false):
+		var progress = building.get("upgrade_progress", 0.0) * 100
+		return "→ upgrading %.0f%%" % progress
 
 	match building_type:
-		# Housing
-		_MCSTypes.BuildingType.HAB_POD:
-			return "→ 4 beds"
-		_MCSTypes.BuildingType.APARTMENT_BLOCK:
-			return "→ 12 beds"
-		_MCSTypes.BuildingType.LUXURY_QUARTERS:
-			return "→ 6 beds +morale"
-		_MCSTypes.BuildingType.BARRACKS:
-			return "→ 20 beds"
-		# Food production
-		_MCSTypes.BuildingType.GREENHOUSE:
-			return "→ +20 food/yr"
-		_MCSTypes.BuildingType.HYDROPONICS:
-			return "→ +40 food/yr"
+		# Housing - show actual capacity from tier stats
+		_MCSTypes.BuildingType.HAB_POD, _MCSTypes.BuildingType.APARTMENT_BLOCK, \
+		_MCSTypes.BuildingType.LUXURY_QUARTERS, _MCSTypes.BuildingType.BARRACKS:
+			var capacity = stats.get("housing_capacity", 4)
+			return "→ %d beds%s" % [capacity, tier_label]
+
+		# Food production - show actual production from tier stats
+		_MCSTypes.BuildingType.GREENHOUSE, _MCSTypes.BuildingType.HYDROPONICS, \
 		_MCSTypes.BuildingType.PROTEIN_VATS:
-			return "→ +30 food/yr"
-		# Power
-		_MCSTypes.BuildingType.SOLAR_ARRAY:
-			return "→ +25 power"
-		_MCSTypes.BuildingType.WIND_TURBINE:
-			return "→ +15 power"
-		_MCSTypes.BuildingType.RTG:
-			return "→ +10 power"
-		_MCSTypes.BuildingType.FISSION_REACTOR:
-			return "→ +100 power"
-		# Water
+			var prod = stats.get("production", {})
+			var food = prod.get("food", 0)
+			return "→ +%d food/yr%s" % [food, tier_label]
+
+		# Power - show actual generation from tier stats
+		_MCSTypes.BuildingType.SOLAR_ARRAY, _MCSTypes.BuildingType.WIND_TURBINE, \
+		_MCSTypes.BuildingType.RTG, _MCSTypes.BuildingType.FISSION_REACTOR, \
+		_MCSTypes.BuildingType.FUSION_REACTOR:
+			var power = stats.get("power_gen", 0)
+			return "→ +%d power%s" % [power, tier_label]
+
+		# Water - show actual production from tier stats
 		_MCSTypes.BuildingType.WATER_EXTRACTOR:
-			return "→ +30 water/yr"
-		# Industry
+			var prod = stats.get("production", {})
+			var water = prod.get("water", 0)
+			return "→ +%d water/yr%s" % [water, tier_label]
+
+		# Oxygen
+		_MCSTypes.BuildingType.OXYGENATOR:
+			var prod = stats.get("production", {})
+			var oxygen = prod.get("oxygen", 0)
+			return "→ +%d oxygen/yr%s" % [oxygen, tier_label]
+
+		# Industry - show parts production
 		_MCSTypes.BuildingType.WORKSHOP:
-			return "→ repairs"
+			var prod = stats.get("production", {})
+			var parts = prod.get("machine_parts", 0)
+			if parts > 0:
+				return "→ +%d parts%s" % [parts, tier_label]
+			return "→ repairs%s" % tier_label
 		_MCSTypes.BuildingType.FACTORY:
-			return "→ +parts/yr"
+			var prod = stats.get("production", {})
+			var parts = prod.get("machine_parts", 0)
+			var mats = prod.get("building_materials", 0)
+			return "→ +%d parts +%d mats%s" % [parts, mats, tier_label]
+
 		# Medical
-		_MCSTypes.BuildingType.MEDICAL_BAY:
-			return "→ +health"
-		_MCSTypes.BuildingType.HOSPITAL:
-			return "→ ++health"
+		_MCSTypes.BuildingType.MEDICAL_BAY, _MCSTypes.BuildingType.HOSPITAL:
+			var health = stats.get("health_boost", 0)
+			return "→ +%d health%s" % [health, tier_label]
+
 		# Science/Education
-		_MCSTypes.BuildingType.LAB:
-			return "→ research"
+		_MCSTypes.BuildingType.LAB, _MCSTypes.BuildingType.RESEARCH_CENTER:
+			var research = stats.get("research_boost", 0)
+			return "→ +%d research%s" % [research, tier_label]
 		_MCSTypes.BuildingType.SCHOOL:
-			return "→ education"
+			var edu = stats.get("education_capacity", 0)
+			return "→ %d students%s" % [edu, tier_label]
 		_MCSTypes.BuildingType.UNIVERSITY:
-			return "→ +skills"
+			return "→ +skills%s" % tier_label
+
 		# Social
 		_MCSTypes.BuildingType.RECREATION_CENTER:
-			return "→ +morale"
+			return "→ +morale%s" % tier_label
 		_MCSTypes.BuildingType.TEMPLE:
 			return "→ +stability"
 		_MCSTypes.BuildingType.GOVERNMENT_HALL:

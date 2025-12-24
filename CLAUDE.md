@@ -7,15 +7,101 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 SpaceProbe is a collection of space simulation games built in Godot 4.5 (GDScript). The games include:
 
 - **MOT (Mars Odyssey Trek)** - The core game, a Mars mission simulator inspired by Oregon Trail
-- **FCW (First Contact War)** - Strategy expansion
+- **FCW (First Contact War)** - Desperate last stand strategy game (see FCW Design Philosophy below)
 - **VNP (Von Neumann Probe)** - Real-time idle expansion
 - **MCS (Mars Colony Sim)** - Colony building expansion
+
+## FCW Design Philosophy
+
+FCW is fundamentally different from traditional RTS games. The core thesis:
+
+> **"Movement IS the game. Desperation comes from physics."**
+
+### Core Principles
+
+1. **You Cannot Win** - Earth will fall. Victory is measured by lives evacuated. This isn't a power fantasy - it's managing decline with dignity. Inspired by Halo Reach: noble sacrifice, losing battle fought with honor.
+
+2. **Show, Don't Tell** - The narrative emerges from watching ships move, zones fall, and transmissions scroll. No cutscenes. The story is in the logistics.
+
+3. **Every Number is a Life** - Population counters aren't abstract. The UI should make you feel each million lost or saved.
+
+4. **Physics Creates Desperation** - You can SEE the Herald coming. You can CALCULATE when they arrive. You know where your ships CAN'T be in time. The clock isn't abstract - it's orbital mechanics.
+
+### The Detection Dilemma
+
+The Herald is observation-limited:
+- Only sees what's near it (5 AU observation radius, 10 AU for burning ships)
+- Follows activity (responds to detected burns)
+- Doesn't care about planets - only human signatures
+- **Critical**: If you don't fly to/from Earth, Herald doesn't know it's there
+
+This creates the central tragic choice:
+- Help outer colonies = Activity draws Herald toward inner system
+- Go dark = Abandon everyone, but Herald might not find Earth
+- Evacuate = Massive activity, definitely draws Herald
+
+### What FCW is NOT
+
+- NOT a production chain game (removed fake resources - no ore/steel/energy economy)
+- NOT about building more ships than the enemy
+- NOT turn-based waiting (continuous player agency, discrete simulation ticks)
+
+### What FCW IS
+
+- A game of tradeoffs: ships, people, time
+- Every action has a detection cost
+- Speed vs stealth for every movement
+- Watching doom approach while frantically trying to save what you can
+
+### Victory Tiers
+
+| Tier | Lives Evacuated | Description |
+|------|-----------------|-------------|
+| LEGENDARY | 80M+ | "Against all odds" |
+| HEROIC | 40-80M | "Enough to rebuild" |
+| PYRRHIC | 15-40M | "A remnant survives" |
+| TRAGIC | 5-15M | "Scattered survivors" |
+| ANNIHILATION | <5M | "Humanity's light flickers" |
+
+## Development Philosophy: Documentation First
+
+**We document before we implement.** This is a core principle of this project.
+
+### The Workflow
+
+1. **Document the design** - Before writing any code, document what you're building in `docs/`. This includes:
+   - What problem are we solving?
+   - What are the mechanics/systems involved?
+   - What are the tradeoffs and alternatives considered?
+   - What does success look like?
+
+2. **Implement the code** - With a clear spec, write the implementation.
+
+3. **Update docs if implementation diverges** - If experimentation reveals a better approach, update the documentation to match reality. The docs should always reflect what the system actually does.
+
+### Why Documentation First?
+
+- **Clarity of thought**: Writing forces you to think through the design before coding.
+- **Context preservation**: LLM sessions end, but docs persist. Future sessions (and humans) can understand the system.
+- **Prevents scope creep**: A documented spec keeps implementation focused.
+- **Enables iteration**: With a clear baseline, we can discuss changes meaningfully.
+
+### Key Documentation Files
+
+| Doc | Purpose |
+|-----|---------|
+| `docs/game-design.md` | Core philosophy, win conditions, phases |
+| `docs/mot/phase-2-systems.md` | Complete Phase 2 mechanics reference |
+| `docs/mot/realtime-crisis-system.md` | CRISIS mode design |
+| `docs/expansions/first-contact-war.md` | FCW game design |
+| `docs/projects/vnp-game-design.md` | VNP mechanics |
 
 ## Design Documentation
 
 See `docs/` for detailed specs:
 - `docs/game-design.md` - Core design philosophy
 - `docs/phase-1-ship-building.md` through `docs/phase-4-return-trip.md` - Phase mechanics
+- `docs/mot/phase-2-systems.md` - Complete MOT Phase 2 systems reference
 - `docs/architecture/overview.md` - System architecture
 - `docs/architecture/refactor-plan.md` - Architecture migration plan
 - `docs/principles/engineering-principles.md` - Coding principles

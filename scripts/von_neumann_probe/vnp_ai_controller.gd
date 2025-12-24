@@ -12,15 +12,15 @@ var territory_timers = {}  # For territory capture decisions
 const BUILD_DECISION_INTERVAL = 0.3  # Faster build checks
 const TERRITORY_DECISION_INTERVAL = 2.0  # Check territory every 2 seconds
 
-# Target fleet composition - what percentage of fleet each ship type should be
-# This ensures we always have critical ships like harvesters
+# Target fleet composition - balanced for equal DPS/cost efficiency
+# Updated for rebalanced ship costs (Frigate 14 dmg, Cruiser 75e+20m, etc.)
 const TARGET_COMPOSITION = {
-	VnpTypes.ShipType.FRIGATE: 0.30,      # 30% - main assault
-	VnpTypes.ShipType.DESTROYER: 0.25,    # 25% - snipers
-	VnpTypes.ShipType.CRUISER: 0.15,      # 15% - artillery
-	VnpTypes.ShipType.DEFENDER: 0.10,     # 10% - missile defense
-	VnpTypes.ShipType.SHIELDER: 0.08,     # 8% - shield support
-	VnpTypes.ShipType.GRAVITON: 0.07,     # 7% - railgun defense
+	VnpTypes.ShipType.FRIGATE: 0.22,      # 22% - equal value to Destroyer now
+	VnpTypes.ShipType.DESTROYER: 0.22,    # 22% - equal value to Frigate now
+	VnpTypes.ShipType.CRUISER: 0.20,      # 20% - now affordable at 75e+20m
+	VnpTypes.ShipType.DEFENDER: 0.12,     # 12% - anti-missile coverage
+	VnpTypes.ShipType.SHIELDER: 0.10,     # 10% - cheaper at 75e+5m
+	VnpTypes.ShipType.GRAVITON: 0.09,     # 9% - cheaper at 100e+30m
 	VnpTypes.ShipType.HARVESTER: 0.05,    # 5% - resource gathering (at least 1)
 }
 const COMPOSITION_TOLERANCE = 0.10  # 10% tolerance before random selection kicks in

@@ -20,7 +20,7 @@ const WORLD_SCALE = 1.5  # World is 1.5x larger than viewport for momentum-based
 
 # Balance constants - CRANKED UP FOR DRAMA
 const ENERGY_REGEN_RATE = 60  # 6x faster ship production - FAST action
-const NEMESIS_ENERGY_MULTIPLIER = 1.5
+const NEMESIS_ENERGY_MULTIPLIER = 1.3  # Reduced from 1.5 - still advantaged but competitive
 const VICTORY_DISPLAY_TIME = 3.0
 
 var ship_nodes = {}
@@ -111,8 +111,8 @@ const OMINOUS_MESSAGE_DURATION = 2.5  # Seconds before changing message
 
 # Progenitor hunters - THE ANCIENT VNP - Fewer but DEADLY
 var progenitor_spawn_timer: float = 0.0
-const PROGENITOR_SPAWN_INTERVAL = 5.0  # Spawn waves slowly - gives time to react
-const PROGENITOR_DRONES_PER_WAVE = 2  # Small waves - beatable with good defense
+const PROGENITOR_SPAWN_INTERVAL = 3.0  # Relentless waves
+const PROGENITOR_DRONES_PER_WAVE = 4  # Overwhelming ancient hunters
 const PROGENITOR_WAVE_SECTORS = 4  # Spawn from 4 directions
 const PROGENITOR_ESCALATION_RATE = 1  # Slowly add more drones per wave
 var progenitor_wave_count: int = 0  # Track waves for escalation
@@ -353,16 +353,35 @@ func _ai_evaluate_base_weapon_fire(team: int):
 func _setup_camera():
 	camera = Camera2D.new()
 	camera.name = "Camera2D"
-	# Center camera on the world and zoom out to fit larger arena
-	camera.position = world_size / 2
+	# Center camera on the gameplay center (where bases are)
+	camera.position = gameplay_center
 	camera.anchor_mode = Camera2D.ANCHOR_MODE_DRAG_CENTER
 	current_zoom = WORLD_SCALE  # Start at current world scale
 	camera.zoom = Vector2.ONE / current_zoom
+
+	# Set camera limits centered on gameplay_center
+	# This ensures expansion grows equally in all visual directions
+	_update_camera_limits()
+	camera.limit_smoothed = true  # Smooth transition at edges
+
 	add_child(camera)
 	camera.make_current()
 
 	# Setup void message label (hidden by default)
 	_setup_void_message()
+
+
+func _update_camera_limits():
+	"""Update camera limits to be symmetric around gameplay_center"""
+	if not camera:
+		return
+	# Calculate how far the camera can move from center
+	# Use half of world_size as the extent from gameplay_center
+	var half_extent = world_size / 2
+	camera.limit_left = int(gameplay_center.x - half_extent.x)
+	camera.limit_right = int(gameplay_center.x + half_extent.x)
+	camera.limit_top = int(gameplay_center.y - half_extent.y)
+	camera.limit_bottom = int(gameplay_center.y + half_extent.y)
 
 
 func _setup_void_message():
@@ -934,7 +953,11 @@ func _on_expansion_tick():
 	if current_phase >= max_phase:
 		expansion_timer.stop()
 		return
+
 	store.dispatch({"type": "EXPAND_WORLD"})
+
+	# Spawn new strategic points in the expanded area
+	_spawn_expansion_points(current_phase + 1)
 
 
 # Convergence slide tracking
@@ -964,15 +987,18 @@ func _slide_convergence_center():
 	# Calculate new center
 	var new_center = center + convergence_slide_direction * slide_amount
 
-	# Keep center within world bounds (with padding)
+	# Keep center within world bounds (symmetric around gameplay_center)
 	var padding = 200.0
-	new_center.x = clamp(new_center.x, padding, world_size.x - padding)
-	new_center.y = clamp(new_center.y, padding, world_size.y - padding)
+	var half_extent = world_size / 2
+	var min_bound = gameplay_center - half_extent + Vector2(padding, padding)
+	var max_bound = gameplay_center + half_extent - Vector2(padding, padding)
+	new_center.x = clamp(new_center.x, min_bound.x, max_bound.x)
+	new_center.y = clamp(new_center.y, min_bound.y, max_bound.y)
 
 	# If we hit an edge, reverse that axis
-	if new_center.x <= padding or new_center.x >= world_size.x - padding:
+	if new_center.x <= min_bound.x or new_center.x >= max_bound.x:
 		convergence_slide_direction.x *= -1
-	if new_center.y <= padding or new_center.y >= world_size.y - padding:
+	if new_center.y <= min_bound.y or new_center.y >= max_bound.y:
 		convergence_slide_direction.y *= -1
 
 	# Dispatch the slide
@@ -1184,8 +1210,9 @@ func _spawn_progenitor_drones(convergence: Dictionary):
 	var spawn_center = convergence.get("center", gameplay_center)
 	var safe_radius = convergence.get("absorption_radius", world_size.length() * 0.5)
 
-	# Escalating threat - more drones each wave (using configured rate)
-	var drones_this_wave = PROGENITOR_DRONES_PER_WAVE + (progenitor_wave_count * PROGENITOR_ESCALATION_RATE)
+	# Escalating threat - more drones each wave (using configured base from VnpTypes)
+	var drones_base = VnpTypes.PROGENITOR_DRONES_BASE if "PROGENITOR_DRONES_BASE" in VnpTypes else PROGENITOR_DRONES_PER_WAVE
+	var drones_this_wave = drones_base + (progenitor_wave_count * PROGENITOR_ESCALATION_RATE)
 	# Spawn at the edge of the safe zone - forms visible closing wall
 	var spawn_radius = safe_radius * 1.1  # Just beyond the safe zone
 
@@ -1317,10 +1344,11 @@ func _process_critical_phase(convergence: Dictionary, timing: Dictionary):
 		"amount": shrink_amount
 	})
 
-	# Natural instability growth in critical phase
+	# Natural instability growth in critical phase (configurable - slow by default)
+	var natural_rate = timing.get("instability_natural_rate", 0.5)
 	store.dispatch({
 		"type": "CONVERGENCE_ADD_INSTABILITY",
-		"amount": 2.0  # Per tick
+		"amount": natural_rate
 	})
 
 	# Check for ship absorption
@@ -2344,26 +2372,148 @@ func _spawn_death_explosion(pos: Vector2, size: int, team: int):
 		return
 	explosion_count_this_frame += 1
 
-	var explosion = DeathExplosionFxScene.instantiate()
-	add_child(explosion)
-	explosion.global_position = pos
-	explosion.emitting = true
+	var team_color = VnpTypes.get_team_color(team)
 
-	# Scale explosion and shake based on ship size - DRAMATIC
+	# Scale explosion based on ship size - DRAMATIC
 	var shake_amounts = {
 		VnpTypes.ShipSize.SMALL: 10.0,
 		VnpTypes.ShipSize.MEDIUM: 25.0,
 		VnpTypes.ShipSize.LARGE: 50.0,
-		VnpTypes.ShipSize.MASSIVE: 100.0,  # Star Base destruction = HUGE shake
+		VnpTypes.ShipSize.MASSIVE: 100.0,
 	}
-	var scale_amounts = {
-		VnpTypes.ShipSize.SMALL: 2.0,
-		VnpTypes.ShipSize.MEDIUM: 3.5,
-		VnpTypes.ShipSize.LARGE: 6.0,
-		VnpTypes.ShipSize.MASSIVE: 12.0,  # Massive explosion for Star Base
+	var scale_mults = {
+		VnpTypes.ShipSize.SMALL: 1.0,
+		VnpTypes.ShipSize.MEDIUM: 1.8,
+		VnpTypes.ShipSize.LARGE: 3.0,
+		VnpTypes.ShipSize.MASSIVE: 5.0,
 	}
+	var scale_mult = scale_mults.get(size, 1.0)
 
-	explosion.scale = Vector2.ONE * scale_amounts.get(size, 1.0)
+	# === LAYER 1: BRIGHT FLASH - Instant white burst ===
+	var flash = Polygon2D.new()
+	var flash_size = 30 * scale_mult
+	var flash_points = []
+	for i in range(9):
+		var angle = i * (TAU / 8)
+		flash_points.append(Vector2(cos(angle), sin(angle)) * flash_size)
+	flash.polygon = PackedVector2Array(flash_points)
+	flash.color = Color(1.0, 1.0, 0.95, 1.0)  # White-hot
+	flash.global_position = pos
+	add_child(flash)
+
+	var flash_tween = create_tween()
+	flash_tween.tween_property(flash, "scale", Vector2(2.5, 2.5), 0.08).from(Vector2(0.3, 0.3))
+	flash_tween.parallel().tween_property(flash, "modulate:a", 0.0, 0.1)
+	flash_tween.tween_callback(func(): flash.queue_free())
+
+	# === LAYER 2: FIRE CORE - Team-colored explosion ===
+	var fire = Polygon2D.new()
+	var fire_size = 25 * scale_mult
+	var fire_points = []
+	for i in range(13):
+		var angle = i * (TAU / 12)
+		var r = fire_size * randf_range(0.7, 1.0)
+		fire_points.append(Vector2(cos(angle), sin(angle)) * r)
+	fire.polygon = PackedVector2Array(fire_points)
+	fire.color = Color(team_color.r * 1.5, team_color.g * 1.2, team_color.b * 0.8, 0.9)
+	fire.global_position = pos
+	add_child(fire)
+
+	var fire_tween = create_tween()
+	fire_tween.tween_property(fire, "scale", Vector2(3.0, 3.0), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	fire_tween.parallel().tween_property(fire, "modulate:a", 0.0, 0.3)
+	fire_tween.tween_callback(func(): fire.queue_free())
+
+	# === LAYER 3: SHOCKWAVE RING - Expanding circle ===
+	var ring = Line2D.new()
+	ring.global_position = pos
+	ring.width = 4.0 * scale_mult
+	ring.default_color = Color(team_color.r, team_color.g, team_color.b, 0.8)
+	var ring_points = []
+	for i in range(33):
+		var angle = i * (TAU / 32)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 15)
+	ring.points = PackedVector2Array(ring_points)
+	add_child(ring)
+
+	var ring_tween = create_tween()
+	ring_tween.set_parallel(true)
+	ring_tween.tween_property(ring, "scale", Vector2.ONE * (5.0 * scale_mult), 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	ring_tween.tween_property(ring, "modulate:a", 0.0, 0.35)
+	ring_tween.tween_callback(func(): ring.queue_free())
+
+	# === LAYER 4: SPARKS - Debris flying outward ===
+	var spark_count = 6 + int(size * 3)
+	for i in range(spark_count):
+		var spark = Line2D.new()
+		spark.global_position = pos
+		spark.width = 2.0 + randf() * scale_mult
+		spark.default_color = Color(1.0, team_color.g * 1.5, team_color.b * 0.5, 0.9)
+
+		var angle = randf() * TAU
+		var length = randf_range(8, 20) * scale_mult
+		spark.add_point(Vector2.ZERO)
+		spark.add_point(Vector2(cos(angle), sin(angle)) * length)
+		add_child(spark)
+
+		# Animate flying outward
+		var end_pos = pos + Vector2(cos(angle), sin(angle)) * randf_range(40, 100) * scale_mult
+		var spark_tween = create_tween()
+		spark_tween.set_parallel(true)
+		spark_tween.tween_property(spark, "global_position", end_pos, randf_range(0.2, 0.4))
+		spark_tween.tween_property(spark, "modulate:a", 0.0, randf_range(0.25, 0.4))
+		spark_tween.tween_callback(func(): spark.queue_free())
+
+	# === LAYER 5: SMOKE PUFF - Fading gray cloud ===
+	if size >= VnpTypes.ShipSize.MEDIUM:
+		var smoke = Polygon2D.new()
+		var smoke_size = 20 * scale_mult
+		var smoke_points = []
+		for i in range(9):
+			var angle = i * (TAU / 8)
+			var r = smoke_size * randf_range(0.6, 1.0)
+			smoke_points.append(Vector2(cos(angle), sin(angle)) * r)
+		smoke.polygon = PackedVector2Array(smoke_points)
+		smoke.color = Color(0.3, 0.3, 0.35, 0.5)
+		smoke.global_position = pos
+		add_child(smoke)
+
+		var smoke_tween = create_tween()
+		smoke_tween.tween_property(smoke, "scale", Vector2(4.0, 4.0), 0.6).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		smoke_tween.parallel().tween_property(smoke, "modulate:a", 0.0, 0.7)
+		smoke_tween.tween_callback(func(): smoke.queue_free())
+
+	# === LAYER 6: SECONDARY FLASHES - Delayed mini-explosions for large+ ships ===
+	if size >= VnpTypes.ShipSize.LARGE:
+		var flash_count = 2 if size == VnpTypes.ShipSize.LARGE else 4
+		for i in range(flash_count):
+			var delay = 0.08 + i * 0.06
+			var offset = Vector2(randf_range(-25, 25) * scale_mult, randf_range(-25, 25) * scale_mult)
+			get_tree().create_timer(delay).timeout.connect(func():
+				var secondary_flash = Polygon2D.new()
+				var sf_size = 15 * scale_mult * randf_range(0.6, 1.0)
+				var sf_points = []
+				for j in range(7):
+					var angle = j * (TAU / 6)
+					sf_points.append(Vector2(cos(angle), sin(angle)) * sf_size)
+				secondary_flash.polygon = PackedVector2Array(sf_points)
+				secondary_flash.color = Color(1.0, 0.95, 0.85, 0.95)
+				secondary_flash.global_position = pos + offset
+				add_child(secondary_flash)
+
+				var sf_tween = create_tween()
+				sf_tween.tween_property(secondary_flash, "scale", Vector2(2.0, 2.0), 0.1).from(Vector2(0.5, 0.5))
+				sf_tween.parallel().tween_property(secondary_flash, "modulate:a", 0.0, 0.12)
+				sf_tween.tween_callback(func(): secondary_flash.queue_free())
+			)
+
+	# Also spawn the particle effect
+	var explosion = DeathExplosionFxScene.instantiate()
+	add_child(explosion)
+	explosion.global_position = pos
+	explosion.scale = Vector2.ONE * (2.0 * scale_mult)
+	explosion.emitting = true
+
 	shake_screen(shake_amounts.get(size, 5.0))
 
 	# Play explosion sound
@@ -2479,61 +2629,197 @@ func _initialize_game_world():
 	_spawn_initial_starbases()
 
 func _create_starfield():
-	# Background layer of distant stars - covers MAX expanded size for consistency
+	# Rich space background with multiple layers for depth
 	starfield_node = Node2D.new()
 	starfield_node.name = "Starfield"
 	starfield_node.z_index = -100
 	add_child(starfield_node)
 
-	# Calculate max world size (after all expansions)
-	var max_scale = WORLD_SCALE + (0.3 * 10)  # Initial + max expansions
-	var max_world = screen_size * max_scale
+	# Calculate max world extent (after all expansions) centered on gameplay_center
+	var max_scale = WORLD_SCALE + (0.3 * 10)
+	var max_half_extent = (screen_size * max_scale) / 2
+	# Starfield bounds: gameplay_center ± max_half_extent (with extra padding)
+	var star_min = gameplay_center - max_half_extent - Vector2(500, 500)
+	var star_max = gameplay_center + max_half_extent + Vector2(500, 500)
 
-	# Evenly distributed dim stars across entire max area
-	var star_count = 120
-	for i in range(star_count):
+	# === LAYER 1: Deep space gradient background ===
+	var bg = Polygon2D.new()
+	bg.polygon = PackedVector2Array([
+		star_min,
+		Vector2(star_max.x, star_min.y),
+		star_max,
+		Vector2(star_min.x, star_max.y)
+	])
+	bg.color = Color(0.02, 0.02, 0.06, 1.0)  # Deep space blue-black
+	bg.z_index = -101
+	add_child(bg)
+
+	# Shorthand for star placement range
+	var star_range = star_max - star_min
+
+	# === LAYER 2: Large nebula clouds (centered around gameplay_center) ===
+	var nebula_configs = [
+		{"pos": star_min + star_range * Vector2(0.2, 0.3), "color": Color(0.4, 0.1, 0.5, 0.08), "size": 600},  # Purple
+		{"pos": star_min + star_range * Vector2(0.7, 0.2), "color": Color(0.1, 0.3, 0.5, 0.07), "size": 500},  # Blue
+		{"pos": star_min + star_range * Vector2(0.5, 0.7), "color": Color(0.5, 0.2, 0.3, 0.06), "size": 550},  # Pink/red
+		{"pos": star_min + star_range * Vector2(0.8, 0.8), "color": Color(0.2, 0.4, 0.4, 0.05), "size": 450},  # Teal
+		{"pos": star_min + star_range * Vector2(0.15, 0.75), "color": Color(0.3, 0.15, 0.4, 0.06), "size": 400},  # Violet
+	]
+
+	for config in nebula_configs:
+		_create_nebula_cloud(config["pos"], config["color"], config["size"])
+
+	# === LAYER 3: Distant tiny stars (hundreds) - spread across full area ===
+	var tiny_star_count = 300
+	for i in range(tiny_star_count):
 		var star = Polygon2D.new()
-		var size = randf_range(1.0, 2.0)
+		var size = randf_range(0.5, 1.2)
 		star.polygon = PackedVector2Array([
 			Vector2(-size, 0), Vector2(0, -size), Vector2(size, 0), Vector2(0, size)
 		])
-		star.color = Color(1, 1, 1, randf_range(0.15, 0.4))
-		star.position = Vector2(randf_range(0, max_world.x), randf_range(0, max_world.y))
+		# Vary star colors slightly
+		var warmth = randf_range(-0.1, 0.1)
+		star.color = Color(0.7 + warmth, 0.7, 0.8 - warmth, randf_range(0.2, 0.5))
+		star.position = star_min + Vector2(randf() * star_range.x, randf() * star_range.y)
 		starfield_node.add_child(star)
 
-	# Bright stars spread across max area
-	var bright_star_count = 25
-	var star_colors = [Color(0.8, 0.9, 1.0), Color(1.0, 0.95, 0.8), Color(0.7, 0.8, 1.0)]
-	for i in range(bright_star_count):
+	# === LAYER 4: Medium stars with color variation ===
+	var medium_star_count = 80
+	var star_colors = [
+		Color(1.0, 0.95, 0.9, 0.7),   # Warm white
+		Color(0.9, 0.95, 1.0, 0.7),   # Cool white
+		Color(1.0, 0.85, 0.7, 0.6),   # Orange tint
+		Color(0.8, 0.9, 1.0, 0.7),    # Blue tint
+		Color(1.0, 0.9, 0.95, 0.6),   # Pink tint
+	]
+	for i in range(medium_star_count):
 		var star = Polygon2D.new()
-		var size = randf_range(2.0, 3.0)
+		var size = randf_range(1.5, 2.5)
 		star.polygon = PackedVector2Array([
 			Vector2(-size, 0), Vector2(0, -size), Vector2(size, 0), Vector2(0, size)
 		])
 		star.color = star_colors[randi() % star_colors.size()]
-		star.position = Vector2(randf_range(0, max_world.x), randf_range(0, max_world.y))
+		star.position = star_min + Vector2(randf() * star_range.x, randf() * star_range.y)
 		starfield_node.add_child(star)
 
-	# Subtle nebula clouds spread across max area
-	for i in range(4):
+	# === LAYER 5: Bright prominent stars with glow ===
+	var bright_star_count = 20
+	for i in range(bright_star_count):
+		var pos = star_min + Vector2(100, 100) + Vector2(randf() * (star_range.x - 200), randf() * (star_range.y - 200))
+		_create_bright_star(pos, star_colors[randi() % star_colors.size()])
+
+	# === LAYER 6: Distant galaxies (subtle) ===
+	_create_distant_galaxy(star_min + star_range * Vector2(0.85, 0.15), 80, Color(0.6, 0.5, 0.7, 0.15))
+	_create_distant_galaxy(star_min + star_range * Vector2(0.1, 0.5), 60, Color(0.5, 0.6, 0.7, 0.12))
+
+	# === LAYER 7: Star clusters ===
+	_create_star_cluster(star_min + star_range * Vector2(0.3, 0.4), 120, 40)
+	_create_star_cluster(star_min + star_range * Vector2(0.6, 0.6), 100, 30)
+	_create_star_cluster(star_min + star_range * Vector2(0.75, 0.35), 80, 25)
+
+
+func _create_nebula_cloud(center: Vector2, color: Color, size: float):
+	"""Create a soft nebula cloud with multiple overlapping layers"""
+	# Create multiple overlapping polygons for soft edges
+	for layer in range(3):
 		var nebula = Polygon2D.new()
 		var points = []
-		var center = Vector2(randf_range(300, max_world.x - 300), randf_range(300, max_world.y - 300))
-		var radius = randf_range(300, 500)
-		for j in range(8):
-			var angle = j * (PI * 2 / 8)
-			var r = radius * randf_range(0.7, 1.3)
+		var layer_size = size * (1.0 - layer * 0.25)
+		var segments = 12
+		for j in range(segments):
+			var angle = j * (PI * 2 / segments)
+			var r = layer_size * randf_range(0.6, 1.0)
 			points.append(center + Vector2(cos(angle), sin(angle)) * r)
 		nebula.polygon = PackedVector2Array(points)
-		var nebula_colors = [
-			Color(0.12, 0.08, 0.2, 0.06),   # Purple
-			Color(0.08, 0.12, 0.2, 0.06),   # Blue
-			Color(0.15, 0.08, 0.12, 0.05),  # Red/pink
-			Color(0.08, 0.15, 0.15, 0.05),  # Teal
-		]
-		nebula.color = nebula_colors[i % nebula_colors.size()]
-		nebula.z_index = -99
+		var layer_color = color
+		layer_color.a = color.a * (1.0 - layer * 0.3)
+		nebula.color = layer_color
+		nebula.z_index = -99 + layer
 		add_child(nebula)
+
+
+func _create_bright_star(pos: Vector2, color: Color):
+	"""Create a bright star with a subtle glow effect"""
+	# Outer glow
+	var glow = Polygon2D.new()
+	var glow_size = randf_range(8, 15)
+	var glow_points = []
+	for i in range(8):
+		var angle = i * (PI * 2 / 8)
+		var r = glow_size if i % 2 == 0 else glow_size * 0.4
+		glow_points.append(Vector2(cos(angle), sin(angle)) * r)
+	glow.polygon = PackedVector2Array(glow_points)
+	glow.color = Color(color.r, color.g, color.b, 0.15)
+	glow.position = pos
+	starfield_node.add_child(glow)
+
+	# Core star
+	var star = Polygon2D.new()
+	var size = randf_range(2.5, 4.0)
+	star.polygon = PackedVector2Array([
+		Vector2(-size, 0), Vector2(0, -size), Vector2(size, 0), Vector2(0, size)
+	])
+	star.color = color
+	star.position = pos
+	starfield_node.add_child(star)
+
+	# Add subtle twinkle animation to some stars
+	if randf() > 0.5:
+		var tween = create_tween()
+		tween.set_loops(0)
+		var twinkle_time = randf_range(2.0, 5.0)
+		tween.tween_property(star, "modulate:a", 0.5, twinkle_time)
+		tween.tween_property(star, "modulate:a", 1.0, twinkle_time)
+
+
+func _create_distant_galaxy(pos: Vector2, size: float, color: Color):
+	"""Create a subtle distant galaxy spiral"""
+	var galaxy = Node2D.new()
+	galaxy.position = pos
+	galaxy.z_index = -98
+
+	# Galaxy core (bright center)
+	var core = Polygon2D.new()
+	var core_points = []
+	for i in range(16):
+		var angle = i * (PI * 2 / 16)
+		core_points.append(Vector2(cos(angle), sin(angle)) * size * 0.3)
+	core.polygon = PackedVector2Array(core_points)
+	core.color = Color(color.r + 0.2, color.g + 0.2, color.b + 0.2, color.a * 1.5)
+	galaxy.add_child(core)
+
+	# Spiral arms (simplified ellipse)
+	var arms = Polygon2D.new()
+	var arm_points = []
+	for i in range(24):
+		var angle = i * (PI * 2 / 24)
+		var r = size * (0.8 + 0.2 * sin(angle * 2))
+		arm_points.append(Vector2(cos(angle) * r, sin(angle) * r * 0.4))
+	arms.polygon = PackedVector2Array(arm_points)
+	arms.color = color
+	arms.rotation = randf_range(0, PI)
+	galaxy.add_child(arms)
+
+	add_child(galaxy)
+
+
+func _create_star_cluster(center: Vector2, radius: float, count: int):
+	"""Create a dense cluster of stars"""
+	for i in range(count):
+		var star = Polygon2D.new()
+		# Gaussian-like distribution - more stars toward center
+		var dist = radius * sqrt(randf()) * randf_range(0.3, 1.0)
+		var angle = randf() * PI * 2
+		var offset = Vector2(cos(angle), sin(angle)) * dist
+
+		var size = randf_range(0.8, 1.8)
+		star.polygon = PackedVector2Array([
+			Vector2(-size, 0), Vector2(0, -size), Vector2(size, 0), Vector2(0, size)
+		])
+		# Cluster stars are slightly bluer
+		star.color = Color(0.85, 0.9, 1.0, randf_range(0.3, 0.7))
+		star.position = center + offset
+		starfield_node.add_child(star)
 
 func _create_bases():
 	# Bases positioned at corners of the larger world
@@ -2792,8 +3078,11 @@ func _handle_expansion(state):
 	var new_scale = state.expansion.world_scale
 	var phase = state.expansion.phase
 
-	# Update world size
+	# Update world size (gameplay_center stays fixed - expansion grows outward)
 	world_size = screen_size * new_scale
+
+	# Update camera limits symmetrically around gameplay_center
+	_update_camera_limits()
 
 	# Animate camera zoom
 	_animate_camera_zoom(new_scale)
@@ -2812,34 +3101,44 @@ func _animate_camera_zoom(new_scale: float):
 	"""Smoothly zoom camera out to show expanded world"""
 	current_zoom = new_scale  # Sync zoom tracking
 	var new_zoom = Vector2.ONE / new_scale
+
+	# Camera should stay centered on gameplay (where bases/action is)
+	# The gameplay_center is the original center where all bases are positioned
 	var tween = create_tween()
+	tween.set_parallel(true)
 	tween.tween_property(camera, "zoom", new_zoom, 1.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	# Keep camera at the gameplay center (original world center where bases are)
+	tween.tween_property(camera, "position", gameplay_center, 1.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 
 
 func _spawn_expansion_points(phase: int):
 	"""Spawn 2 new asteroid fields at fixed positions in expanded territory"""
 	var padding = WORLD_PADDING + 150
-	var center = world_size / 2
 
 	# Pre-calculate all positions BEFORE any dispatch calls to avoid state corruption
 	var points_to_spawn = []
 
-	# Use phase to determine positions - simple grid approach for reliability
+	# Use phase to determine positions - spawn around gameplay_center (fixed anchor)
 	# Phase 1: left and right sides, Phase 2: top corners, etc.
 	var base_angle = phase * 0.8 + 0.5  # Rotate slightly each phase
 
+	# Calculate spawn distance based on current world extent from center
+	var half_extent = world_size / 2
+
 	for i in range(2):
-		# Opposite sides of the map
+		# Opposite sides of the map, relative to gameplay_center
 		var angle = base_angle + i * PI
-		# Use half of the smaller dimension for distance to stay in bounds
-		var max_dist = min(world_size.x, world_size.y) * 0.4
+		# Distance from center scales with world size
+		var max_dist = min(half_extent.x, half_extent.y) * 0.8
 		var dist = max_dist * 0.7 + randf_range(0, max_dist * 0.2)
 
-		var pos = center + Vector2(cos(angle), sin(angle)) * dist
+		var pos = gameplay_center + Vector2(cos(angle), sin(angle)) * dist
 
-		# Clamp to world bounds
-		pos.x = clamp(pos.x, padding, world_size.x - padding)
-		pos.y = clamp(pos.y, padding, world_size.y - padding)
+		# Clamp to camera-visible bounds (symmetric around gameplay_center)
+		var min_bound = gameplay_center - half_extent + Vector2(padding, padding)
+		var max_bound = gameplay_center + half_extent - Vector2(padding, padding)
+		pos.x = clamp(pos.x, min_bound.x, max_bound.x)
+		pos.y = clamp(pos.y, min_bound.y, max_bound.y)
 
 		var point_id = "expansion_%d_%d" % [phase, i]
 		points_to_spawn.append({"id": point_id, "pos": pos})

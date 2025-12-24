@@ -65,16 +65,6 @@ size_flags_stretch_ratio = 2.0
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="ResourcesPanel" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
-layout_mode = 2
-
-[node name="ResourcesContainer" type="VBoxContainer" parent="MainContainer/GameArea/SidePanel/ResourcesPanel"]
-layout_mode = 2
-
-[node name="Title" type="Label" parent="MainContainer/GameArea/SidePanel/ResourcesPanel/ResourcesContainer"]
-layout_mode = 2
-text = "=== RESOURCES ==="
-
 [node name="FleetPanel" type="PanelContainer" parent="MainContainer/GameArea/SidePanel"]
 layout_mode = 2
 

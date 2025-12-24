@@ -38,17 +38,22 @@ const CONVERGENCE_TIMING = {
 	"shrink_rate_critical": 80.0,        # Faster shrink in critical phase
 	"pull_strength_base": 80.0,          # Base gravitational pull (stronger)
 	"pull_strength_critical": 200.0,     # Critical phase pull
-	"instability_per_sacrifice": 8.0,    # Instability from sacrificing ships
-	"instability_threshold": 100.0,      # Triggers fragmentation
+	"instability_per_drone_kill": 3.0,   # Instability from KILLING drones (player reward)
+	"instability_per_sacrifice": 0.0,    # No reward for being eaten by drones
+	"instability_threshold": 80.0,       # Triggers fragmentation (need ~27 drone kills)
+	"instability_natural_rate": 0.5,     # Natural growth per tick in CRITICAL (slow)
 	"critical_radius_percent": 0.3,      # 30% of original = critical phase
 }
+
+# Progenitor spawn configuration
+const PROGENITOR_DRONES_BASE = 5         # Drones per wave base (up from 4)
 
 static func get_convergence_phase_name(phase: int) -> String:
 	return CONVERGENCE_PHASE_NAMES.get(phase, "Unknown")
 
 # Factory system - Harvesters build factories anywhere
 const FACTORY_CONFIG = {
-	"build_time": 4.0,               # Seconds harvester must stay to build (quick!)
+	"build_time": 2.0,               # Seconds harvester must stay to build (fast - limiting factor is resources)
 	"production_interval": 15.0,     # Seconds between ship spawns (same for all factories)
 	"build_radius": 80.0,            # How close harvester must be to build spot
 	"visual_scale": 0.8,             # Size relative to base
@@ -179,7 +184,7 @@ const SHIP_STATS = {
 		"mass_cost": 0,         # No mass needed - swarm unit
 		"speed": 280,           # FAST - get in close
 		"health": 70,           # Fragile glass cannon
-		"damage": 18,           # Piercing damage adds up
+		"damage": 14,           # Balanced: 0.8 DPS/cost (was 18, now equal to Destroyer efficiency)
 		"range": 200,           # Short range, must close distance
 		"fire_rate": 4.0,       # Rapid railgun fire
 	},
@@ -197,8 +202,8 @@ const SHIP_STATS = {
 	ShipType.CRUISER: {
 		"name": "Cruiser",
 		"weapon": WeaponType.MISSILE,
-		"cost": 100,
-		"mass_cost": 25,        # Requires mass - capital ship
+		"cost": 75,             # Reduced from 100 - now viable mid-tier option
+		"mass_cost": 20,        # Reduced from 25 - accessible capital ship
 		"speed": 100,           # Slow but deadly
 		"health": 220,          # Tanky
 		"damage": 50,           # Base damage, splash adds more
@@ -228,8 +233,8 @@ const SHIP_STATS = {
 	ShipType.SHIELDER: {
 		"name": "Shielder",
 		"weapon": WeaponType.SHIELD,
-		"cost": 90,
-		"mass_cost": 10,        # Small mass cost
+		"cost": 75,             # Reduced from 90 - accessible support
+		"mass_cost": 5,         # Reduced from 10 - low barrier
 		"speed": 140,
 		"health": 80,           # Fragile hull, relies on shields
 		"shield_radius": 120,   # Protection radius
@@ -240,8 +245,8 @@ const SHIP_STATS = {
 	ShipType.GRAVITON: {
 		"name": "Graviton",
 		"weapon": WeaponType.GRAVITY,
-		"cost": 120,
-		"mass_cost": 40,        # Heavy mass cost - powerful support
+		"cost": 100,            # Reduced from 120 - accessible support
+		"mass_cost": 30,        # Reduced from 40 - reasonable investment
 		"speed": 80,            # Slow, hulking mass manipulator
 		"health": 180,          # Tanky - needs to survive to protect
 		"gravity_radius": 140,  # Gravity well radius (scaled down from 200)
@@ -279,22 +284,23 @@ const SHIP_STATS = {
 		"is_structure": true,   # Flag to identify as non-buildable structure
 	},
 	# PROGENITOR DRONE: Ancient Von Neumann Probes
-	# The original VNP - ancient hunters, but beatable with coordinated defense
-	# Threatening but not overwhelming - players should be able to survive
+	# The original VNP - ancient, overwhelming, inevitable
+	# The Progenitor is meant to be hard/impossible - it's the end of the cycle
+	# Balance: 90% loss rate - drones must overwhelm fleets
 	ShipType.PROGENITOR_DRONE: {
 		"name": "Ancient Hunter",
 		"weapon": WeaponType.VOID_TENDRIL,  # Void tendrils that reach out
 		"cost": 0,              # Spawned by the cycle, not built
 		"mass_cost": 0,
-		"speed": 100,           # Slow - gives time to react and position
-		"health": 120,          # Killable with a few ships focusing fire
-		"damage": 25,           # Threatening but survivable
-		"range": 100,           # Short range - must get close
-		"fire_rate": 1.5,       # Slow attacks
+		"speed": 120,           # Relentless pursuit
+		"health": 350,          # Very tough - requires significant focus fire (up from 250)
+		"damage": 65,           # Very deadly (up from 50)
+		"range": 120,           # Void tendrils reach
+		"fire_rate": 1.0,       # Steady attacks
 		"is_progenitor": true,  # Flag for special behavior
 		"swarm_cohesion": 0.3,  # Loose coordination
-		"absorption_speed": 0.5, # Slower absorption
-		"scale": 1.4,           # Visually distinct but not massive
+		"absorption_speed": 0.8, # Fast absorption
+		"scale": 1.6,           # Visually imposing
 	},
 }
 
@@ -329,40 +335,40 @@ const FLEET_STANCE_NAMES = {
 	FleetStance.DEFENSIVE: "Defensive",
 }
 
-# Default fleet policies per stance
+# Default fleet policies per stance - balanced for equal ship DPS/cost
 const FLEET_POLICIES = {
 	FleetStance.AGGRESSIVE: {
 		"counter_pick_chance": 0.4,  # Less reactive, more committed
-		"preferences": [ShipType.FRIGATE, ShipType.CRUISER, ShipType.DESTROYER],
+		"preferences": [ShipType.FRIGATE, ShipType.DESTROYER, ShipType.CRUISER],
 		"weights": {
-			ShipType.FRIGATE: 3.0,      # Swarm with frigates
-			ShipType.DESTROYER: 2.0,
-			ShipType.CRUISER: 2.5,
+			ShipType.FRIGATE: 2.5,      # Equal to Destroyer now
+			ShipType.DESTROYER: 2.5,    # Equal to Frigate now
+			ShipType.CRUISER: 2.0,      # Viable artillery
 			ShipType.DEFENDER: 0.5,
 			ShipType.SHIELDER: 0.3,
-			ShipType.GRAVITON: 0.5,
+			ShipType.GRAVITON: 0.3,
 		}
 	},
 	FleetStance.BALANCED: {
 		"counter_pick_chance": 0.6,  # Reactive and adaptive
 		"preferences": [ShipType.DESTROYER, ShipType.FRIGATE, ShipType.CRUISER, ShipType.DEFENDER],
 		"weights": {
-			ShipType.FRIGATE: 1.5,
-			ShipType.DESTROYER: 2.0,
-			ShipType.CRUISER: 1.5,
-			ShipType.DEFENDER: 1.0,
+			ShipType.FRIGATE: 1.5,      # All combat ships equal
+			ShipType.DESTROYER: 1.5,    # All combat ships equal
+			ShipType.CRUISER: 1.5,      # All combat ships equal
+			ShipType.DEFENDER: 1.2,
 			ShipType.SHIELDER: 1.0,
 			ShipType.GRAVITON: 1.0,
 		}
 	},
 	FleetStance.DEFENSIVE: {
 		"counter_pick_chance": 0.7,  # Very reactive
-		"preferences": [ShipType.DEFENDER, ShipType.SHIELDER, ShipType.GRAVITON, ShipType.CRUISER],
+		"preferences": [ShipType.DEFENDER, ShipType.CRUISER, ShipType.DESTROYER, ShipType.SHIELDER],
 		"weights": {
-			ShipType.FRIGATE: 0.5,
-			ShipType.DESTROYER: 1.0,
-			ShipType.CRUISER: 1.5,
-			ShipType.DEFENDER: 3.0,      # Lots of point defense
+			ShipType.FRIGATE: 0.5,      # Less rush, more range
+			ShipType.DESTROYER: 1.5,    # Snipers good for defense
+			ShipType.CRUISER: 2.0,      # Artillery excellent for defense
+			ShipType.DEFENDER: 3.0,     # Lots of point defense
 			ShipType.SHIELDER: 2.5,
 			ShipType.GRAVITON: 2.0,
 		}

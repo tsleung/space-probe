@@ -9,6 +9,8 @@ const FCWHeraldAI = preload("res://scripts/first_contact_war/fcw_herald_ai.gd")
 
 signal zone_clicked(zone_id: int)
 signal zone_hovered(zone_id: int)
+signal entity_clicked(entity_id: String)
+signal entity_destination_selected(entity_id: String, destination_zone: int, route_type: String)
 
 # ============================================================================
 # ZOOM LEVELS - Multi-level view like Star Wars Rebellion
@@ -302,6 +304,24 @@ var _current_turn: int = 1
 var _selected_zone: int = -1
 var _hovered_zone: int = -1
 var _fleet_assignments: Dictionary = {}
+
+# Entity selection for route planning
+var _selected_entity_id: String = ""  # Currently selected entity
+var _hovered_entity_id: String = ""   # Entity under mouse
+var _route_selection_mode: bool = false  # True when waiting for destination click
+var _route_options_visible: bool = false  # Show route options popup
+var _route_options_zone: int = -1  # Destination zone for route options
+var _route_options: Array = []  # Cached route options for display
+const ENTITY_CLICK_RADIUS = 25.0  # Pixels - click detection radius for entities (larger for ships near planets)
+
+# Stacked entity cycling (for selecting ships at same location)
+var _entities_at_click: Array = []  # All entities at last click position
+var _entity_cycle_index: int = 0  # Current index in cycle
+
+# Fleet roster tracking
+var _starting_fleet: Dictionary = {}  # Starting counts by ship type
+var _current_fleet: Dictionary = {}   # Current counts by ship type
+var _capital_ship_states: Array = []  # Array of {type, alive} for grid display
 var _fleets_in_transit: Array = []  # Fleets traveling between zones
 var _week_progress: float = 0.0  # Continuous progress through current week (0.0-1.0)
 var _attack_flash_timer: float = 0.0
@@ -571,6 +591,17 @@ func _draw_system_view(rect: Rect2) -> void:
 
 	# Draw exodus counter (top of screen, always visible when ships are escaping)
 	_draw_exodus_counter(rect)
+
+	# Draw fleet roster (bottom-right, shows UNN fleet status)
+	_draw_fleet_roster(rect)
+
+	# Draw route cost previews when entity is selected (before clicking destination)
+	if _route_selection_mode and _selected_entity_id != "" and not _route_options_visible:
+		_draw_route_cost_previews(offset)
+
+	# Draw route selection UI (on top of everything else)
+	if _route_options_visible:
+		_draw_route_options_popup()
 
 # ============================================================================
 # DRAWING
@@ -3139,6 +3170,15 @@ func spawn_fleet_transit(from_zone: int, to_zone: int, ship_count: int, ship_typ
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		var mouse_pos = event.position
+		var offset = _screen_shake
+
+		# Check for entity hover first
+		var new_hovered_entity = _get_entity_at_position(mouse_pos, offset)
+		if new_hovered_entity != _hovered_entity_id:
+			_hovered_entity_id = new_hovered_entity
+			queue_redraw()
+
+		# Then check zone hover
 		var new_hovered = _get_zone_at_position(mouse_pos)
 		if new_hovered != _hovered_zone:
 			_hovered_zone = new_hovered
@@ -3148,11 +3188,57 @@ func _gui_input(event: InputEvent) -> void:
 
 	elif event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			var clicked_zone = _get_zone_at_position(event.position)
+			var mouse_pos = event.position
+			var offset = _screen_shake
+
+			# If route options popup is visible, check for option click
+			if _route_options_visible:
+				var option_clicked = _get_route_option_at_position(mouse_pos)
+				if option_clicked >= 0:
+					_select_route_option(option_clicked)
+					return
+				# Click outside dismisses popup
+				_route_options_visible = false
+				_route_selection_mode = false
+				queue_redraw()
+				return
+
+			# ALWAYS check for entity click first (with cycling for stacked ships)
+			# This ensures ships at planets can be selected
+			var clicked_entity = _select_entity_with_cycling(mouse_pos, offset)
+			if clicked_entity != "":
+				_select_entity(clicked_entity)
+				return
+
+			# If in route selection mode, left-click on zone uses default route (stealth coast)
+			if _route_selection_mode and _selected_entity_id != "":
+				var clicked_zone = _get_zone_at_position(mouse_pos)
+				if clicked_zone >= 0:
+					_select_default_route(_selected_entity_id, clicked_zone)
+					return
+
+			# Normal zone click (when not in route selection mode)
+			var clicked_zone = _get_zone_at_position(mouse_pos)
 			if clicked_zone >= 0:
 				_selected_zone = clicked_zone
+				_selected_entity_id = ""  # Deselect entity when clicking zone
+				_route_selection_mode = false
 				zone_clicked.emit(clicked_zone)
 				queue_redraw()
+
+		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+			var mouse_pos = event.position
+			# Right-click in route selection mode shows route options popup
+			if _route_selection_mode and _selected_entity_id != "":
+				var clicked_zone = _get_zone_at_position(mouse_pos)
+				if clicked_zone >= 0:
+					_show_route_options(_selected_entity_id, clicked_zone)
+					return
+			# Otherwise, right-click cancels selection
+			_selected_entity_id = ""
+			_route_selection_mode = false
+			_route_options_visible = false
+			queue_redraw()
 
 func _get_zone_at_position(pos: Vector2) -> int:
 	for zone_id in FCWTypes.ZoneId.values():
@@ -3161,6 +3247,510 @@ func _get_zone_at_position(pos: Vector2) -> int:
 		if pos.distance_to(zone_pos) <= zone_size:
 			return zone_id
 	return -1
+
+## Get entity ID at screen position (for click detection)
+## Returns first entity found, or cycles if clicking same spot
+func _get_entity_at_position(pos: Vector2, offset: Vector2) -> String:
+	var entities_here = _get_all_entities_at_position(pos, offset)
+	if entities_here.is_empty():
+		return ""
+	return entities_here[0]
+
+## Get ALL entity IDs at screen position (for stacked ship selection)
+func _get_all_entities_at_position(pos: Vector2, offset: Vector2) -> Array:
+	var entities = _state.get("entities", [])
+	var game_time = _state.get("game_time", 0.0)
+	var found: Array = []
+
+	for entity in entities:
+		# Skip Herald and destroyed entities
+		if entity.faction == FCWTypes.Faction.HERALD:
+			continue
+		if entity.movement_state == FCWTypes.MovementState.DESTROYED:
+			continue
+
+		# Get entity screen position
+		var entity_pos = _get_entity_screen_pos(entity, game_time) + offset
+
+		# Check distance
+		if pos.distance_to(entity_pos) <= ENTITY_CLICK_RADIUS:
+			found.append(entity.id)
+
+	return found
+
+## Select entity with cycling support for stacked ships
+func _select_entity_with_cycling(pos: Vector2, offset: Vector2) -> String:
+	var entities_here = _get_all_entities_at_position(pos, offset)
+
+	if entities_here.is_empty():
+		_entities_at_click = []
+		_entity_cycle_index = 0
+		return ""
+
+	# Check if clicking same location as before
+	if entities_here == _entities_at_click and entities_here.size() > 1:
+		# Cycle to next entity
+		_entity_cycle_index = (_entity_cycle_index + 1) % entities_here.size()
+	else:
+		# New location - reset cycle
+		_entities_at_click = entities_here
+		_entity_cycle_index = 0
+
+	return entities_here[_entity_cycle_index]
+
+## Get entity screen position from AU coordinates
+func _get_entity_screen_pos(entity: Dictionary, game_time: float) -> Vector2:
+	# If entity is orbiting, use zone position
+	if entity.movement_state == FCWTypes.MovementState.ORBITING:
+		var zone_id = entity.get("origin", -1)
+		if zone_id >= 0:
+			var zone_pos = _get_zone_pixel_pos(zone_id)
+			# Offset slightly from zone center based on entity index
+			var entity_index = hash(entity.id) % 8
+			var angle = entity_index * TAU / 8.0
+			var orbit_radius = ZONE_SIZES.get(zone_id, 20.0) + 15.0
+			return zone_pos + Vector2(cos(angle), sin(angle)) * orbit_radius
+
+	# For moving entities, interpolate between zones
+	var origin = entity.get("origin", -1)
+	var destination = entity.get("destination", -1)
+
+	if origin >= 0 and destination >= 0 and origin != destination:
+		var from_pos = _get_zone_pixel_pos(origin)
+		var to_pos = _get_zone_pixel_pos(destination)
+
+		# Calculate progress based on entity position
+		var entity_au = entity.position
+		var from_au = FCWTypes.get_zone_position(origin, game_time)
+		var to_au = FCWTypes.get_zone_position(destination, game_time)
+		var total_dist = from_au.distance_to(to_au)
+		var current_dist = from_au.distance_to(entity_au)
+		var progress = clampf(current_dist / maxf(total_dist, 0.1), 0.0, 1.0)
+
+		return from_pos.lerp(to_pos, progress)
+
+	# Fallback to origin zone
+	if origin >= 0:
+		return _get_zone_pixel_pos(origin)
+
+	return Vector2.ZERO
+
+## Handle entity selection
+func _select_entity(entity_id: String) -> void:
+	_selected_entity_id = entity_id
+	_selected_zone = -1  # Deselect zone
+	_route_selection_mode = true  # Enter route selection mode
+	_route_options_visible = false
+	entity_clicked.emit(entity_id)
+	queue_redraw()
+
+## Show route options popup for selected entity to destination
+func _show_route_options(entity_id: String, destination_zone: int) -> void:
+	var entity = _get_entity_by_id(entity_id)
+	if entity.is_empty():
+		return
+
+	var origin = entity.get("origin", -1)
+	if origin < 0 or origin == destination_zone:
+		return
+
+	# Get route options from orbital calculator
+	var game_time = _state.get("game_time", 0.0)
+	var ship_type = FCWTypes.ShipType.CRUISER  # Default thrust
+	if entity.entity_type == FCWTypes.EntityType.TRANSPORT:
+		ship_type = FCWTypes.ShipType.FRIGATE
+
+	# Load FCWOrbital
+	var FCWOrbital = load("res://scripts/first_contact_war/fcw_orbital.gd")
+	_route_options = FCWOrbital.get_route_summary(origin, destination_zone, game_time, ship_type)
+	_route_options_zone = destination_zone
+	_route_options_visible = true
+	queue_redraw()
+
+## Get entity by ID from state
+func _get_entity_by_id(entity_id: String) -> Dictionary:
+	for entity in _state.get("entities", []):
+		if entity.id == entity_id:
+			return entity
+	return {}
+
+## Get route option index at screen position
+func _get_route_option_at_position(pos: Vector2) -> int:
+	if not _route_options_visible or _route_options.is_empty():
+		return -1
+
+	# Route options popup position (near selected entity)
+	var popup_pos = _get_route_options_popup_pos()
+	var option_height = 35
+	var popup_width = 250
+
+	for i in range(_route_options.size()):
+		var option_rect = Rect2(
+			popup_pos.x,
+			popup_pos.y + 30 + i * option_height,
+			popup_width,
+			option_height - 5
+		)
+		if option_rect.has_point(pos):
+			return i
+
+	return -1
+
+## Get position for route options popup
+func _get_route_options_popup_pos() -> Vector2:
+	if _route_options_zone < 0:
+		return Vector2(100, 100)
+
+	var zone_pos = _get_zone_pixel_pos(_route_options_zone)
+	return zone_pos + Vector2(50, -50)
+
+## Handle route option selection
+func _select_route_option(option_index: int) -> void:
+	if option_index < 0 or option_index >= _route_options.size():
+		return
+
+	var route = _route_options[option_index]
+	var route_type = route.get("type", "direct")
+
+	# Emit signal for main controller to handle
+	entity_destination_selected.emit(_selected_entity_id, _route_options_zone, route_type)
+
+	# Trigger warp effect for dramatic departure
+	_trigger_capital_ship_launch(_selected_entity_id)
+
+	# Clear selection state
+	_selected_entity_id = ""
+	_route_selection_mode = false
+	_route_options_visible = false
+	_route_options_zone = -1
+	_route_options.clear()
+	queue_redraw()
+
+## Select default route (stealth coast) - simplified 2-click flow
+func _select_default_route(entity_id: String, destination_zone: int) -> void:
+	var entity = _get_entity_by_id(entity_id)
+	if entity.is_empty():
+		return
+
+	var origin = entity.get("origin", -1)
+	if origin < 0 or origin == destination_zone:
+		return
+
+	# Default to "coast" (stealth) - the safer option
+	var route_type = "coast"
+
+	# Emit signal for main controller to handle
+	entity_destination_selected.emit(entity_id, destination_zone, route_type)
+
+	# Trigger warp effect for dramatic departure
+	_trigger_capital_ship_launch(entity_id)
+
+	# Clear selection state
+	_selected_entity_id = ""
+	_route_selection_mode = false
+	_route_options_visible = false
+	_route_options_zone = -1
+	_route_options.clear()
+	queue_redraw()
+
+## Trigger dramatic warp zoom effect for capital ship launch
+func _trigger_capital_ship_launch(entity_id: String) -> void:
+	var entity = _get_entity_by_id(entity_id)
+	if entity.is_empty():
+		return
+
+	var game_time = _state.get("game_time", 0.0)
+	var entity_pos = _get_entity_screen_pos(entity, game_time)
+
+	# Spawn dramatic warp flash
+	_warp_flashes.append({
+		"pos": entity_pos,
+		"life": 2.0,
+		"max_life": 2.0,
+		"is_capital": true  # Flag for extra dramatic effect
+	})
+
+	# Screen shake
+	_screen_shake_intensity = 15.0
+
+	# Add particles
+	for i in range(20):
+		var p = Particle.new()
+		p.pos = entity_pos
+		var angle = randf() * TAU
+		p.vel = Vector2(cos(angle), sin(angle)) * randf_range(50, 150)
+		p.color = Color(0.3, 0.6, 1.0, 1.0)
+		p.life = randf_range(0.5, 1.5)
+		p.max_life = p.life
+		p.size = randf_range(2, 5)
+		_particles.append(p)
+
+## Draw route cost preview at each possible destination zone
+func _draw_route_cost_previews(offset: Vector2) -> void:
+	var entity = _get_entity_by_id(_selected_entity_id)
+	if entity.is_empty():
+		return
+
+	var origin_zone = entity.get("origin", -1)
+	if origin_zone < 0:
+		return
+
+	var game_time = _state.get("game_time", 0.0)
+	var font = ThemeDB.fallback_font
+
+	# Determine ship thrust for route calculations
+	var ship_type = FCWTypes.ShipType.CRUISER
+	if entity.entity_type == FCWTypes.EntityType.TRANSPORT:
+		ship_type = FCWTypes.ShipType.FRIGATE
+
+	var FCWOrbital = load("res://scripts/first_contact_war/fcw_orbital.gd")
+
+	# Draw route preview for each zone
+	for zone_id in FCWTypes.ZoneId.values():
+		if zone_id == origin_zone:
+			continue  # Skip origin zone
+
+		var zone = _state.zones.get(zone_id, {})
+		if zone.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+			continue  # Skip fallen zones
+
+		var zone_pos = _get_zone_pixel_pos(zone_id) + offset
+		var zone_size = ZONE_SIZES.get(zone_id, 20.0)
+
+		# Get fastest route summary
+		var routes = FCWOrbital.get_route_summary(origin_zone, zone_id, game_time, ship_type)
+		if routes.is_empty():
+			continue
+
+		# Get fastest and stealthiest options
+		var fastest = routes[0]  # Already sorted by travel time
+		var stealthiest = routes[0]
+		for route in routes:
+			if route.exposure_time < stealthiest.exposure_time:
+				stealthiest = route
+
+		# Calculate display position (below zone)
+		var preview_pos = zone_pos + Vector2(-40, zone_size + 15)
+
+		# Draw preview background
+		var preview_width = 85.0
+		var preview_height = 32.0
+		var bg_rect = Rect2(preview_pos, Vector2(preview_width, preview_height))
+
+		# Highlight if this zone is hovered
+		var is_hovered = _hovered_zone == zone_id
+		var bg_alpha = 0.85 if is_hovered else 0.7
+		var border_color = Color(0.4, 0.8, 1.0, 0.8) if is_hovered else Color(0.3, 0.5, 0.7, 0.5)
+
+		draw_rect(bg_rect, Color(0.02, 0.05, 0.1, bg_alpha))
+		draw_rect(bg_rect, border_color, false, 1.5 if is_hovered else 1.0)
+
+		# Draw connection line from entity to zone (faint)
+		var entity_pos = _get_entity_screen_pos(entity, game_time) + offset
+		var line_alpha = 0.4 if is_hovered else 0.15
+		draw_line(entity_pos, zone_pos, Color(0.3, 0.6, 1.0, line_alpha), 1.0)
+
+		# Format travel time
+		var time_str = FCWOrbital.format_travel_time(fastest.travel_time)
+
+		# Calculate detection risk
+		var exposure_pct = int(stealthiest.exposure_time / maxf(stealthiest.travel_time, 0.1) * 100)
+		var risk_str: String
+		var risk_color: Color
+		if exposure_pct < 20:
+			risk_str = "LOW"
+			risk_color = Color(0.4, 0.9, 0.4)
+		elif exposure_pct < 50:
+			risk_str = "MED"
+			risk_color = Color(1.0, 0.8, 0.3)
+		else:
+			risk_str = "HIGH"
+			risk_color = Color(1.0, 0.4, 0.3)
+
+		# Draw fastest time
+		var time_pos = preview_pos + Vector2(5, 12)
+		draw_string(font, time_pos, time_str, HORIZONTAL_ALIGNMENT_LEFT, 50, 9, Color(0.8, 0.9, 1.0))
+
+		# Draw detection risk
+		var risk_pos = preview_pos + Vector2(5, 25)
+		draw_string(font, risk_pos, "Risk: ", HORIZONTAL_ALIGNMENT_LEFT, 30, 8, Color(0.6, 0.6, 0.7))
+		draw_string(font, risk_pos + Vector2(28, 0), risk_str, HORIZONTAL_ALIGNMENT_LEFT, 30, 8, risk_color)
+
+		# If hovered, show "CLICK" prompt
+		if is_hovered:
+			var click_pos = preview_pos + Vector2(preview_width + 5, 18)
+			var pulse = sin(_global_time * 5.0) * 0.3 + 0.7
+			draw_string(font, click_pos, "CLICK", HORIZONTAL_ALIGNMENT_LEFT, 40, 9, Color(0.3, 1.0, 0.8, pulse))
+
+## Draw capital ship callout with line and name label
+func _draw_capital_ship_callout(ship_pos: Vector2, entity: Dictionary, ship_size: float, base_color: Color, is_selected: bool) -> void:
+	var font = ThemeDB.fallback_font
+	var ship_name = entity.get("name", "UNN Fleet")
+	var combat_power = entity.get("combat_power", 0)
+
+	# Determine callout direction based on position on screen to avoid overlaps
+	var callout_angle: float
+	var screen_center = size * 0.5
+	var to_center = (screen_center - ship_pos).normalized()
+	# Point callout away from center
+	callout_angle = (-to_center).angle()
+
+	# Callout line length and label offset
+	var line_length = 40.0 if not is_selected else 50.0
+	var callout_end = ship_pos + Vector2(cos(callout_angle), sin(callout_angle)) * line_length
+
+	# Colors - brighter when selected
+	var line_color = base_color.lightened(0.3) if is_selected else base_color.darkened(0.1)
+	var label_color = Color(0.9, 0.95, 1.0) if is_selected else Color(0.7, 0.8, 0.9)
+	var line_width = 2.0 if is_selected else 1.0
+	line_color.a = 0.9 if is_selected else 0.6
+
+	# Draw callout line
+	draw_line(ship_pos + Vector2(cos(callout_angle), sin(callout_angle)) * (ship_size + 2), callout_end, line_color, line_width)
+
+	# Draw small circle at line end
+	draw_circle(callout_end, 3.0, line_color)
+
+	# Label position - offset from line end
+	var label_offset = Vector2(8, 4) if callout_angle > -PI/2 and callout_angle < PI/2 else Vector2(-100, 4)
+	var alignment = HORIZONTAL_ALIGNMENT_LEFT if callout_angle > -PI/2 and callout_angle < PI/2 else HORIZONTAL_ALIGNMENT_RIGHT
+
+	# Draw ship name
+	var name_pos = callout_end + label_offset
+	draw_string(font, name_pos, ship_name, alignment, 120, 10, label_color)
+
+	# Show stacked indicator if multiple ships at same location (only for selected)
+	var extra_offset = 0.0
+	if is_selected and _entities_at_click.size() > 1:
+		var stack_str = "[%d/%d]" % [_entity_cycle_index + 1, _entities_at_click.size()]
+		var stack_pos = name_pos + Vector2(0, 11)
+		var pulse = sin(_global_time * 3.0) * 0.2 + 0.8
+		draw_string(font, stack_pos, stack_str + " CLICK TO CYCLE", alignment, 140, 8, Color(0.3, 0.9, 1.0, pulse))
+		extra_offset = 11.0
+
+	# Draw combat power below name
+	var power_str = "Power: %d" % combat_power
+	var power_pos = name_pos + Vector2(0, 12 + extra_offset)
+	draw_string(font, power_pos, power_str, alignment, 80, 8, label_color.darkened(0.2))
+
+	# Draw status indicator
+	var status_str: String
+	var status_color: Color
+	match entity.movement_state:
+		FCWTypes.MovementState.ORBITING:
+			status_str = "STATIONED"
+			status_color = Color(0.5, 0.8, 0.5)
+		FCWTypes.MovementState.BURNING:
+			status_str = "IN TRANSIT"
+			status_color = Color(1.0, 0.7, 0.3)
+		FCWTypes.MovementState.COASTING:
+			status_str = "COASTING"
+			status_color = Color(0.6, 0.7, 0.8)
+		_:
+			status_str = ""
+			status_color = Color.WHITE
+
+	# Calculate status position (always needed for instruction below)
+	var status_pos = power_pos + Vector2(0, 11)
+
+	if status_str != "":
+		draw_string(font, status_pos, status_str, alignment, 80, 8, status_color)
+
+	# If selected, draw destination instruction with controls hint
+	if is_selected and _route_selection_mode and not _route_options_visible:
+		var instr_pos = status_pos + Vector2(0, 14) if status_str != "" else power_pos + Vector2(0, 14)
+		var pulse = sin(_global_time * 4.0) * 0.3 + 0.7
+		# Main instruction
+		draw_string(font, instr_pos, "L-CLICK: STEALTH", alignment, 100, 9, Color(0.3, 0.9, 1.0, pulse))
+		# Secondary hint
+		var hint_pos = instr_pos + Vector2(0, 11)
+		draw_string(font, hint_pos, "R-CLICK: OPTIONS", alignment, 100, 8, Color(0.5, 0.7, 0.8, pulse * 0.7))
+
+## Draw route options popup near destination zone
+func _draw_route_options_popup() -> void:
+	if _route_options.is_empty() or _route_options_zone < 0:
+		return
+
+	var font = ThemeDB.fallback_font
+	var popup_pos = _get_route_options_popup_pos()
+	var popup_width = 250.0
+	var option_height = 35.0
+	var header_height = 30.0
+	var popup_height = header_height + option_height * _route_options.size() + 10
+
+	# Draw connection line from selected entity to popup
+	if _selected_entity_id != "":
+		var entity = _get_entity_by_id(_selected_entity_id)
+		if not entity.is_empty():
+			var game_time = _state.get("game_time", 0.0)
+			var entity_pos = _get_entity_screen_pos(entity, game_time)
+			var zone_pos = _get_zone_pixel_pos(_route_options_zone)
+			# Line from entity to destination zone
+			draw_line(entity_pos, zone_pos, Color(0.3, 0.7, 1.0, 0.5), 2.0)
+
+	# Popup background
+	var bg_rect = Rect2(popup_pos, Vector2(popup_width, popup_height))
+	draw_rect(bg_rect, Color(0.03, 0.06, 0.12, 0.95))
+	draw_rect(bg_rect, Color(0.3, 0.6, 0.9, 0.6), false, 2.0)
+
+	# Header - destination name
+	var dest_name = FCWTypes.get_zone_name(_route_options_zone)
+	draw_string(font, popup_pos + Vector2(10, 18), "ROUTE TO " + dest_name.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, popup_width - 20, 11, Color(0.7, 0.9, 1.0))
+
+	# Draw each route option
+	for i in range(_route_options.size()):
+		var option = _route_options[i]
+		var option_y = popup_pos.y + header_height + i * option_height
+
+		# Option background (highlight on hover)
+		var option_rect = Rect2(popup_pos.x + 5, option_y, popup_width - 10, option_height - 5)
+		var is_hovered = option_rect.has_point(get_local_mouse_position())
+
+		if is_hovered:
+			draw_rect(option_rect, Color(0.2, 0.4, 0.7, 0.4))
+		else:
+			draw_rect(option_rect, Color(0.1, 0.15, 0.25, 0.3))
+
+		# Route type icon and name
+		var route_type = option.get("type", "direct")
+		var route_name: String
+		var route_color: Color
+
+		match route_type:
+			"direct":
+				route_name = "FAST BURN"
+				route_color = Color(1.0, 0.5, 0.3)  # Orange - fast but visible
+			"coast":
+				route_name = "STEALTH COAST"
+				route_color = Color(0.5, 0.8, 0.5)  # Green - slow but hidden
+			"gravity_assist":
+				route_name = "GRAVITY ASSIST"
+				route_color = Color(0.7, 0.7, 1.0)  # Blue - balanced
+			_:
+				route_name = route_type.to_upper()
+				route_color = Color.WHITE
+
+		var name_pos = popup_pos + Vector2(15, header_height + 12 + i * option_height)
+		draw_string(font, name_pos, route_name, HORIZONTAL_ALIGNMENT_LEFT, 120, 10, route_color)
+
+		# Travel time
+		var travel_weeks = option.get("travel_time", 0.0)
+		var FCWOrbital = load("res://scripts/first_contact_war/fcw_orbital.gd")
+		var time_str = FCWOrbital.format_travel_time(travel_weeks)
+		var time_pos = popup_pos + Vector2(130, header_height + 12 + i * option_height)
+		draw_string(font, time_pos, time_str, HORIZONTAL_ALIGNMENT_LEFT, 60, 9, Color(0.8, 0.8, 0.8))
+
+		# Detection exposure
+		var exposure = option.get("exposure_time", 0.0)
+		var exposure_pct = int(exposure / maxf(travel_weeks, 0.1) * 100)
+		var exposure_str = "%d%% vis" % exposure_pct
+		var exposure_color = Color(0.5, 0.8, 0.5) if exposure_pct < 30 else (Color(1.0, 0.8, 0.3) if exposure_pct < 70 else Color(1.0, 0.4, 0.3))
+		var exposure_pos = popup_pos + Vector2(195, header_height + 12 + i * option_height)
+		draw_string(font, exposure_pos, exposure_str, HORIZONTAL_ALIGNMENT_LEFT, 50, 9, exposure_color)
+
+	# Instructions at bottom
+	var instr_pos = popup_pos + Vector2(10, popup_height - 5)
+	draw_string(font, instr_pos, "Click to select • Right-click to cancel", HORIZONTAL_ALIGNMENT_LEFT, popup_width - 20, 8, Color(0.5, 0.6, 0.7))
 
 # ============================================================================
 # PUBLIC API
@@ -3188,6 +3778,16 @@ func update_state(state: Dictionary, zone_defenses: Dictionary, fleets_in_transi
 
 	# Store fleets in transit for visualization
 	_fleets_in_transit = fleets_in_transit
+
+	# Update fleet tracking for roster display
+	_current_fleet = state.get("fleet", {}).duplicate()
+	if _starting_fleet.is_empty() and not _current_fleet.is_empty():
+		# Initialize starting fleet on first update
+		_starting_fleet = _current_fleet.duplicate()
+		_init_capital_ship_grid()
+	elif not _current_fleet.is_empty():
+		# Update capital ship states based on losses
+		_update_capital_ship_states()
 
 	# Update herald from entity system
 	var new_target = state.herald_attack_target
@@ -3841,11 +4441,40 @@ func _draw_entities(offset: Vector2) -> void:
 		# Draw entity body
 		draw_circle(screen_pos, entity_size, entity_color)
 
+		# === SELECTION AND HOVER HIGHLIGHTS ===
+		var entity_id = entity.get("id", "")
+
+		# Hover highlight
+		if entity_id == _hovered_entity_id and entity_id != _selected_entity_id:
+			var hover_pulse = sin(_global_time * 4.0) * 0.2 + 0.8
+			draw_arc(screen_pos, entity_size + 6, 0, TAU, 24, Color(0.8, 0.9, 1.0, 0.5 * hover_pulse), 2.0)
+
+		# Selection highlight (stronger, with instructions)
+		if entity_id == _selected_entity_id:
+			var select_pulse = sin(_global_time * 3.0) * 0.3 + 0.7
+			# Outer selection ring
+			draw_arc(screen_pos, entity_size + 8, 0, TAU, 32, Color(0.3, 0.8, 1.0, select_pulse), 3.0)
+			# Inner glow
+			draw_circle(screen_pos, entity_size + 4, Color(0.3, 0.6, 1.0, 0.15))
+
+			# Draw "Click destination" instruction if in route selection mode
+			if _route_selection_mode and not _route_options_visible:
+				var font = ThemeDB.fallback_font
+				var instruction_pos = screen_pos + Vector2(0, entity_size + 20)
+				draw_string(font, instruction_pos, "Click destination zone", HORIZONTAL_ALIGNMENT_CENTER, 200, 10, Color(0.7, 0.9, 1.0, select_pulse))
+
 		# Drone indicator
 		if entity.get("is_drone", false):
 			# Sharp triangular shape for drones
 			var drone_pulse = sin(_global_time * 8.0) * 0.2 + 0.8
 			draw_circle(screen_pos, entity_size * 0.6, Color(1.0, 0.3, 0.3, drone_pulse))
+
+		# === CAPITAL SHIP CALLOUTS ===
+		# Show callout line and name label for capital ships (Cruiser+)
+		if entity.faction != FCWTypes.Faction.HERALD and entity.entity_type == FCWTypes.EntityType.WARSHIP:
+			# Show callout for any named ship or combat_power >= 25 (Carrier/Cruiser/Dreadnought)
+			if entity.get("name", "") != "" or entity.combat_power >= 25:
+				_draw_capital_ship_callout(screen_pos, entity, entity_size, entity_color, entity_id == _selected_entity_id)
 
 ## Draw projected trajectories for entities
 func _draw_entity_trajectories(offset: Vector2) -> void:
@@ -3919,40 +4548,108 @@ func _draw_entity_trajectories(offset: Vector2) -> void:
 			var mid_pos = start_pos.lerp(dest_pos, 0.5)
 			draw_string(font, mid_pos + Vector2(5, -5), eta_text, HORIZONTAL_ALIGNMENT_LEFT, 50, 10, traj_color)
 
-## Draw Herald observation zone - shows detection risk
-## "Herald has observation radius (only sees nearby signatures)"
+## Draw Herald observation zone - clean circle showing detection radius
+## Simplified: just radius circles + detection labels at zones
 func _draw_herald_observation_zone(offset: Vector2) -> void:
-	# Use zone-based pixel position for consistency with entity rendering
 	var screen_pos = _herald_position + offset
 
-	# Get observation zone settings from Herald AI (for radii)
+	# Get observation zone settings from Herald AI
 	var game_time = _state.get("game_time", 0.0)
 	var herald_au_pos = _get_herald_au_position(game_time)
 	var obs = FCWHeraldAI.get_observation_zone(herald_au_pos)
 
-	# Scale radii from AU to pixels - use visual scale for zone-based layout
-	# Average distance between zones in pixels vs AU gives reasonable scale
-	var visual_scale = size.x / 80.0  # Approximate scale for zone layout
-	var inner_radius = obs.inner_radius * visual_scale
+	# Scale radii from AU to pixels
+	var visual_scale = size.x / 80.0
 	var outer_radius = obs.radius * visual_scale
 	var drone_range = obs.drone_range * visual_scale
 
-	# Draw detection probability zones
-	# Outer zone - 0.1% detection (can see burning ships)
-	var outer_color = Color(1.0, 0.3, 0.3, 0.05)
-	draw_circle(screen_pos, outer_radius, outer_color)
+	# Subtle pulse for life
+	var pulse = sin(_global_time * 1.2) * 0.15 + 0.85
 
-	# Inner zone - 1% detection (can see coasting ships)
-	var inner_color = Color(1.0, 0.2, 0.2, 0.1)
-	draw_circle(screen_pos, inner_radius, inner_color)
+	# Outer observation radius - clean arc with subtle fill
+	var outer_color = Color(0.8, 0.2, 0.3, 0.08 * pulse)
+	draw_circle(screen_pos, outer_radius * pulse, outer_color)
+	draw_arc(screen_pos, outer_radius * pulse, 0, TAU, 64, Color(0.9, 0.3, 0.4, 0.3), 1.5)
 
-	# Drone range - dangerous zone
-	var pulse = sin(_global_time * 2.0) * 0.3 + 0.5
-	draw_arc(screen_pos, drone_range, 0, TAU, 48, Color(1.0, 0.2, 0.2, pulse * 0.3), 2.0)
+	# Drone range - danger zone indicator
+	var drone_color = Color(1.0, 0.2, 0.2, 0.2 * pulse)
+	draw_arc(screen_pos, drone_range * pulse, 0, TAU, 48, drone_color, 2.0)
 
-	# Zone labels
+	# Detection labels at zones (the most useful info)
+	_draw_zone_detection_labels(offset, herald_au_pos)
+
+## Draw detection probability labels at each zone
+func _draw_zone_detection_labels(offset: Vector2, herald_au_pos: Vector2) -> void:
 	var font = ThemeDB.fallback_font
-	draw_string(font, screen_pos + Vector2(outer_radius + 5, 0), "DETECTION ZONE", HORIZONTAL_ALIGNMENT_LEFT, 150, 9, Color(1.0, 0.4, 0.4, 0.6))
+	var herald_intel = _state.get("herald_intel", {})
+	var activity_zones = herald_intel.get("activity_zones", {})
+	var known_routes = herald_intel.get("known_routes", {})
+	var game_time = _state.get("game_time", 0.0)
+
+	for zone_id in FCWTypes.ZoneId.values():
+		var zone = _state.zones.get(zone_id, {})
+		if zone.get("status", 0) == FCWTypes.ZoneStatus.FALLEN:
+			continue
+
+		var zone_pos = _get_zone_pixel_pos(zone_id) + offset
+		var zone_au_pos = FCWTypes.get_zone_position(zone_id, game_time)
+
+		# Calculate detection probability for this zone
+		var traffic_level = activity_zones.get(zone_id, 0.0)
+
+		# Add traffic from connected routes
+		for route_key in known_routes:
+			var parts = route_key.split("_")
+			if parts.size() == 2:
+				var zone_a = int(parts[0])
+				var zone_b = int(parts[1])
+				if zone_a == zone_id or zone_b == zone_id:
+					traffic_level = maxf(traffic_level, known_routes[route_key] * 0.5)
+
+		# Use Herald AI's detection probability calculation
+		var detection_prob = FCWHeraldAI.calc_detection_probability(zone_au_pos, herald_au_pos, false, traffic_level)
+
+		# Only show label if there's meaningful detection risk
+		if detection_prob < 0.001:
+			continue
+
+		# Format as percentage per day
+		var percent_text: String
+		if detection_prob >= 0.1:
+			percent_text = "%.0f%%" % (detection_prob * 100)
+		elif detection_prob >= 0.01:
+			percent_text = "%.1f%%" % (detection_prob * 100)
+		else:
+			percent_text = "%.2f%%" % (detection_prob * 100)
+
+		# Determine color based on danger level
+		var label_color: Color
+		var glow_color: Color
+		if detection_prob >= 0.1:
+			label_color = Color(1.0, 0.3, 0.3)  # Red - dangerous
+			glow_color = Color(1.0, 0.2, 0.2, 0.3)
+		elif detection_prob >= 0.05:
+			label_color = Color(1.0, 0.6, 0.2)  # Orange - risky
+			glow_color = Color(1.0, 0.5, 0.1, 0.2)
+		elif detection_prob >= 0.01:
+			label_color = Color(1.0, 1.0, 0.4)  # Yellow - caution
+			glow_color = Color(1.0, 0.9, 0.2, 0.15)
+		else:
+			label_color = Color(0.5, 0.7, 0.5, 0.7)  # Dim green - safe
+			glow_color = Color(0.3, 0.6, 0.3, 0.1)
+
+		# Draw glow behind label
+		var zone_size = ZONE_SIZES.get(zone_id, 20.0)
+		var label_pos = zone_pos + Vector2(zone_size + 8, -zone_size - 5)
+
+		# Pulsing effect for high danger
+		if detection_prob >= 0.05:
+			var pulse = sin(_global_time * 3.0) * 0.3 + 0.7
+			label_color.a = pulse
+			draw_circle(label_pos + Vector2(15, 5), 18.0, glow_color)
+
+		# Draw detection percentage
+		draw_string(font, label_pos, "[" + percent_text + "]", HORIZONTAL_ALIGNMENT_LEFT, 60, 10, label_color)
 
 ## Get Herald position in AU coordinates
 func _get_herald_au_position(game_time: float) -> Vector2:
@@ -3973,7 +4670,8 @@ func _get_herald_au_position(game_time: float) -> Vector2:
 		var progress = 1.0 - (float(herald_transit.turns_remaining) / float(herald_transit.total_turns))
 		return from_pos.lerp(to_pos, progress)
 
-## Draw traffic pattern visualization - shows Herald's known routes
+## Draw traffic pattern visualization - simple lines showing known routes
+## Simplified: thin lines with intensity based on traffic level
 func _draw_traffic_patterns(offset: Vector2) -> void:
 	var herald_intel = _state.get("herald_intel", {})
 	var known_routes = herald_intel.get("known_routes", {})
@@ -3991,25 +4689,203 @@ func _draw_traffic_patterns(offset: Vector2) -> void:
 		var zone_a = int(parts[0])
 		var zone_b = int(parts[1])
 
-		# Use zone-based pixel positions for consistency
 		var pos_a = _get_zone_pixel_pos(zone_a) + offset
 		var pos_b = _get_zone_pixel_pos(zone_b) + offset
 
-		# Route color intensity based on traffic level
-		var route_color = Color(1.0, 0.6, 0.2, traffic * 0.5)
-		var width = 1.0 + traffic * 3.0
+		# Simple line - width and opacity based on traffic
+		var line_alpha = 0.2 + traffic * 0.5
+		var line_width = 1.0 + traffic * 2.0
+		var line_color = Color(1.0, 0.5, 0.2, line_alpha)
 
-		# Draw as wavy line to show it's "known" traffic
-		var direction = (pos_b - pos_a).normalized()
-		var perpendicular = Vector2(-direction.y, direction.x)
-		var distance = pos_a.distance_to(pos_b)
-		var segments = int(distance / 20.0)
+		# Danger coloring for heavy traffic
+		if traffic >= 0.5:
+			line_color = Color(1.0, 0.3, 0.2, line_alpha)
 
-		var prev_point = pos_a
-		for i in range(1, segments + 1):
-			var t = float(i) / float(segments)
-			var base_point = pos_a.lerp(pos_b, t)
-			var wave_offset = sin(t * 4.0 * PI + _global_time) * 3.0 * traffic
-			var point = base_point + perpendicular * wave_offset
-			draw_line(prev_point, point, route_color, width)
-			prev_point = point
+		draw_line(pos_a, pos_b, line_color, line_width)
+
+		# Show percentage at midpoint for significant traffic
+		if traffic >= 0.3:
+			var mid_point = pos_a.lerp(pos_b, 0.5)
+			var font = ThemeDB.fallback_font
+			var percent = "%.0f%%" % (traffic * 100)
+			draw_string(font, mid_point + Vector2(5, -5), percent, HORIZONTAL_ALIGNMENT_LEFT, 40, 9, line_color)
+
+# ============================================================================
+# FLEET ROSTER - Visual display of UNN fleet status
+# ============================================================================
+
+func _init_capital_ship_grid() -> void:
+	## Initialize the capital ship grid from starting fleet
+	_capital_ship_states.clear()
+
+	# Add capital ships (Cruisers, Carriers, Dreadnoughts) to grid
+	# Frigates are too numerous to show individually
+	for ship_type in [FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.DREADNOUGHT]:
+		var count = _starting_fleet.get(ship_type, 0)
+		for i in range(count):
+			_capital_ship_states.append({"type": ship_type, "alive": true})
+
+func _update_capital_ship_states() -> void:
+	## Update ship states based on current vs starting counts
+	# Count how many of each type should be alive
+	var alive_counts = {}
+	for ship_type in [FCWTypes.ShipType.CRUISER, FCWTypes.ShipType.CARRIER, FCWTypes.ShipType.DREADNOUGHT]:
+		alive_counts[ship_type] = _current_fleet.get(ship_type, 0)
+
+	# Mark ships as dead from the end (most recently lost)
+	for i in range(_capital_ship_states.size() - 1, -1, -1):
+		var ship = _capital_ship_states[i]
+		var ship_type = ship.type
+		if alive_counts.get(ship_type, 0) > 0:
+			ship.alive = true
+			alive_counts[ship_type] -= 1
+		else:
+			ship.alive = false
+
+func _draw_fleet_roster(rect: Rect2) -> void:
+	## Draw fleet status panel in top-right corner with ship outlines and names
+	var panel_width = 220
+	var row_height = 18
+	var max_ships_shown = 30  # Limit to prevent overflow
+	var ships_to_show = mini(_capital_ship_states.size(), max_ships_shown)
+	var panel_height = 30 + ships_to_show * row_height
+	var margin = 10
+	var panel_pos = Vector2(rect.size.x - panel_width - margin, margin)
+
+	# Panel background
+	draw_rect(Rect2(panel_pos, Vector2(panel_width, panel_height)), Color(0.02, 0.04, 0.08, 0.9))
+	draw_rect(Rect2(panel_pos, Vector2(panel_width, panel_height)), Color(0.3, 0.5, 0.7, 0.4), false, 1.0)
+
+	# Title with ship counts
+	var font = ThemeDB.fallback_font
+	var total_alive = _capital_ship_states.filter(func(s): return s.alive).size()
+	var total_ships = _capital_ship_states.size()
+	var title = "UNN CAPITAL FLEET  %d/%d" % [total_alive, total_ships]
+	draw_string(font, panel_pos + Vector2(8, 14), title, HORIZONTAL_ALIGNMENT_LEFT, panel_width - 16, 9, Color(0.6, 0.8, 1.0))
+
+	# Draw each capital ship with outline and name
+	var y_offset = 24
+	for i in range(ships_to_show):
+		var ship = _capital_ship_states[i]
+		var ship_y = panel_pos.y + y_offset + i * row_height
+		var ship_x = panel_pos.x + 8
+
+		# Ship outline (simplified silhouette)
+		var outline_width = 24
+		var outline_height = 10
+		var outline_pos = Vector2(ship_x, ship_y + 2)
+
+		# Get ship color and name based on type
+		var base_color: Color
+		var type_prefix: String
+		match ship.type:
+			FCWTypes.ShipType.CRUISER:
+				base_color = Color(0.4, 0.5, 0.9)
+				type_prefix = "CRS"
+			FCWTypes.ShipType.CARRIER:
+				base_color = Color(0.9, 0.7, 0.3)
+				type_prefix = "CVR"
+			FCWTypes.ShipType.DREADNOUGHT:
+				base_color = Color(0.9, 0.4, 0.4)
+				type_prefix = "DRN"
+			_:
+				base_color = Color(0.5, 0.5, 0.5)
+				type_prefix = "SHP"
+
+		# Generate consistent name from index
+		var ship_name = _get_capital_ship_name(i, ship.type)
+
+		if ship.alive:
+			# Draw ship outline (alive)
+			_draw_ship_silhouette(outline_pos, outline_width, outline_height, ship.type, base_color)
+			# Ship name
+			draw_string(font, Vector2(ship_x + outline_width + 6, ship_y + 11), ship_name, HORIZONTAL_ALIGNMENT_LEFT, 150, 8, base_color)
+		else:
+			# Draw ship outline (destroyed - red X through it)
+			_draw_ship_silhouette(outline_pos, outline_width, outline_height, ship.type, Color(0.3, 0.3, 0.3, 0.5))
+			# Red X over the ship
+			draw_line(outline_pos, outline_pos + Vector2(outline_width, outline_height), Color(0.8, 0.2, 0.2, 0.9), 2.0)
+			draw_line(outline_pos + Vector2(outline_width, 0), outline_pos + Vector2(0, outline_height), Color(0.8, 0.2, 0.2, 0.9), 2.0)
+			# Ship name (struck through)
+			draw_string(font, Vector2(ship_x + outline_width + 6, ship_y + 11), ship_name, HORIZONTAL_ALIGNMENT_LEFT, 150, 8, Color(0.5, 0.3, 0.3, 0.7))
+
+func _draw_ship_silhouette(pos: Vector2, w: float, h: float, ship_type: int, color: Color) -> void:
+	## Draw a simple ship silhouette based on type
+	var points: PackedVector2Array
+
+	match ship_type:
+		FCWTypes.ShipType.CRUISER:
+			# Sleek cruiser shape
+			points = PackedVector2Array([
+				pos + Vector2(0, h * 0.5),
+				pos + Vector2(w * 0.15, 0),
+				pos + Vector2(w * 0.7, 0),
+				pos + Vector2(w, h * 0.5),
+				pos + Vector2(w * 0.7, h),
+				pos + Vector2(w * 0.15, h),
+			])
+		FCWTypes.ShipType.CARRIER:
+			# Wide carrier shape
+			points = PackedVector2Array([
+				pos + Vector2(0, h * 0.3),
+				pos + Vector2(w * 0.1, 0),
+				pos + Vector2(w * 0.9, 0),
+				pos + Vector2(w, h * 0.3),
+				pos + Vector2(w, h * 0.7),
+				pos + Vector2(w * 0.9, h),
+				pos + Vector2(w * 0.1, h),
+				pos + Vector2(0, h * 0.7),
+			])
+		FCWTypes.ShipType.DREADNOUGHT:
+			# Heavy dreadnought shape
+			points = PackedVector2Array([
+				pos + Vector2(0, h * 0.5),
+				pos + Vector2(w * 0.2, 0),
+				pos + Vector2(w * 0.5, 0),
+				pos + Vector2(w * 0.6, h * 0.2),
+				pos + Vector2(w, h * 0.5),
+				pos + Vector2(w * 0.6, h * 0.8),
+				pos + Vector2(w * 0.5, h),
+				pos + Vector2(w * 0.2, h),
+			])
+		_:
+			# Default rectangle
+			points = PackedVector2Array([
+				pos,
+				pos + Vector2(w, 0),
+				pos + Vector2(w, h),
+				pos + Vector2(0, h),
+			])
+
+	draw_colored_polygon(points, color)
+	draw_polyline(points, color.lightened(0.3), 1.0, true)
+
+func _get_capital_ship_name(index: int, ship_type: int) -> String:
+	## Generate consistent ship name from index
+	var type_prefix: String
+	match ship_type:
+		FCWTypes.ShipType.CRUISER:
+			type_prefix = "UNN"
+		FCWTypes.ShipType.CARRIER:
+			type_prefix = "CVN"
+		FCWTypes.ShipType.DREADNOUGHT:
+			type_prefix = "BB"
+		_:
+			type_prefix = "UNN"
+
+	# Famous ship names
+	var names = [
+		"Defiant", "Resolute", "Intrepid", "Valiant", "Dauntless",
+		"Prometheus", "Athena", "Hercules", "Perseus", "Orion",
+		"Armstrong", "Gagarin", "Shepard", "Aldrin", "Collins",
+		"Tokyo", "Shanghai", "Mumbai", "Lagos", "Sydney",
+		"Wellington", "Nelson", "Yamamoto", "Nimitz", "Halsey",
+		"Aurora", "Phoenix", "Titan", "Atlas", "Nova",
+		"Victory", "Triumph", "Glory", "Honor", "Valor",
+		"Endeavor", "Discovery", "Challenger", "Columbia", "Enterprise",
+		"Constellation", "Constitution", "Independence", "Liberty", "Freedom",
+		"Vanguard", "Sentinel", "Guardian", "Warden", "Bulwark"
+	]
+
+	var name_idx = index % names.size()
+	return "%s %s" % [type_prefix, names[name_idx]]

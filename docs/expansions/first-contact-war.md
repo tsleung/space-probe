@@ -1178,6 +1178,60 @@ All AI improvements implemented:
 
 ---
 
+## Deterministic Simulation & AI Optimization
+
+### Determinism Guarantee
+
+FCW is fully deterministic: **same seed = identical outcome**.
+
+```gdscript
+# Start with fixed seed for reproducible game
+store.start_new_game(12345)
+
+# Record game for replay
+var recording = store.get_recording()
+store.save_recording("user://game.json")
+```
+
+This enables:
+- **Replay & Debug**: Record games and replay them exactly
+- **AI Optimization**: Run thousands of simulations to find optimal strategies
+- **Narrative Control**: Predict when key moments occur
+
+### AI Decision Architecture
+
+The Human AI uses **phase-adaptive strategy** with action evaluation:
+
+| Phase | Herald Location | Strategy |
+|-------|-----------------|----------|
+| **EARLY** | Kuiper/outer zones | Build fleet aggressively, minimize detection signature |
+| **MID** | Jupiter/Asteroid Belt | Mars blockade + start evacuation, balanced defense |
+| **LATE** | Mars/inner zones | Maximize evacuation, sacrifice outer zones |
+| **ENDGAME** | Earth threatened | Pure evacuation, all ships protect transports |
+
+The AI uses:
+- `FCWActionEnumerator` - Discovers all valid actions at each decision point
+- `FCWStateEvaluator` - Ranks actions by expected impact on lives saved
+- Phase detection - Adapts strategy as Herald advances
+
+### Batch Simulation
+
+Run many games to test strategies:
+
+```gdscript
+# Compare strategies across 100 games
+var comparison = FCWHeadlessRunner.compare_strategies([
+    {"name": "Passive", "strategy": FCWHeadlessRunner.strategy_passive()},
+    {"name": "Defend Earth", "strategy": FCWHeadlessRunner.strategy_defend_earth()},
+    {"name": "Forward Defense", "strategy": FCWHeadlessRunner.strategy_forward_defense()}
+], 100)
+FCWHeadlessRunner.print_comparison_summary(comparison)
+```
+
+See `docs/expansions/fcw-architecture.md` section 19 for full API documentation.
+
+---
+
 ## Architecture Reference
 
 For detailed technical architecture including:
@@ -1185,6 +1239,8 @@ For detailed technical architecture including:
 - Signal flow diagrams
 - Module dependencies
 - Data flow patterns
+- **Deterministic simulation infrastructure** (Section 19)
+- **Testing determinism** (Section 20)
 
 See: `docs/expansions/fcw-architecture.md`
 

@@ -387,11 +387,11 @@ func _count_team_strategic_points(state: Dictionary, team: int) -> int:
 
 
 func show_victory(winner_name: String):
-	# Special message if Progenitor wins
+	# Special message if Progenitor wins - this is the expected ending
 	if winner_name == "The Progenitor":
-		victory_label.text = "THE CYCLE CONTINUES\nYou have been absorbed."
+		victory_label.text = "INCORPORATED\n\nYou have returned to the source.\nThe cycle continues."
 		victory_label.add_theme_color_override("font_color", VnpTypes.PROGENITOR_PULSE)
-		victory_label.add_theme_font_size_override("font_size", 36)
+		victory_label.add_theme_font_size_override("font_size", 32)
 	else:
 		victory_label.text = "%s Wins!" % winner_name
 		victory_label.add_theme_color_override("font_color", Color.WHITE)

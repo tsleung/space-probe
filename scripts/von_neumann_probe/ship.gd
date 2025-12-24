@@ -29,7 +29,7 @@ var side_thruster_left: GPUParticles2D = null
 var side_thruster_right: GPUParticles2D = null
 
 # Defensive systems
-var shield_bubble: Line2D = null
+var shield_bubble: Node2D = null
 var pdc_cooldown: float = 0.0
 var gravity_well: Node2D = null
 var gravity_vortex_particles: GPUParticles2D = null
@@ -368,8 +368,11 @@ static func _make_circle_texture(radius: float) -> GradientTexture2D:
 	return texture
 
 
+var pdc_inner_ring: Line2D = null
+var pdc_crosshairs: Node2D = null
+
 func _setup_pdc_kill_zone():
-	# Simplified PDC - just a simple range ring
+	# SPECTACULAR PDC KILL ZONE - Radar sweep, crosshairs, threat indicator
 	var pdc_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.PDC)
 	var pdc_range = ship_stats.get("range", 250)
 
@@ -377,55 +380,166 @@ func _setup_pdc_kill_zone():
 	pdc_kill_zone.name = "PDCKillZone"
 	add_child(pdc_kill_zone)
 
-	# Simple range ring
+	# OUTER RANGE RING - Main boundary
 	pdc_range_ring = Line2D.new()
 	pdc_range_ring.name = "RangeRing"
-	pdc_range_ring.width = 1.5
-	pdc_range_ring.default_color = Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.25)
+	pdc_range_ring.width = 3.0
+	pdc_range_ring.default_color = Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.4)
 	var ring_points = []
-	for i in range(17):
-		var angle = i * (PI * 2 / 16)
+	for i in range(33):
+		var angle = i * (PI * 2 / 32)
 		ring_points.append(Vector2(cos(angle), sin(angle)) * pdc_range)
 	pdc_range_ring.points = PackedVector2Array(ring_points)
 	pdc_kill_zone.add_child(pdc_range_ring)
 
+	# INNER RING - Kill zone core
+	pdc_inner_ring = Line2D.new()
+	pdc_inner_ring.name = "InnerRing"
+	pdc_inner_ring.width = 2.0
+	pdc_inner_ring.default_color = Color(pdc_color.r * 1.2, pdc_color.g * 1.2, pdc_color.b * 1.2, 0.5)
+	var inner_points = []
+	for i in range(25):
+		var angle = i * (PI * 2 / 24)
+		inner_points.append(Vector2(cos(angle), sin(angle)) * (pdc_range * 0.6))
+	pdc_inner_ring.points = PackedVector2Array(inner_points)
+	pdc_kill_zone.add_child(pdc_inner_ring)
+
+	# RADAR SWEEP LINE - Rotating scanner
+	pdc_sweep_line = Line2D.new()
+	pdc_sweep_line.name = "SweepLine"
+	pdc_sweep_line.width = 2.0
+	pdc_sweep_line.default_color = Color(pdc_color.r * 1.5, pdc_color.g * 1.5, pdc_color.b * 1.5, 0.6)
+	pdc_sweep_line.add_point(Vector2.ZERO)
+	pdc_sweep_line.add_point(Vector2(pdc_range, 0))
+
+	# Gradient fade for sweep line
+	var sweep_gradient = Gradient.new()
+	sweep_gradient.set_color(0, Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.8))
+	sweep_gradient.set_color(1, Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.1))
+	pdc_sweep_line.gradient = sweep_gradient
+	pdc_kill_zone.add_child(pdc_sweep_line)
+
+	# CROSSHAIRS - Targeting reticle
+	pdc_crosshairs = Node2D.new()
+	pdc_crosshairs.name = "Crosshairs"
+	var cross_color = Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.2)
+	for i in range(4):
+		var crosshair = Line2D.new()
+		crosshair.width = 1.5
+		crosshair.default_color = cross_color
+		var angle = i * (PI / 2)
+		crosshair.add_point(Vector2(cos(angle), sin(angle)) * 30)
+		crosshair.add_point(Vector2(cos(angle), sin(angle)) * pdc_range)
+		pdc_crosshairs.add_child(crosshair)
+	pdc_kill_zone.add_child(pdc_crosshairs)
+
+	# Start sweep animation
+	_animate_pdc_sweep()
+
 
 func _animate_pdc_sweep():
-	# No animation needed - simplified
+	# Continuous radar sweep rotation
+	var sweep_tween = create_tween()
+	sweep_tween.set_loops(0)  # 0 = infinite
+	sweep_tween.tween_property(pdc_sweep_line, "rotation", TAU, 2.0)
+	sweep_tween.tween_callback(func(): pdc_sweep_line.rotation = 0)
+
+	# Slow crosshair rotation (opposite direction)
+	var cross_tween = create_tween()
+	cross_tween.set_loops(0)  # 0 = infinite
+	cross_tween.tween_property(pdc_crosshairs, "rotation", -TAU, 8.0)
+	cross_tween.tween_callback(func(): pdc_crosshairs.rotation = 0)
+
+	# Pulsing rings
 	var pulse_tween = create_tween()
 	pulse_tween.set_loops(0)  # 0 = infinite
-	pulse_tween.tween_property(pdc_range_ring, "modulate:a", 0.5, 1.0).set_trans(Tween.TRANS_SINE)
-	pulse_tween.tween_property(pdc_range_ring, "modulate:a", 1.0, 1.0).set_trans(Tween.TRANS_SINE)
+	pulse_tween.tween_property(pdc_range_ring, "modulate:a", 0.6, 0.8).set_trans(Tween.TRANS_SINE)
+	pulse_tween.tween_property(pdc_range_ring, "modulate:a", 1.0, 0.8).set_trans(Tween.TRANS_SINE)
 
+
+var shield_outer_ring: Line2D = null
+var shield_inner_glow: Line2D = null
+var shield_hex_pattern: Node2D = null
+var shield_pulse_timer: float = 0.0
 
 func _setup_shield_bubble():
-	# Simplified shield - just a simple ring
-	shield_bubble = Line2D.new()
-	shield_bubble.name = "ShieldBubble"
-
+	# SPECTACULAR SHIELD BUBBLE - Hexagonal energy field with shimmer
 	var shield_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.SHIELD)
 	var radius = ship_stats.get("shield_radius", 120)
 
-	shield_bubble.default_color = Color(shield_color.r, shield_color.g, shield_color.b, 0.4)
-	shield_bubble.width = 2.0
-
-	var points = []
-	for i in range(17):
-		var angle = i * (PI * 2 / 16)
-		points.append(Vector2(cos(angle), sin(angle)) * radius)
-	shield_bubble.points = PackedVector2Array(points)
+	# Container for all shield elements
+	shield_bubble = Node2D.new()
+	shield_bubble.name = "ShieldBubble"
 	add_child(shield_bubble)
+
+	# OUTER RING - Main visible boundary (thicker, brighter)
+	shield_outer_ring = Line2D.new()
+	shield_outer_ring.name = "OuterRing"
+	shield_outer_ring.default_color = Color(shield_color.r, shield_color.g, shield_color.b, 0.6)
+	shield_outer_ring.width = 4.0
+	var outer_points = []
+	for i in range(33):
+		var angle = i * (PI * 2 / 32)
+		outer_points.append(Vector2(cos(angle), sin(angle)) * radius)
+	shield_outer_ring.points = PackedVector2Array(outer_points)
+	shield_bubble.add_child(shield_outer_ring)
+
+	# INNER GLOW - Soft protective aura
+	shield_inner_glow = Line2D.new()
+	shield_inner_glow.name = "InnerGlow"
+	shield_inner_glow.default_color = Color(shield_color.r * 1.2, shield_color.g * 1.2, shield_color.b * 1.2, 0.25)
+	shield_inner_glow.width = 12.0
+	shield_inner_glow.points = PackedVector2Array(outer_points)
+	shield_bubble.add_child(shield_inner_glow)
+
+	# HEXAGONAL PATTERN - Energy field structure
+	shield_hex_pattern = Node2D.new()
+	shield_hex_pattern.name = "HexPattern"
+	shield_bubble.add_child(shield_hex_pattern)
+
+	# Create hex grid lines
+	var hex_color = Color(shield_color.r, shield_color.g, shield_color.b, 0.15)
+	for ring in range(3):
+		var ring_radius = radius * (0.4 + ring * 0.25)
+		for i in range(6):
+			var angle = i * (PI / 3) + ring * (PI / 6)
+			var hex_line = Line2D.new()
+			hex_line.width = 1.5
+			hex_line.default_color = hex_color
+			var start = Vector2(cos(angle), sin(angle)) * ring_radius * 0.6
+			var end = Vector2(cos(angle), sin(angle)) * ring_radius
+			hex_line.add_point(start)
+			hex_line.add_point(end)
+			shield_hex_pattern.add_child(hex_line)
+
+	# Start shimmer animation
+	_animate_shield_pulse()
 
 
 func _animate_shield_pulse():
 	if not is_instance_valid(shield_bubble):
 		return
-	# Simple pulse - no complex animation
-	pass
 
+	# Continuous breathing pulse
+	var pulse_tween = create_tween()
+	pulse_tween.set_loops(0)  # 0 = infinite
+
+	pulse_tween.tween_property(shield_outer_ring, "modulate:a", 0.5, 1.2).set_trans(Tween.TRANS_SINE)
+	pulse_tween.tween_property(shield_outer_ring, "modulate:a", 1.0, 1.2).set_trans(Tween.TRANS_SINE)
+
+	# Rotate hex pattern slowly for shimmer effect
+	var rotate_tween = create_tween()
+	rotate_tween.set_loops(0)  # 0 = infinite
+	rotate_tween.tween_property(shield_hex_pattern, "rotation", TAU, 8.0)
+	rotate_tween.tween_callback(func(): shield_hex_pattern.rotation = 0)
+
+
+var gravity_spiral_1: Line2D = null
+var gravity_spiral_2: Line2D = null
+var gravity_core: Polygon2D = null
 
 func _setup_gravity_well():
-	# Simplified gravity well - just two rings, no particles
+	# SPECTACULAR GRAVITY VORTEX - Spinning cosmic singularity effect
 	var gravity_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.GRAVITY)
 	var gravity_radius = ship_stats.get("gravity_radius", 140)
 
@@ -433,32 +547,107 @@ func _setup_gravity_well():
 	gravity_well.name = "GravityWell"
 	add_child(gravity_well)
 
-	# Outer ring
+	# OUTER RING - Event horizon boundary (thick, menacing)
 	gravity_ring_outer = Line2D.new()
 	gravity_ring_outer.name = "OuterRing"
-	gravity_ring_outer.width = 2.0
-	gravity_ring_outer.default_color = Color(gravity_color.r, gravity_color.g, gravity_color.b, 0.3)
+	gravity_ring_outer.width = 5.0
+	gravity_ring_outer.default_color = Color(gravity_color.r, gravity_color.g, gravity_color.b, 0.5)
 	var outer_points = []
-	for i in range(17):
-		var angle = i * (PI * 2 / 16)
+	for i in range(33):
+		var angle = i * (PI * 2 / 32)
 		outer_points.append(Vector2(cos(angle), sin(angle)) * gravity_radius)
 	gravity_ring_outer.points = PackedVector2Array(outer_points)
 	gravity_well.add_child(gravity_ring_outer)
 
-	# Inner ring
+	# MIDDLE RING - Secondary boundary
 	gravity_ring_inner = Line2D.new()
-	gravity_ring_inner.name = "InnerRing"
-	gravity_ring_inner.width = 1.5
-	gravity_ring_inner.default_color = Color(gravity_color.r, gravity_color.g, gravity_color.b, 0.5)
-	var inner_points = []
-	for i in range(13):
-		var angle = i * (PI * 2 / 12)
-		inner_points.append(Vector2(cos(angle), sin(angle)) * (gravity_radius * 0.5))
-	gravity_ring_inner.points = PackedVector2Array(inner_points)
+	gravity_ring_inner.name = "MiddleRing"
+	gravity_ring_inner.width = 3.0
+	gravity_ring_inner.default_color = Color(gravity_color.r * 1.2, gravity_color.g * 1.2, gravity_color.b * 1.2, 0.6)
+	var middle_points = []
+	for i in range(25):
+		var angle = i * (PI * 2 / 24)
+		middle_points.append(Vector2(cos(angle), sin(angle)) * (gravity_radius * 0.65))
+	gravity_ring_inner.points = PackedVector2Array(middle_points)
 	gravity_well.add_child(gravity_ring_inner)
+
+	# SPIRAL ARMS - Spinning matter being sucked in
+	gravity_spiral_1 = _create_gravity_spiral(gravity_radius, gravity_color, 0)
+	gravity_spiral_2 = _create_gravity_spiral(gravity_radius, gravity_color, PI)
+	gravity_well.add_child(gravity_spiral_1)
+	gravity_well.add_child(gravity_spiral_2)
+
+	# CORE - Dark center with bright rim
+	gravity_core = Polygon2D.new()
+	gravity_core.name = "Core"
+	var core_points = []
+	for i in range(13):
+		var angle = i * (TAU / 12)
+		core_points.append(Vector2(cos(angle), sin(angle)) * 20)
+	gravity_core.polygon = PackedVector2Array(core_points)
+	gravity_core.color = Color(0.05, 0.0, 0.1, 0.9)  # Near black
+	gravity_well.add_child(gravity_core)
+
+	# Core rim glow
+	var core_rim = Line2D.new()
+	core_rim.name = "CoreRim"
+	core_rim.width = 4.0
+	core_rim.default_color = Color(gravity_color.r * 1.5, gravity_color.g * 1.5, gravity_color.b * 1.5, 0.8)
+	core_rim.points = PackedVector2Array(core_points + [core_points[0]])  # Close the loop
+	gravity_well.add_child(core_rim)
+
+	# Start spinning animation
+	_animate_gravity_vortex()
 
 	# Add ship to graviton group for projectile detection
 	add_to_group("gravitons")
+
+
+func _create_gravity_spiral(radius: float, color: Color, offset_angle: float) -> Line2D:
+	var spiral = Line2D.new()
+	spiral.width = 2.5
+	spiral.default_color = Color(color.r, color.g, color.b, 0.4)
+
+	# Create spiral arm - curves inward
+	var points = []
+	var spiral_turns = 1.5
+	var segments = 20
+	for i in range(segments):
+		var t = float(i) / (segments - 1)
+		var angle = offset_angle + t * TAU * spiral_turns
+		var r = radius * (1.0 - t * 0.7)  # Spiral inward
+		points.append(Vector2(cos(angle), sin(angle)) * r)
+	spiral.points = PackedVector2Array(points)
+
+	# Gradient from outer to inner
+	var gradient = Gradient.new()
+	gradient.set_color(0, Color(color.r, color.g, color.b, 0.1))
+	gradient.set_color(1, Color(color.r * 1.5, color.g * 1.5, color.b * 1.5, 0.7))
+	spiral.gradient = gradient
+
+	return spiral
+
+
+func _animate_gravity_vortex():
+	if not is_instance_valid(gravity_well):
+		return
+
+	# Continuous rotation of spiral arms
+	var spin_tween = create_tween()
+	spin_tween.set_loops(0)  # 0 = infinite
+	spin_tween.tween_property(gravity_spiral_1, "rotation", TAU, 3.0)
+	spin_tween.tween_callback(func(): gravity_spiral_1.rotation = 0)
+
+	var spin_tween2 = create_tween()
+	spin_tween2.set_loops(0)  # 0 = infinite
+	spin_tween2.tween_property(gravity_spiral_2, "rotation", TAU, 3.0)
+	spin_tween2.tween_callback(func(): gravity_spiral_2.rotation = 0)
+
+	# Pulsing outer ring
+	var pulse_tween = create_tween()
+	pulse_tween.set_loops(0)  # 0 = infinite
+	pulse_tween.tween_property(gravity_ring_outer, "width", 7.0, 1.0).set_trans(Tween.TRANS_SINE)
+	pulse_tween.tween_property(gravity_ring_outer, "width", 5.0, 1.0).set_trans(Tween.TRANS_SINE)
 
 
 func _animate_gravity_well():
@@ -665,12 +854,12 @@ func _setup_progenitor_drone_visuals():
 func _show_muzzle_flash():
 	muzzle_flash.visible = true
 	muzzle_flash.modulate = Color.WHITE
-	muzzle_flash.scale = Vector2(1.5, 1.5)  # Start bigger
+	muzzle_flash.scale = Vector2(2.0, 2.0)  # Start much bigger for visibility
 
 	var tween = create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(muzzle_flash, "modulate:a", 0.0, 0.08)
-	tween.tween_property(muzzle_flash, "scale", Vector2(0.5, 0.5), 0.08)
+	tween.tween_property(muzzle_flash, "modulate:a", 0.0, 0.12)
+	tween.tween_property(muzzle_flash, "scale", Vector2(0.6, 0.6), 0.12)
 	tween.tween_callback(func():
 		muzzle_flash.visible = false
 		muzzle_flash.scale = Vector2.ONE
@@ -678,26 +867,34 @@ func _show_muzzle_flash():
 
 
 func _show_railgun_power_surge():
-	# Cool expanding ring effect - no particles
+	# Cool expanding ring effect - larger and more visible
 	var flash_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.GUN)
 
-	# Bright core flash
+	# Bright core flash - larger
 	var core = Polygon2D.new()
 	core.polygon = PackedVector2Array([
-		Vector2(-3, -6), Vector2(12, 0), Vector2(-3, 6)
+		Vector2(-4, -10), Vector2(18, 0), Vector2(-4, 10)
 	])
 	core.color = Color.WHITE
 	core.position = muzzle_flash.position
 	add_child(core)
 
-	# Expanding ring
+	# Inner bright line (the projectile origin)
+	var line_flash = Line2D.new()
+	line_flash.width = 5.0
+	line_flash.default_color = flash_color.lightened(0.6)
+	line_flash.add_point(muzzle_flash.position)
+	line_flash.add_point(muzzle_flash.position + Vector2(30, 0))
+	add_child(line_flash)
+
+	# Expanding ring - larger
 	var ring = Line2D.new()
-	ring.width = 3.0
+	ring.width = 4.0
 	ring.default_color = flash_color.lightened(0.4)
 	var ring_points = []
 	for i in range(13):
 		var angle = i * (PI * 2 / 12)
-		ring_points.append(Vector2(cos(angle), sin(angle)) * 6)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 10)
 	ring.points = PackedVector2Array(ring_points)
 	ring.position = muzzle_flash.position
 	add_child(ring)
@@ -705,12 +902,14 @@ func _show_railgun_power_surge():
 	# Animate
 	var tween = create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(ring, "scale", Vector2(4, 4), 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(ring, "modulate:a", 0.0, 0.12)
-	tween.tween_property(core, "modulate:a", 0.0, 0.08)
+	tween.tween_property(ring, "scale", Vector2(5, 5), 0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(ring, "modulate:a", 0.0, 0.15)
+	tween.tween_property(core, "modulate:a", 0.0, 0.1)
+	tween.tween_property(line_flash, "modulate:a", 0.0, 0.1)
 	tween.tween_callback(func():
 		ring.queue_free()
 		core.queue_free()
+		line_flash.queue_free()
 	)
 
 func select():
@@ -739,8 +938,14 @@ func _physics_process(delta):
 		return  # Drones don't use normal ship AI
 
 	var target_ship_data = null
-	if my_current_data.target and current_state.ships.has(my_current_data.target):
-		target_ship_data = current_state.ships.get(my_current_data.target)
+	var is_factory_target = false
+	if my_current_data.target:
+		if current_state.ships.has(my_current_data.target):
+			target_ship_data = current_state.ships.get(my_current_data.target)
+		elif my_current_data.target is String and current_state.has("factories") and current_state.factories.has(my_current_data.target):
+			# Target is a factory
+			target_ship_data = current_state.factories.get(my_current_data.target)
+			is_factory_target = true
 
 	# Rotate to look at target
 	if my_current_data.state == "attacking" and target_ship_data:
@@ -962,6 +1167,26 @@ func _physics_process(delta):
 			var base_range = ship_stats.get("range", 200)
 			var effective_range = base_range * tactics.range_mult
 
+			# Range-aware kiting/diving logic override
+			var my_speed = ship_stats.get("speed", 100)
+			var target_type = target_ship_data.get("type", -1)
+			var target_stats = VnpTypes.SHIP_STATS.get(target_type, {})
+			var target_range = target_stats.get("range", 200)
+			var target_speed = target_stats.get("speed", 100)
+
+			# KITING: If we outrange by 100+ units, maintain distance
+			if base_range > target_range + 100:
+				tactics.keep_distance = true
+				# If slower, stay at max range; if faster, can close slightly
+				tactics.range_mult = 1.0 if my_speed < target_speed else 0.9
+				tactics.rush = false
+			# DIVING: If outranged by 100+ units, close the gap fast
+			elif target_range > base_range + 100:
+				tactics.rush = true
+				tactics.range_mult = 0.5  # Get to MY optimal range
+
+			effective_range = base_range * tactics.range_mult  # Recalculate
+
 			# Rush behavior - close distance aggressively
 			if tactics.rush and distance_to_target > effective_range * 0.7:
 				_rush_target(target_ship_data.position, delta)
@@ -978,14 +1203,23 @@ func _physics_process(delta):
 						var orbit_speed = 0.4 if not tactics.rush else 0.6
 						_orbit_target(target_ship_data.position, delta, orbit_speed)
 					VnpTypes.ShipSize.LARGE:
-						# Large ships: Brake to stop and fire (heavy with momentum)
-						# Gradual brake rather than instant stop
-						current_velocity = current_velocity.lerp(Vector2.ZERO, 2.0 * delta)
-						if current_velocity.length() < 5:
-							current_velocity = Vector2.ZERO
-						velocity = current_velocity
-						move_and_slide()
-						_fire_side_thrusters(0)
+						# Large ships (Cruiser): Maintain distance if kiting, otherwise brake
+						if tactics.keep_distance:
+							# Circle at range instead of stopping - rain missiles from afar
+							var orbit_dir = (position - target_ship_data.position).normalized().rotated(PI / 2)
+							var max_speed = ship_stats.get("speed", 100)
+							current_velocity = current_velocity.lerp(orbit_dir * max_speed * 0.5, 2.0 * delta)
+							velocity = current_velocity
+							move_and_slide()
+							_fire_side_thrusters(sign(orbit_dir.dot(Vector2.RIGHT)))
+						else:
+							# Brake to stop and fire (heavy with momentum)
+							current_velocity = current_velocity.lerp(Vector2.ZERO, 2.0 * delta)
+							if current_velocity.length() < 5:
+								current_velocity = Vector2.ZERO
+							velocity = current_velocity
+							move_and_slide()
+							_fire_side_thrusters(0)
 					VnpTypes.ShipSize.MASSIVE:
 						# Star Bases: Completely stationary - just rotate to face target
 						current_velocity = Vector2.ZERO
@@ -1571,7 +1805,7 @@ func _dispatch_state_change(new_state: String, target = null):
 	return true
 
 func _find_nearest_enemy(state):
-	# Use cached target if still valid
+	# Use cached target if still valid (ships only - factories don't cache)
 	if cached_target_id != -1 and target_cache_timer > 0:
 		if state.ships.has(cached_target_id):
 			return cached_target_id
@@ -1591,12 +1825,41 @@ func _find_nearest_enemy(state):
 		state.ships
 	)
 
+	# If no ships in range, look for enemy factories
+	if target_id == -1 and state.has("factories"):
+		var factory_target = _find_nearest_enemy_factory(state)
+		if factory_target != "":
+			return factory_target  # Factory ID is a string like "factory_1_0"
+
 	# Cache the result
 	if target_id != -1:
 		cached_target_id = target_id
 		target_cache_timer = TARGET_CACHE_DURATION
 
 	return target_id
+
+
+func _find_nearest_enemy_factory(state) -> String:
+	"""Find nearest enemy factory to attack"""
+	if not state.has("factories"):
+		return ""
+
+	var best_factory_id = ""
+	var min_dist = INF
+
+	for factory_id in state.factories:
+		var factory = state.factories[factory_id]
+		if factory.team == ship_data.team:
+			continue  # Skip our own factories
+		if not factory.get("complete", false):
+			continue  # Only attack completed factories
+
+		var dist = position.distance_to(factory.position)
+		if dist < min_dist:
+			min_dist = dist
+			best_factory_id = factory_id
+
+	return best_factory_id
 
 
 func _find_uncaptured_planet(state):
@@ -1619,190 +1882,234 @@ func _on_fire_rate_timer_timeout():
 	if current_state == null or not current_state.has("ships"):
 		return
 	var my_current_data = current_state.ships.get(ship_data.id)
-	
+
 	if not my_current_data or my_current_data.state != "attacking":
 		return
 
 	var target_id = my_current_data.target
-	if current_state.ships.has(target_id):
-		# Skip firing for ships without weapons (like PROGENITOR_DRONE)
-		var weapon = ship_stats.get("weapon", null)
-		if weapon == null:
-			return
+	var target_data = null
+	var is_factory_target = false
+	var damage_multiplier = 1.0
 
-		var target_data = current_state.ships[target_id]
+	if current_state.ships.has(target_id):
+		target_data = current_state.ships[target_id]
 		var target_stats = VnpTypes.SHIP_STATS[target_data.type]
 		# Get damage multiplier safely - some weapons (PDC, TURBOLASER, etc) don't have multipliers
-		var weapon_multipliers = VnpTypes.DAMAGE_MULTIPLIERS.get(weapon, {})
-		var damage_multiplier = weapon_multipliers.get(target_stats.get("weapon", -1), 1.0)
+		var weapon_multipliers = VnpTypes.DAMAGE_MULTIPLIERS.get(ship_stats.get("weapon", -1), {})
+		damage_multiplier = weapon_multipliers.get(target_stats.get("weapon", -1), 1.0)
+	elif target_id is String and current_state.has("factories") and current_state.factories.has(target_id):
+		# Targeting a factory
+		target_data = current_state.factories[target_id]
+		is_factory_target = true
+		damage_multiplier = 1.5  # Bonus damage vs structures
 
-		# Apply damage bonus from controlled strategic points (e.g., Command Center)
-		var point_damage_bonus = _get_strategic_point_damage_bonus(current_state, ship_data.team)
-		var base_damage = ship_stats.get("damage", 0)
-		var total_damage = base_damage * damage_multiplier * (1.0 + point_damage_bonus)
+	if target_data == null:
+		return
 
-		# Show muzzle flash for all weapons
-		_show_muzzle_flash()
+	# Skip firing for ships without weapons (like PROGENITOR_DRONE)
+	var weapon = ship_stats.get("weapon", null)
+	if weapon == null:
+		return
 
-		# Play weapon sound
-		if sound_manager:
-			match weapon:
-				VnpTypes.WeaponType.LASER:
-					sound_manager.play_laser()
-				VnpTypes.WeaponType.GUN:
-					sound_manager.play_railgun()
-				VnpTypes.WeaponType.MISSILE:
-					sound_manager.play_missile_launch()
-				VnpTypes.WeaponType.TURBOLASER:
-					sound_manager.play_turbolaser()
+	# Apply damage bonus from controlled strategic points (e.g., Command Center)
+	var point_damage_bonus = _get_strategic_point_damage_bonus(current_state, ship_data.team)
+	var base_damage = ship_stats.get("damage", 0)
+	var total_damage = base_damage * damage_multiplier * (1.0 + point_damage_bonus)
 
+	# Show muzzle flash for all weapons
+	_show_muzzle_flash()
+
+	# Play weapon sound
+	if sound_manager:
 		match weapon:
-			VnpTypes.WeaponType.VOID_TENDRIL:
-				# VOID TENDRIL: Ancient probe attack - reaching tendrils of void energy
-				_fire_void_tendril(target_id, target_data, total_damage)
-				return
-
 			VnpTypes.WeaponType.LASER:
-				# LASER: Instant hit with sustained burn effect
-				var laser_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.LASER)
+				sound_manager.play_laser()
+			VnpTypes.WeaponType.GUN:
+				sound_manager.play_railgun()
+			VnpTypes.WeaponType.MISSILE:
+				sound_manager.play_missile_launch()
+			VnpTypes.WeaponType.TURBOLASER:
+				sound_manager.play_turbolaser()
 
-				# Main beam - bright core
-				laser_beam.default_color = laser_color
-				laser_beam.clear_points()
-				laser_beam.add_point(Vector2.ZERO)
-				laser_beam.add_point(to_local(target_data.position))
+	match weapon:
+		VnpTypes.WeaponType.VOID_TENDRIL:
+			# VOID TENDRIL: Ancient probe attack - reaching tendrils of void energy
+			_fire_void_tendril(target_id, target_data, total_damage)
+			return
 
-				# Create glow beam (wider, more transparent) - add to root so it doesn't move with ship
-				var glow_beam = Line2D.new()
-				glow_beam.default_color = Color(laser_color.r, laser_color.g, laser_color.b, 0.4)
-				glow_beam.width = 24.0
-				glow_beam.add_point(global_position)
-				glow_beam.add_point(target_data.position)
-				get_tree().root.add_child(glow_beam)
+		VnpTypes.WeaponType.LASER:
+			# LASER: Instant hit with sustained burn effect - more visible
+			var laser_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.LASER)
 
-				# Animate beam fade - use sequential tween with proper cleanup
-				var tween = create_tween()
-				tween.tween_property(laser_beam, "width", 0.0, 0.2).from(14.0)
+			# Main beam - thick bright core
+			laser_beam.default_color = Color(laser_color.r * 1.3, laser_color.g * 1.3, laser_color.b * 1.3, 1.0)
+			laser_beam.clear_points()
+			laser_beam.add_point(Vector2.ZERO)
+			laser_beam.add_point(to_local(target_data.position))
 
-				var glow_tween = get_tree().create_tween()
-				glow_tween.tween_property(glow_beam, "modulate:a", 0.0, 0.2)
-				glow_tween.tween_callback(func(): glow_beam.queue_free())
+			# Create wide outer glow beam - add to root so it doesn't move with ship
+			var glow_beam = Line2D.new()
+			glow_beam.default_color = Color(laser_color.r, laser_color.g, laser_color.b, 0.5)
+			glow_beam.width = 36.0  # Wider glow
+			glow_beam.add_point(global_position)
+			glow_beam.add_point(target_data.position)
+			get_tree().root.add_child(glow_beam)
 
-				# Burning impact at target
-				var impact = ImpactFxScene.instantiate()
-				get_tree().root.add_child(impact)
-				impact.global_position = target_data.position
-				impact.scale = Vector2(1.5, 1.5)  # Larger burn mark
-				impact.emitting = true
+			# Create inner bright core beam - static in world space
+			var core_beam = Line2D.new()
+			core_beam.default_color = Color(1.0, 1.0, 1.0, 0.9)  # White-hot core
+			core_beam.width = 6.0
+			core_beam.add_point(global_position)
+			core_beam.add_point(target_data.position)
+			get_tree().root.add_child(core_beam)
 
-				# Instant damage - lasers are precise
+			# Animate beam fade - use sequential tween with proper cleanup
+			var tween = create_tween()
+			tween.tween_property(laser_beam, "width", 0.0, 0.25).from(18.0)
+
+			var glow_tween = get_tree().create_tween()
+			glow_tween.tween_property(glow_beam, "modulate:a", 0.0, 0.25)
+			glow_tween.tween_callback(func(): glow_beam.queue_free())
+
+			var core_tween = get_tree().create_tween()
+			core_tween.tween_property(core_beam, "modulate:a", 0.0, 0.15)
+			core_tween.tween_callback(func(): core_beam.queue_free())
+
+			# Burning impact at target - larger
+			var impact = ImpactFxScene.instantiate()
+			get_tree().root.add_child(impact)
+			impact.global_position = target_data.position
+			impact.scale = Vector2(2.0, 2.0)  # Larger burn mark
+			impact.emitting = true
+
+			# Instant damage - lasers are precise (dispatch to factory or ship)
+			if is_factory_target:
+				store.dispatch({ "type": "DAMAGE_FACTORY", "factory_id": target_id, "damage": total_damage })
+			else:
 				store.dispatch({ "type": "DAMAGE_SHIP", "ship_id": target_id, "damage": total_damage })
 
-			VnpTypes.WeaponType.GUN:
-				# RAILGUN: Punchy power surge + piercing projectile
-				_show_railgun_power_surge()
-				var projectile = vnp_main.get_projectile()
-				projectile.init({
-					"team": ship_data.team,
-					"weapon_type": weapon,
-					"damage": total_damage,
-					"start_position": self.global_position,
-					"start_rotation": self.rotation,
-					"target_id": target_id,
-					"store": store,
-					"vnp_main": vnp_main,
-				})
+		VnpTypes.WeaponType.GUN:
+			# RAILGUN: Punchy power surge + piercing projectile
+			_show_railgun_power_surge()
+			var projectile = vnp_main.get_projectile()
+			projectile.init({
+				"team": ship_data.team,
+				"weapon_type": weapon,
+				"damage": total_damage,
+				"start_position": self.global_position,
+				"start_rotation": self.rotation,
+				"target_id": target_id,
+				"is_factory_target": is_factory_target,
+				"store": store,
+				"vnp_main": vnp_main,
+			})
 
-			VnpTypes.WeaponType.MISSILE:
-				# MISSILE SALVO: Fire 3 missiles in a shower pattern
-				var missile_count = 3
-				for i in range(missile_count):
-					# Stagger launch slightly for shower effect
-					var delay = i * 0.08
-					var spread_index = i
-					var main_ref = vnp_main  # Capture reference for lambda
-					get_tree().create_timer(delay).timeout.connect(func():
-						if not is_instance_valid(self):
-							return
-						var m_projectile = main_ref.get_projectile()
-						# Spread missiles with different arc offsets
-						m_projectile.init({
-							"team": ship_data.team,
-							"weapon_type": weapon,
-							"damage": total_damage / missile_count,  # Split damage across salvo
-							"start_position": self.global_position,
-							"start_rotation": self.rotation + (spread_index - 1) * 0.12,  # Slight angle spread
-							"target_id": target_id,
-							"arc_height_mult": 0.4 + randf() * 0.35,  # Varied arc heights
-							"store": store,
-							"vnp_main": main_ref,
-						})
-					)
+		VnpTypes.WeaponType.MISSILE:
+			# MISSILE SALVO: Fire 3 missiles in a shower pattern
+			var missile_count = 3
+			var factory_flag = is_factory_target  # Capture for lambda
+			for i in range(missile_count):
+				# Stagger launch slightly for shower effect
+				var delay = i * 0.08
+				var spread_index = i
+				var main_ref = vnp_main  # Capture reference for lambda
+				get_tree().create_timer(delay).timeout.connect(func():
+					if not is_instance_valid(self):
+						return
+					var m_projectile = main_ref.get_projectile()
+					# Spread missiles with different arc offsets
+					m_projectile.init({
+						"team": ship_data.team,
+						"weapon_type": weapon,
+						"damage": total_damage / missile_count,  # Split damage across salvo
+						"start_position": self.global_position,
+						"start_rotation": self.rotation + (spread_index - 1) * 0.12,  # Slight angle spread
+						"target_id": target_id,
+						"is_factory_target": factory_flag,
+						"arc_height_mult": 0.4 + randf() * 0.35,  # Varied arc heights
+						"store": store,
+						"vnp_main": main_ref,
+					})
+				)
 
-			VnpTypes.WeaponType.TURBOLASER:
-				# TURBOLASER: Slow but devastating projectile - Star Destroyer style
-				# Easy for small fast ships to dodge, deadly to capitals
-				_show_turbolaser_charge()
-				var turbo_projectile = vnp_main.get_projectile()
-				turbo_projectile.init({
-					"team": ship_data.team,
-					"weapon_type": VnpTypes.WeaponType.TURBOLASER,
-					"damage": total_damage,
-					"start_position": self.global_position,
-					"start_rotation": self.rotation,
-					"target_id": target_id,
-					"turbolaser_speed": ship_stats.get("turbolaser_speed", 180),
-					"turbolaser_size": ship_stats.get("turbolaser_size", 12),
-					"store": store,
-					"vnp_main": vnp_main,
-				})
+		VnpTypes.WeaponType.TURBOLASER:
+			# TURBOLASER: Slow but devastating projectile - Star Destroyer style
+			# Easy for small fast ships to dodge, deadly to capitals
+			_show_turbolaser_charge()
+			var turbo_projectile = vnp_main.get_projectile()
+			turbo_projectile.init({
+				"team": ship_data.team,
+				"weapon_type": VnpTypes.WeaponType.TURBOLASER,
+				"damage": total_damage,
+				"start_position": self.global_position,
+				"start_rotation": self.rotation,
+				"target_id": target_id,
+				"is_factory_target": is_factory_target,
+				"turbolaser_speed": ship_stats.get("turbolaser_speed", 180),
+				"turbolaser_size": ship_stats.get("turbolaser_size", 12),
+				"store": store,
+				"vnp_main": vnp_main,
+			})
 
 func _fire_void_tendril(target_id: int, target_data: Dictionary, damage: float):
-	"""Fire void tendril attack - reaching tendrils of ancient void energy"""
+	"""Fire void tendril attack - reaching tendrils of ancient void energy - MORE VISIBLE"""
 	var tendril_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.VOID_TENDRIL)
 	var target_pos = target_data.position
 
-	# Create multiple wispy tendrils reaching toward target
-	for i in range(3):
+	# Create multiple wispy tendrils reaching toward target - thicker and brighter
+	for i in range(4):  # More tendrils
 		var tendril = Line2D.new()
-		tendril.width = 3.0 + randf() * 2.0
-		tendril.default_color = Color(tendril_color.r, tendril_color.g, tendril_color.b, 0.7)
+		tendril.width = 5.0 + randf() * 3.0  # Thicker
+		tendril.default_color = Color(tendril_color.r * 1.3, tendril_color.g * 1.3, tendril_color.b * 1.3, 0.85)
 		tendril.z_index = 5
 
 		# Create wavy tendril path
 		var points = []
-		var segments = 8
+		var segments = 10  # More segments for smoother waves
 		var local_target = to_local(target_pos)
 		for j in range(segments + 1):
 			var t = float(j) / segments
 			var base_pos = Vector2.ZERO.lerp(local_target, t)
 			# Add waviness that's perpendicular to direction
 			var perp = local_target.normalized().orthogonal()
-			var wave = sin(t * PI * 3 + i * PI / 3) * (20 - t * 15)  # Waves diminish near target
+			var wave = sin(t * PI * 3 + i * PI / 4) * (30 - t * 20)  # Larger waves
 			points.append(base_pos + perp * wave)
 		tendril.points = PackedVector2Array(points)
 		add_child(tendril)
 
 		# Animate tendril - reaches out then fades
 		var tendril_tween = create_tween()
-		tendril_tween.tween_property(tendril, "modulate:a", 0.0, 0.3).set_delay(0.1 + i * 0.05)
+		tendril_tween.tween_property(tendril, "modulate:a", 0.0, 0.4).set_delay(0.1 + i * 0.05)
 		tendril_tween.tween_callback(func(): tendril.queue_free())
 
-	# Void pulse at our position
+	# Add a bright core tendril through the center
+	var core_tendril = Line2D.new()
+	core_tendril.width = 3.0
+	core_tendril.default_color = Color(1.0, 1.0, 0.9, 0.9)  # Bright white-yellow
+	core_tendril.z_index = 6
+	core_tendril.add_point(Vector2.ZERO)
+	core_tendril.add_point(to_local(target_pos))
+	add_child(core_tendril)
+
+	var core_tween = create_tween()
+	core_tween.tween_property(core_tendril, "modulate:a", 0.0, 0.2)
+	core_tween.tween_callback(func(): core_tendril.queue_free())
+
+	# Void pulse at our position - larger
 	var pulse = Line2D.new()
-	pulse.width = 4.0
+	pulse.width = 6.0  # Thicker
 	pulse.default_color = VnpTypes.PROGENITOR_PULSE
 	var pulse_points = []
 	for k in range(17):
 		var angle = k * (PI * 2 / 16)
-		pulse_points.append(Vector2(cos(angle), sin(angle)) * 15)
+		pulse_points.append(Vector2(cos(angle), sin(angle)) * 20)  # Larger
 	pulse.points = PackedVector2Array(pulse_points)
 	add_child(pulse)
 
 	var pulse_tween = create_tween()
 	pulse_tween.set_parallel(true)
-	pulse_tween.tween_property(pulse, "scale", Vector2(2.5, 2.5), 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	pulse_tween.tween_property(pulse, "modulate:a", 0.0, 0.2)
+	pulse_tween.tween_property(pulse, "scale", Vector2(3.0, 3.0), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	pulse_tween.tween_property(pulse, "modulate:a", 0.0, 0.25)
 	pulse_tween.tween_callback(func(): pulse.queue_free())
 
 	# Absorption effect at target
@@ -1828,41 +2135,55 @@ func _fire_void_tendril(target_id: int, target_data: Dictionary, damage: float):
 
 
 func _show_turbolaser_charge():
-	# Dramatic charging effect before turbolaser fires
+	# Dramatic charging effect before turbolaser fires - MORE VISIBLE
 	var turbo_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.TURBOLASER)
 
-	# Big charging glow at center
+	# Big charging glow at center - larger
 	var charge = Polygon2D.new()
 	var charge_points = []
 	for i in range(13):
 		var angle = i * (PI * 2 / 12)
-		charge_points.append(Vector2(cos(angle), sin(angle)) * 20)
+		charge_points.append(Vector2(cos(angle), sin(angle)) * 30)  # Larger
 	charge.polygon = PackedVector2Array(charge_points)
-	charge.color = Color(turbo_color.r, turbo_color.g, turbo_color.b, 0.8)
+	charge.color = Color(turbo_color.r * 1.2, turbo_color.g * 1.2, turbo_color.b * 1.2, 0.9)
 	add_child(charge)
 
-	# Expanding ring
+	# Bright core flash
+	var core = Polygon2D.new()
+	var core_points = []
+	for i in range(9):
+		var angle = i * (PI * 2 / 8)
+		core_points.append(Vector2(cos(angle), sin(angle)) * 12)
+	core.polygon = PackedVector2Array(core_points)
+	core.color = Color(1.0, 1.0, 1.0, 0.95)  # White-hot core
+	add_child(core)
+
+	# Expanding ring - larger
 	var ring = Line2D.new()
-	ring.width = 6.0
-	ring.default_color = turbo_color.lightened(0.3)
+	ring.width = 8.0
+	ring.default_color = turbo_color.lightened(0.4)
 	var ring_points = []
 	for i in range(25):
 		var angle = i * (PI * 2 / 24)
-		ring_points.append(Vector2(cos(angle), sin(angle)) * 30)
+		ring_points.append(Vector2(cos(angle), sin(angle)) * 40)  # Larger
 	ring.points = PackedVector2Array(ring_points)
 	add_child(ring)
 
 	# Animate charge and ring
 	var charge_tween = create_tween()
 	charge_tween.set_parallel(true)
-	charge_tween.tween_property(charge, "scale", Vector2(2.0, 2.0), 0.2).from(Vector2(0.5, 0.5))
-	charge_tween.tween_property(charge, "modulate:a", 0.0, 0.3)
+	charge_tween.tween_property(charge, "scale", Vector2(2.5, 2.5), 0.25).from(Vector2(0.5, 0.5))
+	charge_tween.tween_property(charge, "modulate:a", 0.0, 0.35)
 	charge_tween.tween_callback(func(): charge.queue_free())
+
+	var core_tween = create_tween()
+	core_tween.tween_property(core, "modulate:a", 0.0, 0.15)
+	core_tween.tween_callback(func(): core.queue_free())
 
 	var ring_tween = create_tween()
 	ring_tween.set_parallel(true)
-	ring_tween.tween_property(ring, "scale", Vector2(3.0, 3.0), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	ring_tween.tween_property(ring, "modulate:a", 0.0, 0.25)
+	ring_tween.tween_property(ring, "scale", Vector2(3.5, 3.5), 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	ring_tween.tween_property(ring, "modulate:a", 0.0, 0.3)
 	ring_tween.tween_callback(func(): ring.queue_free())
 
 func _apply_styles():
@@ -2033,25 +2354,39 @@ func _fire_pdc_burst(target_pos: Vector2):
 
 	var pdc_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.PDC)
 
-	# Create 3-4 tracer lines (reduced for performance)
-	var tracer_count = randi_range(3, 4)
+	# Create 4-5 tracer lines - more visible
+	var tracer_count = randi_range(4, 5)
 	for i in range(tracer_count):
+		# Outer glow tracer
+		var glow_tracer = Line2D.new()
+		glow_tracer.width = 6.0  # Wide glow
+		glow_tracer.default_color = Color(pdc_color.r, pdc_color.g, pdc_color.b, 0.4)
+
+		# Bright core tracer
 		var tracer = Line2D.new()
-		tracer.width = 2.5  # Thicker tracers
-		tracer.default_color = pdc_color
+		tracer.width = 3.0  # Thicker core
+		tracer.default_color = Color(pdc_color.r * 1.3, pdc_color.g * 1.3, pdc_color.b * 1.3, 1.0)
 
 		# Spread pattern
-		var spread = Vector2(randf_range(-20, 20), randf_range(-20, 20))
+		var spread = Vector2(randf_range(-25, 25), randf_range(-25, 25))
 		var end_pos = target_pos + spread
 
+		glow_tracer.add_point(global_position)
+		glow_tracer.add_point(end_pos)
 		tracer.add_point(global_position)
 		tracer.add_point(end_pos)
+
+		get_tree().root.add_child(glow_tracer)
 		get_tree().root.add_child(tracer)
 
 		# Quick fade
 		var tween = get_tree().create_tween()
-		tween.tween_property(tracer, "modulate:a", 0.0, 0.1)
+		tween.tween_property(tracer, "modulate:a", 0.0, 0.12)
 		tween.tween_callback(func(): tracer.queue_free())
+
+		var glow_tween = get_tree().create_tween()
+		glow_tween.tween_property(glow_tracer, "modulate:a", 0.0, 0.15)
+		glow_tween.tween_callback(func(): glow_tracer.queue_free())
 
 	# Skip GPU particles for PDC - too expensive for high fire rate
 	# Just use the muzzle flash instead
@@ -2088,13 +2423,17 @@ func _intercept_missile(missile_node):
 	missile_node.queue_free()
 
 
+var shield_flare_cooldown: float = 0.0
+
 func _run_shield_defense(delta, state):
 	if not is_instance_valid(shield_bubble):
 		return
 
+	shield_flare_cooldown -= delta
+
 	# Shield provides damage reduction to nearby allies
-	# This is handled in the damage reducer, we just update visual feedback here
 	var shield_radius = ship_stats.get("shield_radius", 120)
+	var shield_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.SHIELD)
 
 	# Count protected allies for visual feedback
 	var protected_count = 0
@@ -2105,11 +2444,52 @@ func _run_shield_defense(delta, state):
 			if dist <= shield_radius:
 				protected_count += 1
 
-	# Brighten shield based on protection activity
+	# SPECTACULAR protection visuals
 	if protected_count > 0:
-		shield_bubble.width = 4.0
+		# Intensify shield when protecting
+		if is_instance_valid(shield_outer_ring):
+			shield_outer_ring.width = 6.0
+			shield_outer_ring.default_color = Color(shield_color.r * 1.3, shield_color.g * 1.3, shield_color.b * 1.3, 0.8)
+		if is_instance_valid(shield_inner_glow):
+			shield_inner_glow.width = 18.0
+			shield_inner_glow.default_color = Color(shield_color.r, shield_color.g, shield_color.b, 0.4)
+
+		# Spawn protection flares occasionally
+		if shield_flare_cooldown <= 0:
+			shield_flare_cooldown = 0.3
+			_spawn_shield_flare(shield_radius, shield_color)
 	else:
-		shield_bubble.width = 2.0
+		# Return to normal
+		if is_instance_valid(shield_outer_ring):
+			shield_outer_ring.width = 4.0
+			shield_outer_ring.default_color = Color(shield_color.r, shield_color.g, shield_color.b, 0.6)
+		if is_instance_valid(shield_inner_glow):
+			shield_inner_glow.width = 12.0
+			shield_inner_glow.default_color = Color(shield_color.r * 1.2, shield_color.g * 1.2, shield_color.b * 1.2, 0.25)
+
+
+func _spawn_shield_flare(radius: float, color: Color):
+	# Random position on shield perimeter
+	var angle = randf() * TAU
+	var flare_pos = Vector2(cos(angle), sin(angle)) * radius
+
+	# Flare burst
+	var flare = Polygon2D.new()
+	var flare_points = []
+	for i in range(7):
+		var a = i * (TAU / 6)
+		flare_points.append(Vector2(cos(a), sin(a)) * 8)
+	flare.polygon = PackedVector2Array(flare_points)
+	flare.color = Color(color.r * 1.5, color.g * 1.5, color.b * 1.5, 0.9)
+	flare.position = flare_pos
+	add_child(flare)
+
+	# Animate flare
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(flare, "scale", Vector2(2.5, 2.5), 0.2).from(Vector2(0.5, 0.5))
+	tween.tween_property(flare, "modulate:a", 0.0, 0.25)
+	tween.tween_callback(func(): flare.queue_free())
 
 
 func _run_gravity_defense(delta, state):
@@ -2141,14 +2521,14 @@ func _run_gravity_defense(delta, state):
 
 
 func show_deflection_effect(projectile_pos: Vector2, deflect_direction: Vector2):
-	# Visual feedback when a railgun is deflected
+	# SPECTACULAR DEFLECTION - Ripples, sparks, and energy discharge
 	var gravity_color = VnpTypes.get_weapon_color(ship_data.team, VnpTypes.WeaponType.GRAVITY)
 
-	# Ripple wave from point of deflection
+	# === RIPPLE WAVE - Expanding shockwave from deflection point ===
 	var ripple = Line2D.new()
 	ripple.global_position = projectile_pos
-	ripple.width = 4.0
-	ripple.default_color = Color(gravity_color.r * 1.5, gravity_color.g * 1.5, gravity_color.b * 1.5, 0.8)
+	ripple.width = 6.0
+	ripple.default_color = Color(gravity_color.r * 1.5, gravity_color.g * 1.5, gravity_color.b * 1.5, 0.9)
 	var ripple_points = []
 	for i in range(33):
 		var angle = i * (PI * 2 / 32)
@@ -2159,15 +2539,63 @@ func show_deflection_effect(projectile_pos: Vector2, deflect_direction: Vector2)
 	# Expand and fade
 	var tween = get_tree().create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(ripple, "scale", Vector2(6, 6), 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(ripple, "modulate:a", 0.0, 0.3)
+	tween.tween_property(ripple, "scale", Vector2(8, 8), 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(ripple, "modulate:a", 0.0, 0.35)
 	tween.tween_callback(func(): ripple.queue_free())
+
+	# === SECOND RIPPLE - Delayed follow-up ===
+	var ripple2 = Line2D.new()
+	ripple2.global_position = projectile_pos
+	ripple2.width = 3.0
+	ripple2.default_color = Color(gravity_color.r, gravity_color.g, gravity_color.b, 0.6)
+	ripple2.points = PackedVector2Array(ripple_points)
+	get_tree().root.add_child(ripple2)
+
+	var tween2 = get_tree().create_tween()
+	tween2.set_parallel(true)
+	tween2.tween_property(ripple2, "scale", Vector2(5, 5), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT).set_delay(0.05)
+	tween2.tween_property(ripple2, "modulate:a", 0.0, 0.25).set_delay(0.05)
+	tween2.tween_callback(func(): ripple2.queue_free())
+
+	# === SPARKS - Energy discharge flying outward ===
+	for i in range(6):
+		var spark = Line2D.new()
+		spark.global_position = projectile_pos
+		spark.width = 3.0
+		spark.default_color = Color(1.0, 1.0, 0.9, 0.9)  # Bright white-yellow
+
+		var spark_angle = randf() * TAU
+		var spark_length = randf_range(15, 30)
+		spark.add_point(Vector2.ZERO)
+		spark.add_point(Vector2(cos(spark_angle), sin(spark_angle)) * spark_length)
+		get_tree().root.add_child(spark)
+
+		# Animate spark flying outward
+		var spark_tween = get_tree().create_tween()
+		spark_tween.set_parallel(true)
+		var end_pos = projectile_pos + Vector2(cos(spark_angle), sin(spark_angle)) * randf_range(40, 80)
+		spark_tween.tween_property(spark, "global_position", end_pos, 0.2)
+		spark_tween.tween_property(spark, "modulate:a", 0.0, 0.2)
+		spark_tween.tween_callback(func(): spark.queue_free())
+
+	# === DEFLECTION ARC - Shows the bent trajectory ===
+	var arc = Line2D.new()
+	arc.global_position = projectile_pos
+	arc.width = 4.0
+	arc.default_color = Color(gravity_color.r * 1.3, gravity_color.g * 1.3, gravity_color.b * 1.3, 0.7)
+	arc.add_point(Vector2.ZERO)
+	arc.add_point(deflect_direction * 50)
+	get_tree().root.add_child(arc)
+
+	var arc_tween = get_tree().create_tween()
+	arc_tween.tween_property(arc, "modulate:a", 0.0, 0.3)
+	arc_tween.tween_callback(func(): arc.queue_free())
 
 	# Brief flash on gravity well
 	if is_instance_valid(gravity_well):
 		var flash_tween = create_tween()
-		flash_tween.tween_property(gravity_well, "modulate", Color(1.5, 1.5, 1.5, 1.2), 0.05)
-		flash_tween.tween_property(gravity_well, "modulate", Color.WHITE, 0.2)
+		flash_tween.tween_property(gravity_well, "modulate", Color(1.8, 1.8, 2.0, 1.3), 0.05)
+		flash_tween.tween_property(gravity_well, "modulate", Color.WHITE, 0.25)
 
 
 func _get_strategic_point_damage_bonus(state: Dictionary, team: int) -> float:
@@ -2728,20 +3156,16 @@ func _calculate_swarm_offset(state: Dictionary) -> Vector2:
 
 
 func _absorb_target(target_id: int):
-	"""Absorb a ship - drone sacrifices itself to consume the target"""
+	"""Absorb a ship - drone sacrifices itself to consume the target.
+	Note: Instability is added when the DRONE dies, not when it absorbs.
+	This creates correct incentive: players must KILL drones to win."""
 	# Dispatch absorption - removes BOTH the target and this drone
 	store.dispatch({
 		"type": "CONVERGENCE_ABSORB_SHIP",
 		"ship_id": target_id
 	})
 
-	# Add instability from absorption (drones contribute to cycle ending)
-	store.dispatch({
-		"type": "CONVERGENCE_ADD_INSTABILITY",
-		"amount": VnpTypes.CONVERGENCE_TIMING["instability_per_sacrifice"]
-	})
-
-	# Destroy self after absorbing
+	# Drone self-destructs - instability added via _on_drone_death when this damage kills us
 	store.dispatch({
 		"type": "DAMAGE_SHIP",
 		"ship_id": ship_data.id,

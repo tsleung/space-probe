@@ -43,6 +43,9 @@ signal game_ended(is_victory: bool, reason: String)
 
 var _state: Dictionary = _MCSTypes.create_colony_state()
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var _balance: Dictionary = {}
+
+const BALANCE_PATH = "res://data/games/mars_colony_sim/balance.json"
 
 # ============================================================================
 # INITIALIZATION
@@ -52,9 +55,77 @@ func _init():
 	# Ensure state is initialized immediately (not waiting for _ready)
 	if _state.is_empty():
 		_state = _MCSTypes.create_colony_state()
+	# Load balance configuration
+	_balance = _load_balance()
 
 func _ready():
 	pass  # State already initialized in _init
+
+## Load balance configuration from JSON
+static func _load_balance() -> Dictionary:
+	if not FileAccess.file_exists(BALANCE_PATH):
+		push_warning("MCSStore: balance.json not found at %s" % BALANCE_PATH)
+		return _get_default_balance()
+
+	var file = FileAccess.open(BALANCE_PATH, FileAccess.READ)
+	if not file:
+		push_warning("MCSStore: Failed to open balance.json")
+		return _get_default_balance()
+
+	var json = JSON.new()
+	var error = json.parse(file.get_as_text())
+	file.close()
+
+	if error != OK:
+		push_warning("MCSStore: Failed to parse balance.json: %s" % json.get_error_message())
+		return _get_default_balance()
+
+	return json.data
+
+## Default balance values (fallback if file not found)
+static func _get_default_balance() -> Dictionary:
+	return {
+		"consumption": {
+			"food_per_colonist_per_year": 50,
+			"water_per_colonist_per_year": 20,
+			"oxygen_per_colonist_per_year": 5,
+			"power_per_colonist": 2.0
+		},
+		"difficulty": {
+			"consumption_multiplier": 1.0,
+			"starting_resource_multiplier": 1.0,
+			"upgrade_cost_multiplier": 1.0
+		},
+		"starting_conditions": {
+			"initial_colonists": 24,
+			"starting_resources": {
+				"food": 10000,
+				"water": 5000,
+				"oxygen": 2500,
+				"building_materials": 3000,
+				"machine_parts": 800,
+				"medicine": 200,
+				"fuel": 800
+			}
+		}
+	}
+
+## Get balance configuration (read-only)
+func get_balance() -> Dictionary:
+	return _balance.duplicate(true)
+
+## Get consumption rates with difficulty multiplier applied
+func get_consumption_rates() -> Dictionary:
+	var consumption = _balance.get("consumption", {})
+	var difficulty = _balance.get("difficulty", {})
+	var multiplier = difficulty.get("consumption_multiplier", 1.0)
+
+	return {
+		"food": consumption.get("food_per_colonist_per_year", 50) * multiplier,
+		"water": consumption.get("water_per_colonist_per_year", 20) * multiplier,
+		"oxygen": consumption.get("oxygen_per_colonist_per_year", 5) * multiplier,
+		"power": consumption.get("power_per_colonist", 2.0) * multiplier
+	}
 
 ## Get current state (read-only copy)
 func get_state() -> Dictionary:
@@ -181,7 +252,7 @@ func start_new_colony(founder_count: int = 24) -> void:
 
 		founders.append(colonist)
 
-	dispatch(_MCSReducer.action_start_new_colony(founders, _rng.seed))
+	dispatch(_MCSReducer.action_start_new_colony(founders, _rng.seed, _balance))
 
 func advance_year() -> void:
 	if is_game_over():
@@ -190,6 +261,9 @@ func advance_year() -> void:
 	# Generate random values for the year
 	var random_count = _state.get("colonists", []).size() * 10 + 50
 	dispatch_with_random(_MCSReducer.action_advance_year([]), random_count)
+
+	# Progress all ongoing building upgrades
+	progress_upgrades()
 
 	# Check for events
 	_check_yearly_events()
@@ -214,6 +288,7 @@ func advance_week() -> void:
 	# If year changed (week 52 → week 1), do yearly events
 	if new_year != old_year:
 		year_advanced.emit(new_year)
+		progress_upgrades()  # Progress all ongoing building upgrades
 		_check_yearly_events()
 		dispatch(_MCSReducer.action_check_victory())
 
@@ -236,6 +311,10 @@ func repair_building(building_id: String) -> void:
 
 func upgrade_building(building_id: String) -> void:
 	dispatch(_MCSReducer.action_upgrade_building(building_id))
+
+func progress_upgrades() -> void:
+	"""Progress all ongoing building upgrades - called each year"""
+	dispatch(_MCSReducer.action_progress_upgrades())
 
 func assign_worker(colonist_id: String, building_id: String) -> void:
 	dispatch(_MCSReducer.action_assign_worker(colonist_id, building_id))
@@ -295,7 +374,7 @@ func project_next_year() -> Dictionary:
 	var resources = _state.get("resources", {})
 
 	var production = _MCSEconomy.calc_yearly_production(buildings, colonists, resources)
-	var consumption = _MCSEconomy.calc_yearly_consumption(colonists, buildings)
+	var consumption = _MCSEconomy.calc_yearly_consumption(colonists, buildings, _balance)
 
 	var net: Dictionary = {}
 	for key in production.keys():
@@ -306,7 +385,7 @@ func project_next_year() -> Dictionary:
 		"consumption": consumption,
 		"net": net,
 		"food_surplus_years": resources.get("food", 0.0) / maxf(1, consumption.get("food", 1)),
-		"power_balance": _MCSEconomy.calc_power_balance(buildings, colonists),
+		"power_balance": _MCSEconomy.calc_power_balance(buildings, colonists, _balance),
 		"housing_balance": _MCSEconomy.calc_housing_balance(buildings, colonists)
 	}
 

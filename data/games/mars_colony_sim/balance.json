@@ -1,31 +1,43 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
+
+  "_comment": "AUTHORITATIVE BALANCE - All game systems should read from here",
 
   "starting_conditions": {
     "initial_colonists": 24,
     "starting_resources": {
-      "food": 8000,
-      "water": 4000,
-      "oxygen": 2000,
-      "building_materials": 2000,
-      "machine_parts": 500,
-      "medicine": 150,
-      "fuel": 600
+      "food": 10000,
+      "water": 5000,
+      "oxygen": 2500,
+      "building_materials": 3000,
+      "machine_parts": 800,
+      "medicine": 200,
+      "fuel": 800
     },
     "starting_buildings": [
       {"type": "HAB_POD", "count": 4},
-      {"type": "GREENHOUSE", "count": 2},
-      {"type": "SOLAR_ARRAY", "count": 3},
+      {"type": "GREENHOUSE", "count": 3},
+      {"type": "SOLAR_ARRAY", "count": 4},
       {"type": "WATER_EXTRACTOR", "count": 2},
-      {"type": "WORKSHOP", "count": 1}
+      {"type": "OXYGENATOR", "count": 1},
+      {"type": "WORKSHOP", "count": 1},
+      {"type": "MEDICAL_BAY", "count": 1}
     ]
   },
 
   "consumption": {
-    "food_per_colonist_per_year": 600,
-    "water_per_colonist_per_year": 150,
-    "oxygen_per_colonist_per_year": 30,
-    "power_per_colonist": 4.0
+    "_comment": "Per colonist per year. Efficient future tech = low consumption",
+    "food_per_colonist_per_year": 50,
+    "water_per_colonist_per_year": 20,
+    "oxygen_per_colonist_per_year": 5,
+    "power_per_colonist": 2.0
+  },
+
+  "difficulty": {
+    "_comment": "Multiplier for consumption (1.0 = normal, 1.3 = hard, 1.5 = impossible)",
+    "consumption_multiplier": 1.0,
+    "starting_resource_multiplier": 1.0,
+    "upgrade_cost_multiplier": 1.0
   },
 
   "population": {

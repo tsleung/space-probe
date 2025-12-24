@@ -9,6 +9,10 @@ const Phase2Types = preload("res://scripts/mars_odyssey_trek/phase2/phase2_types
 @onready var controller = $"../Phase2Controller"
 @onready var hud = $"../HUD"
 @onready var speed_controls = $"../SpeedControls"
+@onready var ship_systems = $"../ShipSystemsIntegration"
+@onready var crisis_controller = $"../CrisisController"
+@onready var effects = $"../Effects"
+@onready var ship_view = $"../ShipView"
 
 func _ready() -> void:
 	await get_tree().process_frame
@@ -16,6 +20,11 @@ func _ready() -> void:
 	# Connect controller to store
 	if controller and store:
 		controller.connect_to_store(store)
+
+	# Wire up ship systems integration
+	if controller and ship_systems:
+		controller.setup_ship_systems(ship_systems, crisis_controller, effects, ship_view)
+		print("[UI] Ship systems wired to controller")
 
 	# Connect speed buttons
 	if speed_controls:

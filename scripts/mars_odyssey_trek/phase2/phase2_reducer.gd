@@ -21,7 +21,13 @@ enum ActionType {
 	BLOCK_SECTION,
 	START_REPAIR,
 	EVA_RETRIEVAL,
-	ADD_LOG
+	ADD_LOG,
+	# Ship Systems Integration actions
+	APPLY_POWER_DELTA,    # Power drain/generation from control surfaces
+	APPLY_RESOURCE_DRAIN, # Crisis resource drain (O2, water, food, etc.)
+	APPLY_CREW_DAMAGE,    # Crisis crew damage
+	BREAK_SYSTEM,         # Break a ship system (control surface)
+	REPAIR_SYSTEM         # Repair a ship system
 }
 
 # ============================================================================
@@ -68,6 +74,27 @@ static func action_add_log(message: String) -> Dictionary:
 	## Add a log message
 	return {"type": ActionType.ADD_LOG, "message": message}
 
+# Ship Systems Integration action creators
+static func action_apply_power_delta(delta: float) -> Dictionary:
+	## Apply power change from control surfaces (positive = generation, negative = drain)
+	return {"type": ActionType.APPLY_POWER_DELTA, "delta": delta}
+
+static func action_apply_resource_drain(resource: String, amount: float) -> Dictionary:
+	## Apply resource drain from crises (amount should be negative for drain)
+	return {"type": ActionType.APPLY_RESOURCE_DRAIN, "resource": resource, "amount": amount}
+
+static func action_apply_crew_damage(crew_index: int, damage: float) -> Dictionary:
+	## Apply damage to specific crew member from crisis
+	return {"type": ActionType.APPLY_CREW_DAMAGE, "crew_index": crew_index, "damage": damage}
+
+static func action_break_system(system_id: int, cause: String) -> Dictionary:
+	## Break a ship control surface system
+	return {"type": ActionType.BREAK_SYSTEM, "system_id": system_id, "cause": cause}
+
+static func action_repair_system(system_id: int) -> Dictionary:
+	## Repair a ship control surface system
+	return {"type": ActionType.REPAIR_SYSTEM, "system_id": system_id}
+
 # ============================================================================
 # MAIN REDUCER
 # ============================================================================
@@ -98,6 +125,17 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_eva_retrieval(state, action.container_id, action.random_value)
 		ActionType.ADD_LOG:
 			return _reduce_add_log(state, action.message)
+		# Ship Systems Integration
+		ActionType.APPLY_POWER_DELTA:
+			return _reduce_apply_power_delta(state, action.delta)
+		ActionType.APPLY_RESOURCE_DRAIN:
+			return _reduce_apply_resource_drain(state, action.resource, action.amount)
+		ActionType.APPLY_CREW_DAMAGE:
+			return _reduce_apply_crew_damage(state, action.crew_index, action.damage)
+		ActionType.BREAK_SYSTEM:
+			return _reduce_break_system(state, action.system_id, action.cause)
+		ActionType.REPAIR_SYSTEM:
+			return _reduce_repair_system(state, action.system_id)
 		_:
 			return state
 
@@ -1012,3 +1050,112 @@ static func get_journey_progress(state: Dictionary) -> float:
 	## Use total_hours for smoother progress (updates every hour not every day)
 	var total_hours = state.get("total_hours", state.current_day * Phase2Types.HOURS_PER_DAY)
 	return float(total_hours) / float(Phase2Types.TOTAL_TRAVEL_HOURS)
+
+# ============================================================================
+# SHIP SYSTEMS INTEGRATION REDUCERS
+# ============================================================================
+
+static func _reduce_apply_power_delta(state: Dictionary, delta: float) -> Dictionary:
+	## Apply power change from control surfaces
+	## delta is the per-second power change already scaled by the caller
+	var new_state = state.duplicate(true)
+	var resources = new_state.resources.duplicate(true)
+
+	if resources.has("power"):
+		var power = resources.power.duplicate()
+		power.current = clamp(power.current + delta, 0, power.max)
+		resources.power = power
+		new_state.resources = resources
+
+	return new_state
+
+static func _reduce_apply_resource_drain(state: Dictionary, resource: String, amount: float) -> Dictionary:
+	## Apply resource drain from crises
+	## Supports: oxygen, power, fuel (direct), food, water (container-based)
+	var new_state = state.duplicate(true)
+
+	if resource == "food" or resource == "water":
+		# Container-based resources
+		new_state = _consume_from_containers(new_state, resource, abs(amount) if amount < 0 else 0)
+		if amount > 0:
+			# Adding resources - find accessible container with space
+			var containers = new_state.storage_containers.duplicate()
+			var remaining = amount
+			for i in range(containers.size()):
+				if containers[i].accessible and remaining > 0:
+					var container = containers[i].duplicate()
+					var space = container[resource + "_max"] - container[resource]
+					var add_amt = min(space, remaining)
+					container[resource] = container[resource] + add_amt
+					remaining -= add_amt
+					containers[i] = container
+			new_state.storage_containers = containers
+		new_state.resources = Phase2Types.compute_resource_totals(new_state)
+	else:
+		# Direct resources (oxygen, power, fuel)
+		var resources = new_state.resources.duplicate(true)
+		if resources.has(resource):
+			var res = resources[resource].duplicate()
+			res.current = clamp(res.current + amount, 0, res.max)
+			resources[resource] = res
+			new_state.resources = resources
+
+	return new_state
+
+static func _reduce_apply_crew_damage(state: Dictionary, crew_index: int, damage: float) -> Dictionary:
+	## Apply damage to a specific crew member
+	var new_state = state.duplicate(true)
+	var crew = new_state.crew.duplicate()
+
+	if crew_index >= 0 and crew_index < crew.size():
+		var member = crew[crew_index].duplicate()
+		member.health = clamp(member.health - damage, 0, 100)
+		crew[crew_index] = member
+		new_state.crew = crew
+
+		if member.health <= 0:
+			new_state = _add_log_entry(new_state, "%s has died from injuries." % member.name)
+
+	return new_state
+
+static func _reduce_break_system(state: Dictionary, system_id: int, cause: String) -> Dictionary:
+	## Mark a ship system as broken in state
+	## The actual breaking is handled by ControlSurfaceManager, this just tracks it in store
+	var new_state = state.duplicate(true)
+
+	# Initialize broken_systems array if not present
+	if not new_state.has("broken_systems"):
+		new_state.broken_systems = []
+
+	var broken = new_state.broken_systems.duplicate()
+	if system_id not in broken:
+		broken.append(system_id)
+		new_state.broken_systems = broken
+		new_state = _add_log_entry(new_state, "SYSTEM FAILURE: %s (%s)" % [_get_system_name(system_id), cause])
+
+	return new_state
+
+static func _reduce_repair_system(state: Dictionary, system_id: int) -> Dictionary:
+	## Mark a ship system as repaired in state
+	var new_state = state.duplicate(true)
+
+	if new_state.has("broken_systems"):
+		var broken = new_state.broken_systems.duplicate()
+		broken.erase(system_id)
+		new_state.broken_systems = broken
+		new_state = _add_log_entry(new_state, "System repaired: %s" % _get_system_name(system_id))
+
+	return new_state
+
+static func _get_system_name(system_id: int) -> String:
+	## Get human-readable system name from ID
+	## These match ControlSurface.SurfaceId enum
+	match system_id:
+		0: return "Power Core"
+		1: return "Shields"
+		2: return "Engine"
+		3: return "Life Support"
+		4: return "Medical Bay"
+		5: return "Sensors"
+		6: return "Emergency Power"
+		_: return "Unknown System"

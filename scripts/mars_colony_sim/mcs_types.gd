@@ -114,6 +114,232 @@ enum PoliticalSystem {
 }
 
 # ============================================================================
+# BUILDING TIER SYSTEM - Production scales with tier, workers decrease
+# ============================================================================
+
+## Upgrade costs per tier transition (building_materials, machine_parts)
+## Costs balanced to be achievable with 1-2 factories
+const UPGRADE_COSTS = {
+	2: {"building_materials": 25, "machine_parts": 10},
+	3: {"building_materials": 50, "machine_parts": 20},
+	4: {"building_materials": 80, "machine_parts": 40},
+	5: {"building_materials": 120, "machine_parts": 60},  # Was 200/100 - too expensive!
+}
+
+## Time in years to complete each tier upgrade - FAST for optimal play
+const UPGRADE_DURATIONS = {
+	2: 1,   # 1 year to reach tier 2 (was 2)
+	3: 1,   # 1 year to reach tier 3 (was 2)
+	4: 2,   # 2 years to reach tier 4 (was 3)
+	5: 2,   # 2 years to reach tier 5 (was 4)
+}
+
+## Tier-based stats: production scales UP, workers scale DOWN
+## Key insight: Worker efficiency is the main driver for upgrades
+## Tier 5 = 3x production with ~50% workers needed
+const BUILDING_TIER_STATS = {
+	# === HOUSING ===
+	BuildingType.HAB_POD: {
+		1: {"housing_capacity": 4, "power": 5},
+		2: {"housing_capacity": 6, "power": 5},
+		3: {"housing_capacity": 8, "power": 5},
+		4: {"housing_capacity": 12, "power": 6},
+		5: {"housing_capacity": 20, "power": 8},
+	},
+	BuildingType.APARTMENT_BLOCK: {
+		1: {"housing_capacity": 20, "power": 25},
+		2: {"housing_capacity": 28, "power": 24},
+		3: {"housing_capacity": 38, "power": 23},
+		4: {"housing_capacity": 52, "power": 22},
+		5: {"housing_capacity": 75, "power": 20},
+	},
+	BuildingType.LUXURY_QUARTERS: {
+		1: {"housing_capacity": 8, "power": 15},
+		2: {"housing_capacity": 12, "power": 14},
+		3: {"housing_capacity": 16, "power": 13},
+		4: {"housing_capacity": 24, "power": 12},
+		5: {"housing_capacity": 35, "power": 10},
+	},
+
+	# === FOOD PRODUCTION ===
+	BuildingType.GREENHOUSE: {
+		1: {"production": {"food": 500}, "power": 15, "workers": 2},
+		2: {"production": {"food": 650}, "power": 14, "workers": 2},
+		3: {"production": {"food": 850}, "power": 13, "workers": 2},
+		4: {"production": {"food": 1100}, "power": 12, "workers": 1},
+		5: {"production": {"food": 1500}, "power": 10, "workers": 1},
+	},
+	BuildingType.HYDROPONICS: {
+		1: {"production": {"food": 800}, "power": 25, "workers": 2},
+		2: {"production": {"food": 1040}, "power": 24, "workers": 2},
+		3: {"production": {"food": 1360}, "power": 22, "workers": 2},
+		4: {"production": {"food": 1760}, "power": 20, "workers": 1},
+		5: {"production": {"food": 2400}, "power": 18, "workers": 1},
+	},
+
+	# === POWER ===
+	BuildingType.SOLAR_ARRAY: {
+		1: {"power_gen": 50, "workers": 0},
+		2: {"power_gen": 65, "workers": 0},
+		3: {"power_gen": 85, "workers": 0},
+		4: {"power_gen": 110, "workers": 0},
+		5: {"power_gen": 150, "workers": 0},
+	},
+	BuildingType.FISSION_REACTOR: {
+		1: {"power_gen": 200, "workers": 2},
+		2: {"power_gen": 280, "workers": 2},
+		3: {"power_gen": 380, "workers": 2},
+		4: {"power_gen": 500, "workers": 1},
+		5: {"power_gen": 700, "workers": 1},
+	},
+	BuildingType.FUSION_REACTOR: {
+		1: {"power_gen": 500, "workers": 3},
+		2: {"power_gen": 700, "workers": 3},
+		3: {"power_gen": 950, "workers": 2},
+		4: {"power_gen": 1300, "workers": 2},
+		5: {"power_gen": 2000, "workers": 1},
+	},
+
+	# === LIFE SUPPORT ===
+	BuildingType.WATER_EXTRACTOR: {
+		1: {"production": {"water": 400}, "power": 20, "workers": 1},
+		2: {"production": {"water": 520}, "power": 19, "workers": 1},
+		3: {"production": {"water": 680}, "power": 18, "workers": 1},
+		4: {"production": {"water": 880}, "power": 16, "workers": 0},  # Automated!
+		5: {"production": {"water": 1200}, "power": 15, "workers": 0},
+	},
+	BuildingType.OXYGENATOR: {
+		1: {"production": {"oxygen": 200}, "power": 15, "workers": 1},
+		2: {"production": {"oxygen": 260}, "power": 14, "workers": 1},
+		3: {"production": {"oxygen": 340}, "power": 13, "workers": 1},
+		4: {"production": {"oxygen": 440}, "power": 12, "workers": 0},
+		5: {"production": {"oxygen": 600}, "power": 10, "workers": 0},
+	},
+
+	# === INDUSTRY ===
+	BuildingType.WORKSHOP: {
+		1: {"production": {"machine_parts": 20}, "power": 30, "workers": 3},
+		2: {"production": {"machine_parts": 28}, "power": 28, "workers": 3},
+		3: {"production": {"machine_parts": 38}, "power": 26, "workers": 2},
+		4: {"production": {"machine_parts": 50}, "power": 24, "workers": 2},
+		5: {"production": {"machine_parts": 70}, "power": 20, "workers": 1},
+	},
+	BuildingType.FACTORY: {
+		1: {"production": {"machine_parts": 50, "building_materials": 30}, "power": 60, "workers": 6},
+		2: {"production": {"machine_parts": 70, "building_materials": 42}, "power": 55, "workers": 5},
+		3: {"production": {"machine_parts": 95, "building_materials": 57}, "power": 50, "workers": 4},
+		4: {"production": {"machine_parts": 130, "building_materials": 78}, "power": 45, "workers": 3},
+		5: {"production": {"machine_parts": 180, "building_materials": 108}, "power": 40, "workers": 2},
+	},
+
+	# === SERVICES ===
+	BuildingType.MEDICAL_BAY: {
+		1: {"health_boost": 5, "power": 10, "workers": 2},
+		2: {"health_boost": 8, "power": 10, "workers": 2},
+		3: {"health_boost": 12, "power": 10, "workers": 2},
+		4: {"health_boost": 18, "power": 10, "workers": 1},
+		5: {"health_boost": 25, "power": 10, "workers": 1},
+	},
+	BuildingType.HOSPITAL: {
+		1: {"health_boost": 15, "power": 30, "workers": 4},
+		2: {"health_boost": 22, "power": 28, "workers": 4},
+		3: {"health_boost": 32, "power": 26, "workers": 3},
+		4: {"health_boost": 45, "power": 24, "workers": 2},
+		5: {"health_boost": 65, "power": 20, "workers": 2},
+	},
+	BuildingType.SCHOOL: {
+		1: {"education_capacity": 10, "power": 8, "workers": 2},
+		2: {"education_capacity": 15, "power": 8, "workers": 2},
+		3: {"education_capacity": 22, "power": 8, "workers": 2},
+		4: {"education_capacity": 32, "power": 8, "workers": 1},
+		5: {"education_capacity": 50, "power": 8, "workers": 1},
+	},
+	BuildingType.LAB: {
+		1: {"research_boost": 10, "power": 20, "workers": 2},
+		2: {"research_boost": 15, "power": 19, "workers": 2},
+		3: {"research_boost": 22, "power": 18, "workers": 2},
+		4: {"research_boost": 32, "power": 16, "workers": 1},
+		5: {"research_boost": 50, "power": 15, "workers": 1},
+	},
+	BuildingType.RESEARCH_CENTER: {
+		1: {"research_boost": 25, "power": 40, "workers": 4},
+		2: {"research_boost": 38, "power": 38, "workers": 4},
+		3: {"research_boost": 55, "power": 35, "workers": 3},
+		4: {"research_boost": 80, "power": 32, "workers": 2},
+		5: {"research_boost": 120, "power": 28, "workers": 2},
+	},
+
+	# === COMMUNICATIONS ===
+	BuildingType.COMMUNICATIONS: {
+		1: {"research_boost": 5, "morale_boost": 2, "power": 10, "workers": 1},
+		2: {"research_boost": 10, "morale_boost": 4, "power": 10, "workers": 1},
+		3: {"research_boost": 15, "morale_boost": 6, "power": 10, "workers": 1},
+		4: {"research_boost": 25, "morale_boost": 10, "power": 10, "workers": 0},
+		5: {"research_boost": 40, "morale_boost": 15, "power": 10, "workers": 0},
+	},
+
+	# === SOCIAL ===
+	BuildingType.RECREATION_CENTER: {
+		1: {"morale_boost": 8, "power": 15, "workers": 1},
+		2: {"morale_boost": 12, "power": 14, "workers": 1},
+		3: {"morale_boost": 18, "power": 13, "workers": 1},
+		4: {"morale_boost": 26, "power": 12, "workers": 0},
+		5: {"morale_boost": 40, "power": 10, "workers": 0},
+	},
+	BuildingType.TEMPLE: {
+		1: {"morale_boost": 10, "power": 5, "workers": 1},
+		2: {"morale_boost": 15, "power": 5, "workers": 1},
+		3: {"morale_boost": 22, "power": 5, "workers": 1},
+		4: {"morale_boost": 32, "power": 5, "workers": 0},
+		5: {"morale_boost": 50, "power": 5, "workers": 0},
+	},
+
+	# === MEGASTRUCTURES ===
+	BuildingType.MASS_DRIVER: {
+		1: {"export_capacity": 100, "power": 100, "workers": 4},
+		2: {"export_capacity": 150, "power": 95, "workers": 4},
+		3: {"export_capacity": 220, "power": 90, "workers": 3},
+		4: {"export_capacity": 320, "power": 85, "workers": 2},
+		5: {"export_capacity": 500, "power": 80, "workers": 2},
+	},
+	BuildingType.SPACE_ELEVATOR: {
+		1: {"export_capacity": 200, "import_capacity": 50, "power": 150, "workers": 6},
+		2: {"export_capacity": 300, "import_capacity": 80, "power": 140, "workers": 5},
+		3: {"export_capacity": 450, "import_capacity": 120, "power": 130, "workers": 4},
+		4: {"export_capacity": 650, "import_capacity": 180, "power": 120, "workers": 3},
+		5: {"export_capacity": 1000, "import_capacity": 300, "power": 100, "workers": 2},
+	},
+}
+
+## Get tier stats for a building type at a specific tier
+static func get_tier_stats(building_type: BuildingType, tier: int) -> Dictionary:
+	if not BUILDING_TIER_STATS.has(building_type):
+		# Fallback for buildings without tier progression
+		return {"tier": tier}
+
+	var tier_data = BUILDING_TIER_STATS[building_type]
+	tier = clampi(tier, 1, 5)
+	if tier_data.has(tier):
+		return tier_data[tier].duplicate(true)
+	return {"tier": tier}
+
+## Get upgrade cost for transitioning to a specific tier
+static func get_upgrade_cost(target_tier: int) -> Dictionary:
+	if UPGRADE_COSTS.has(target_tier):
+		return UPGRADE_COSTS[target_tier].duplicate(true)
+	return {}
+
+## Get upgrade duration in years for transitioning to a specific tier
+static func get_upgrade_duration(target_tier: int) -> int:
+	if UPGRADE_DURATIONS.has(target_tier):
+		return UPGRADE_DURATIONS[target_tier]
+	return 2  # Default 2 years
+
+## Check if a building type has tier progression defined
+static func has_tier_progression(building_type: BuildingType) -> bool:
+	return BUILDING_TIER_STATS.has(building_type)
+
+# ============================================================================
 # FACTORY FUNCTIONS - Colonist
 # ============================================================================
 

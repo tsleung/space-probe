@@ -194,6 +194,40 @@ func _on_body_exited(body: Node2D) -> void:
 func get_work_position() -> Vector2:
 	return global_position + work_position_marker.position
 
+func get_random_idle_position() -> Vector2:
+	## Get a random position within the room for varied idle spots
+	var padding = 10.0
+	var half_w = (room_size.x / 2) - padding
+	var half_h = (room_size.y / 2) - padding
+
+	var offset = Vector2(
+		randf_range(-half_w, half_w),
+		randf_range(-half_h, half_h)
+	)
+	return global_position + offset
+
+func get_idle_spots() -> Array[Vector2]:
+	## Get predefined idle spots within the room (corners, center, sides)
+	var spots: Array[Vector2] = []
+	var padding = 12.0
+	var hw = (room_size.x / 2) - padding
+	var hh = (room_size.y / 2) - padding
+
+	# Center (work position)
+	spots.append(global_position)
+	# Four corners
+	spots.append(global_position + Vector2(-hw, -hh))
+	spots.append(global_position + Vector2(hw, -hh))
+	spots.append(global_position + Vector2(-hw, hh))
+	spots.append(global_position + Vector2(hw, hh))
+	# Midpoints
+	spots.append(global_position + Vector2(0, -hh))
+	spots.append(global_position + Vector2(0, hh))
+	spots.append(global_position + Vector2(-hw, 0))
+	spots.append(global_position + Vector2(hw, 0))
+
+	return spots
+
 func has_crew_with_role(role: String) -> bool:
 	for crew in crew_inside:
 		if crew.role == role:

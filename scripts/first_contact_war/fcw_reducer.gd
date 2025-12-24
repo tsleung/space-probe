@@ -271,12 +271,13 @@ static func _process_production_daily(state: Dictionary) -> Dictionary:
 
 static func _process_weekly_update(state: Dictionary, random_values: Array, random_idx: int) -> Dictionary:
 	## Full weekly processing - combat, evacuation, turn advancement
+	## Key change: Herald now uses detection-based targeting (see FCWHeraldAI)
 	var new_state = state.duplicate(true)
 
-	# Ship construction - advance queue
+	# Ship construction - advance queue (also tracks activity)
 	new_state = _process_ship_construction(new_state)
 
-	# Combat phase - resolve Herald attacks
+	# Combat phase - resolve Herald attacks (tracks combat activity)
 	var combat_result = _process_combat(new_state, random_values[random_idx] if random_idx < random_values.size() else 0.5)
 	new_state = combat_result.state
 
@@ -286,8 +287,14 @@ static func _process_weekly_update(state: Dictionary, random_values: Array, rand
 	# Weapon processing
 	new_state = _process_weapons(new_state, random_values[random_idx + 2] if random_idx + 2 < random_values.size() else 0.5)
 
-	# Herald advance - pick next target
-	new_state = _process_herald_advance(new_state)
+	# *** HERALD WEEKLY TURN ***
+	# This is the core of the new timeline model:
+	# 1. Updates zone signatures from this week's activity
+	# 2. Attacks current zone
+	# 3. Chooses next target based on signatures
+	# 4. Decays signatures for next week
+	# 5. Generates dramatic event messages
+	new_state = FCWHeraldAI.process_weekly_herald_turn(new_state)
 
 	# Evacuation
 	new_state = _process_evacuation(new_state)
@@ -321,7 +328,7 @@ static func _reduce_end_turn(state: Dictionary, random_values: Array) -> Diction
 
 	# 3. Entity movement - advance all entities based on physics
 	# (Handles warships, transports, AND Herald entity)
-	new_state = _process_entity_movement(new_state)
+	new_state = _process_entity_movement(new_state, random_values)
 
 	# 4. Detection update - Herald observes signatures, builds intel
 	new_state = _process_detection(new_state, random_values[random_idx] if random_idx < random_values.size() else 0.5)
@@ -408,6 +415,7 @@ static func _process_ship_construction(state: Dictionary) -> Dictionary:
 	var new_state = state.duplicate(true)
 	var new_queue: Array = []
 	var fleet = new_state.fleet.duplicate()
+	var ships_built_this_week = 0
 
 	for order in new_state.production_queue:
 		var updated = order.duplicate()
@@ -416,6 +424,7 @@ static func _process_ship_construction(state: Dictionary) -> Dictionary:
 		if updated.turns_remaining <= 0:
 			# Ship completed
 			fleet[order.ship_type] = fleet.get(order.ship_type, 0) + 1
+			ships_built_this_week += 1
 			new_state.event_log.append(FCWTypes.create_log_entry(
 				new_state.turn,
 				"%s completed" % FCWTypes.get_ship_name(order.ship_type)
@@ -425,6 +434,31 @@ static func _process_ship_construction(state: Dictionary) -> Dictionary:
 
 	new_state.production_queue = new_queue
 	new_state.fleet = fleet
+
+	# Track ship production activity (production happens at Earth)
+	if ships_built_this_week > 0:
+		new_state = _track_activity(new_state, "ships_built", FCWTypes.ZoneId.EARTH, ships_built_this_week)
+
+	return new_state
+
+# ============================================================================
+# ACTIVITY TRACKING (for Herald detection signatures)
+# ============================================================================
+
+static func _track_activity(state: Dictionary, activity_type: String, zone_id: int, amount: int = 1) -> Dictionary:
+	## Track activity that contributes to zone detection signatures
+	## activity_type: "ships_built", "ships_transited", "burns_detected", "combat_events", "evacuations"
+	var new_state = state.duplicate(true)
+	var activity = new_state.weekly_activity.duplicate(true)
+
+	if not activity.has(activity_type):
+		activity[activity_type] = {}
+
+	var zone_activity = activity[activity_type].duplicate()
+	zone_activity[zone_id] = zone_activity.get(zone_id, 0) + amount
+	activity[activity_type] = zone_activity
+	new_state.weekly_activity = activity
+
 	return new_state
 
 static func _find_nearest_controlled_zone(state: Dictionary, from_zone: int) -> int:
@@ -550,6 +584,9 @@ static func _process_combat(state: Dictionary, random_value: float) -> Dictionar
 	new_state.zones[target_zone_id] = zone
 	new_state.event_log.append(log_entry)
 
+	# Track combat activity (battles are VERY visible - explosions across the system!)
+	new_state = _track_activity(new_state, "combat_events", target_zone_id, 1)
+
 	return {"state": new_state, "battle_occurred": true}
 
 static func calc_zone_defense(state: Dictionary, zone_id: int) -> int:
@@ -604,9 +641,38 @@ static func _process_herald_advance(state: Dictionary) -> Dictionary:
 	var current_zone = herald.get("origin", FCWTypes.ZoneId.KUIPER)
 	var current_target = new_state.herald_attack_target
 
-	# If current target zone hasn't fallen yet and Herald is there, keep attacking
+	# If current target zone hasn't fallen yet and Herald is there:
+	# Check if we should try a different (weaker) target
 	var target_zone = new_state.zones[current_target]
 	if target_zone.status != FCWTypes.ZoneStatus.FALLEN and current_zone == current_target:
+		# Herald was repelled - look for an easier target
+		# Find weakest adjacent zone that isn't the current one
+		var adjacent_zones = FCWTypes.ZONE_CONNECTIONS.get(current_zone, [])
+		var weakest_adjacent = -1
+		var weakest_defense = 999999
+		for adj_id in adjacent_zones:
+			var adj_zone = new_state.zones.get(adj_id)
+			if adj_zone and adj_zone.status != FCWTypes.ZoneStatus.FALLEN:
+				var defense = calc_zone_defense(new_state, adj_id)
+				if defense < weakest_defense:
+					weakest_defense = defense
+					weakest_adjacent = adj_id
+
+		# If there's a weaker adjacent zone, move there
+		if weakest_adjacent >= 0 and weakest_adjacent != current_target:
+			var current_defense = calc_zone_defense(new_state, current_target)
+			# Move if adjacent zone is weaker OR if we've been attacking this zone for a while
+			if weakest_defense < current_defense * 0.8:
+				new_state = _set_herald_destination(new_state, weakest_adjacent, game_time)
+				new_state.herald_attack_target = weakest_adjacent
+				new_state.event_log.append(FCWTypes.create_log_entry(
+					new_state.turn,
+					"HERALD: Seeking weaker target - moving to %s" % FCWTypes.get_zone_name(weakest_adjacent),
+					true
+				))
+				return new_state
+
+		# Otherwise keep attacking current target
 		return new_state
 
 	# Use Herald AI to decide next action
@@ -813,6 +879,12 @@ static func _process_evacuation(state: Dictionary) -> Dictionary:
 
 			new_state.entities = entities
 
+			# Track evacuation activity (transports departing = visible!)
+			new_state = _track_activity(new_state, "evacuations", FCWTypes.ZoneId.EARTH, evacuated)
+			# Also track burns from departing transports
+			var num_transports = ceili(float(evacuated) / 500_000.0)
+			new_state = _track_activity(new_state, "burns_detected", FCWTypes.ZoneId.EARTH, num_transports)
+
 	return new_state
 
 # ============================================================================
@@ -916,6 +988,9 @@ static func _reduce_assign_fleet(state: Dictionary, zone_id: int, ship_type: int
 			]
 		))
 
+		# Track burn activity (ships leaving Earth are visible!)
+		new_state = _track_activity(new_state, "burns_detected", from_zone, to_assign)
+
 	return new_state
 
 static func _reduce_set_fleet_order(state: Dictionary, zone_id: int, order: int) -> Dictionary:
@@ -996,6 +1071,9 @@ static func _reduce_recall_fleet(state: Dictionary, from_zone: int, to_zone: int
 				travel_time
 			]
 		))
+
+		# Track burn activity (ships departing are visible!)
+		new_state = _track_activity(new_state, "burns_detected", from_zone, to_recall)
 
 	return new_state
 
@@ -1086,12 +1164,13 @@ static func estimate_turns_until_earth_attack(state: Dictionary) -> int:
 # ENTITY MOVEMENT SYSTEM (NEW)
 # ============================================================================
 
-static func _process_entity_movement(state: Dictionary) -> Dictionary:
+static func _process_entity_movement(state: Dictionary, random_values: Array = []) -> Dictionary:
 	## Advance all entities based on their physics state
 	## Position updates, signature changes, arrival detection
 	## Handles redirect when destination falls
 	var new_state = state.duplicate(true)
 	var game_time = new_state.get("game_time", 0.0)
+	var random_idx = 0
 	var entities = new_state.get("entities", []).duplicate()
 	var updated_entities: Array = []
 
@@ -1170,7 +1249,10 @@ static func _process_entity_movement(state: Dictionary) -> Dictionary:
 			if dist_to_herald < 1.5 and new_state.turn > 3:
 				# Interception chance based on proximity (closer = higher chance)
 				var intercept_chance = 0.4 * (1.0 - dist_to_herald / 1.5)
-				if randf() < intercept_chance:
+				# Use deterministic random from array (fall back to 0.5 if no values)
+				var roll = random_values[random_idx % maxi(1, random_values.size())] if random_values.size() > 0 else 0.5
+				random_idx += 1
+				if roll < intercept_chance:
 					# Transport destroyed - all souls lost
 					var souls_lost = entity.get("cargo", {}).get("souls", 0)
 					new_state.lives_intercepted = new_state.get("lives_intercepted", 0) + souls_lost

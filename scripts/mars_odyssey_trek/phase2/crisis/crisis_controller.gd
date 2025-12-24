@@ -9,6 +9,7 @@ const CrisisManagerScript = preload("res://scripts/mars_odyssey_trek/phase2/cris
 const CrisisAIScript = preload("res://scripts/mars_odyssey_trek/phase2/crisis/crisis_ai.gd")
 const CrisisVisualScript = preload("res://scripts/mars_odyssey_trek/phase2/crisis/crisis_visual.gd")
 const ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
+const Phase2Reducer = preload("res://scripts/mars_odyssey_trek/phase2/phase2_reducer.gd")
 
 # ============================================================================
 # COMPONENTS
@@ -167,54 +168,27 @@ func _on_crew_unassigned(_crisis_id: String, crew_role: String) -> void:
 		ship_view.send_crew_to_room(crew_role, home, false)
 
 func _on_resource_drained(resource: String, amount: float) -> void:
-	## Apply resource drain to Phase2Store
-	if not phase2_store:
+	## Apply resource drain to Phase2Store via dispatch
+	if not phase2_store or not phase2_store.has_method("dispatch"):
 		return
 
-	# Get current state and apply drain
-	var state = phase2_store.get_state()
-	var resources = state.get("resources", {})
-
 	match resource:
-		"oxygen":
-			if resources.has("oxygen"):
-				var new_val = max(0, resources.oxygen.current - amount)
-				_update_resource(resources, "oxygen", new_val)
-		"power":
-			if resources.has("power"):
-				var new_val = max(0, resources.power.current - amount)
-				_update_resource(resources, "power", new_val)
-		"water":
-			if resources.has("water"):
-				var new_val = max(0, resources.water.current - amount)
-				_update_resource(resources, "water", new_val)
-		"fuel":
-			if resources.has("fuel"):
-				var new_val = max(0, resources.fuel.current - amount)
-				_update_resource(resources, "fuel", new_val)
-		"food":
-			if resources.has("food"):
-				var new_val = max(0, resources.food.current - amount)
-				_update_resource(resources, "food", new_val)
+		"oxygen", "power", "water", "fuel", "food":
+			# Dispatch resource drain action (negative amount = drain)
+			phase2_store.dispatch(Phase2Reducer.action_apply_resource_drain(resource, -amount))
 		"morale":
-			# Apply to all crew
+			# Apply morale loss to all crew
+			var state = phase2_store.get_state()
 			var crew = state.get("crew", [])
-			for member in crew:
-				member.morale = max(0, member.morale - amount * 0.1)
+			for i in range(crew.size()):
+				phase2_store.dispatch(Phase2Reducer.action_apply_crew_damage(i, amount * 0.1))
 		"crew_health":
-			# Apply to random crew member
+			# Apply health damage to random crew member
+			var state = phase2_store.get_state()
 			var crew = state.get("crew", [])
 			if crew.size() > 0:
-				var victim = crew[randi() % crew.size()]
-				victim.health = max(0, victim.health - amount * 0.5)
-
-func _update_resource(resources: Dictionary, key: String, new_value: float) -> void:
-	## Helper to update a resource value
-	if resources.has(key):
-		resources[key].current = new_value
-		# Emit resources_changed if store supports it
-		if phase2_store and phase2_store.has_signal("resources_changed"):
-			phase2_store.resources_changed.emit(resources)
+				var victim_index = randi() % crew.size()
+				phase2_store.dispatch(Phase2Reducer.action_apply_crew_damage(victim_index, amount * 0.5))
 
 func _on_catastrophe(crisis: Dictionary, effect: String) -> void:
 	## Handle catastrophic events
@@ -303,6 +277,27 @@ func get_crisis_count() -> int:
 
 func get_active_crises() -> Array:
 	return crisis_manager.get_active_crises()
+
+func spawn_crisis(crisis_type: String, room: int) -> void:
+	## Spawn a specific crisis in a room
+	## crisis_type: "fire", "hull_stress", "power_fluctuation", "radiation", "toxic_atmosphere"
+	var type_enum = _string_to_crisis_type(crisis_type)
+	if type_enum >= 0:
+		crisis_manager.spawn_crisis(type_enum, room)
+
+func _string_to_crisis_type(type_str: String) -> int:
+	## Convert string crisis type to CrisisTypes enum
+	match type_str.to_lower():
+		"fire": return CrisisTypes.CrisisType.FIRE
+		"hull_stress": return CrisisTypes.CrisisType.HULL_STRESS
+		"power_fluctuation": return CrisisTypes.CrisisType.POWER_FLUCTUATION
+		"o2_leak": return CrisisTypes.CrisisType.O2_LEAK
+		"water_recycler": return CrisisTypes.CrisisType.WATER_RECYCLER
+		"medical_emergency": return CrisisTypes.CrisisType.MEDICAL_EMERGENCY
+		"equipment_fault": return CrisisTypes.CrisisType.EQUIPMENT_FAULT
+		_:
+			push_warning("Unknown crisis type: %s" % type_str)
+			return -1
 
 func spawn_test_crisis() -> void:
 	crisis_manager.debug_spawn_random()

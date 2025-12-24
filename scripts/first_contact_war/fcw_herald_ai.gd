@@ -2,14 +2,20 @@ extends RefCounted
 class_name FCWHeraldAI
 
 ## First Contact War - Herald AI System
-## Observation-limited predator that follows human activity
+##
+## WEEKLY TIMELINE MODEL:
+## Week 1: Herald attacks Kuiper (starting position)
+## Week 2+: Herald evaluates zone signatures → moves toward highest detection
+## Each week = attack current zone + evaluate + move toward next target
 ##
 ## Design principles:
-## - Herald only sees what's near it (local observation radius)
-## - Follows activity (responds to detected burns)
-## - Doesn't care about planets - only human signatures
-## - Can release fast drones to intercept targets
-## - Learns traffic patterns over time
+## - Herald advances WEEKLY, always moving toward highest detection
+## - Zone signatures accumulate from human activity (ships, burns, evacuation)
+## - Signatures decay over time (going dark works!)
+## - Players can create decoys, go stealth, or cut trails
+## - Herald prefers moving inward but can be lured outward
+##
+## "Every number is a life. Every decision echoes in the void."
 
 const FCWTypes = preload("res://scripts/first_contact_war/fcw_types.gd")
 
@@ -485,3 +491,348 @@ static func format_intel_summary(intel: Dictionary) -> String:
 				summary += "    %s: %.0f%%\n" % [route_key, routes[route_key] * 100]
 
 	return summary
+
+# ============================================================================
+# WEEKLY TIMELINE SYSTEM
+# ============================================================================
+# The Herald advances every week, choosing its next target based on
+# detection signatures. Players can manipulate signatures to control
+# the Herald's path through the solar system.
+
+static func process_weekly_herald_turn(state: Dictionary) -> Dictionary:
+	## Main weekly Herald update - call this at the start of each week
+	## Returns new state with Herald actions applied and dramatic messages
+	var new_state = state.duplicate(true)
+	var current_zone = new_state.herald_current_zone
+	var turn = new_state.turn
+	var messages: Array = []
+
+	# Step 1: Update signatures from this week's activity
+	new_state = update_zone_signatures(new_state)
+
+	# Step 2: Attack current zone (if not already fallen)
+	var zone = new_state.zones.get(current_zone, {})
+	if zone.get("status", FCWTypes.ZoneStatus.CONTROLLED) == FCWTypes.ZoneStatus.CONTROLLED:
+		new_state = _attack_zone(new_state, current_zone)
+		messages.append_array(_get_attack_messages(current_zone, zone))
+
+	# Step 3: Choose next target based on signatures
+	var next_target = choose_next_target(new_state, current_zone)
+
+	# Step 4: Begin transit to next target (if different from current)
+	if next_target >= 0 and next_target != current_zone:
+		new_state = _begin_transit(new_state, current_zone, next_target)
+		messages.append_array(_get_movement_messages(new_state, current_zone, next_target))
+
+	# Step 5: Decay signatures for next week
+	new_state = decay_zone_signatures(new_state)
+
+	# Step 6: Reset weekly activity tracking
+	new_state = _reset_weekly_activity(new_state)
+
+	# Add all messages to event log
+	for msg in messages:
+		new_state.event_log.append(FCWTypes.create_log_entry(turn, msg, true))
+
+	return new_state
+
+static func update_zone_signatures(state: Dictionary) -> Dictionary:
+	## Calculate and update zone signatures based on weekly activity
+	var new_state = state.duplicate(true)
+	var sigs = new_state.zone_signatures.duplicate()
+	var activity = new_state.weekly_activity
+
+	for zone_id in FCWTypes.ZoneId.values():
+		var zone = new_state.zones.get(zone_id, {})
+		var sig = sigs.get(zone_id, 0.0)
+
+		# Population emissions (unavoidable baseline)
+		var pop = zone.get("population", 0)
+		sig += pop * FCWTypes.SIG_POPULATION
+
+		# Stationed ships
+		var stationed = zone.get("stationed_ships", {})
+		var ship_count = 0
+		for ship_type in stationed:
+			ship_count += stationed[ship_type]
+		sig += ship_count * FCWTypes.SIG_STATIONED_SHIP
+
+		# Production activity this week
+		var built = activity.ships_built.get(zone_id, 0)
+		sig += built * FCWTypes.SIG_PRODUCTION
+
+		# Transit traffic this week
+		var transits = activity.ships_transited.get(zone_id, 0)
+		sig += transits * FCWTypes.SIG_TRANSIT
+
+		# Active burns this week (very visible!)
+		var burns = activity.burns_detected.get(zone_id, 0)
+		sig += burns * FCWTypes.SIG_ACTIVE_BURN
+
+		# Combat events this week
+		var combat = activity.combat_events.get(zone_id, 0)
+		sig += combat * FCWTypes.SIG_COMBAT
+
+		# Evacuation activity
+		var evac = activity.evacuations.get(zone_id, 0)
+		sig += (evac / 1_000_000.0) * FCWTypes.SIG_EVACUATION
+
+		sigs[zone_id] = sig
+
+	new_state.zone_signatures = sigs
+	return new_state
+
+static func decay_zone_signatures(state: Dictionary) -> Dictionary:
+	## Decay all zone signatures (going dark works!)
+	var new_state = state.duplicate(true)
+	var sigs = new_state.zone_signatures.duplicate()
+
+	for zone_id in sigs:
+		sigs[zone_id] = sigs[zone_id] * FCWTypes.HERALD_SIG_DECAY
+		# Earth maintains minimum baseline (civilization is visible)
+		if zone_id == FCWTypes.ZoneId.EARTH:
+			sigs[zone_id] = maxf(sigs[zone_id], 0.05)
+
+	new_state.zone_signatures = sigs
+	return new_state
+
+static func choose_next_target(state: Dictionary, current_zone: int) -> int:
+	## Choose Herald's next target based on zone signatures
+	## Returns zone_id of best target, or -1 if should hold position
+	var sigs = state.zone_signatures
+	var best_target = -1
+	var best_score = 0.0
+
+	# Get all reachable zones (adjacent + skip targets)
+	var adjacent = FCWTypes.get_zone_adjacent(current_zone)
+	var skippable = FCWTypes.get_zone_skip_targets(current_zone)
+	var current_orbit = FCWTypes.get_zone_orbit_order(current_zone)
+
+	# Evaluate adjacent zones
+	for zone_id in adjacent:
+		var sig = sigs.get(zone_id, 0.0)
+		if sig < FCWTypes.HERALD_MIN_SIG_TO_ATTRACT:
+			# Still consider for inward bias
+			sig = 0.0
+
+		var target_orbit = FCWTypes.get_zone_orbit_order(zone_id)
+		var orbit_diff = current_orbit - target_orbit
+
+		# Inward bias: prefer moving toward Sun
+		var inward_bonus = 1.0 + (orbit_diff * FCWTypes.HERALD_INWARD_BIAS) if orbit_diff > 0 else 1.0
+
+		var score = sig * inward_bonus + (0.05 if orbit_diff > 0 else 0.0)  # Small inward nudge
+
+		if score > best_score:
+			best_score = score
+			best_target = zone_id
+
+	# Evaluate skip zones (require higher threshold)
+	for zone_id in skippable:
+		var sig = sigs.get(zone_id, 0.0)
+		if sig < FCWTypes.HERALD_SKIP_THRESHOLD:
+			continue  # Not enough signature to skip
+
+		var target_orbit = FCWTypes.get_zone_orbit_order(zone_id)
+		var orbit_diff = current_orbit - target_orbit
+		var inward_bonus = 1.0 + (orbit_diff * FCWTypes.HERALD_INWARD_BIAS) if orbit_diff > 0 else 1.0
+
+		# Skip penalty: slightly prefer adjacent zones
+		var score = sig * inward_bonus * 0.9
+
+		if score > best_score:
+			best_score = score
+			best_target = zone_id
+
+	# If no strong signal, follow default inward path
+	if best_target < 0:
+		best_target = FCWTypes.get_zone_default_next(current_zone)
+
+	return best_target
+
+static func _attack_zone(state: Dictionary, zone_id: int) -> Dictionary:
+	## Herald attacks a zone - marks it as fallen
+	var new_state = state.duplicate(true)
+	var zones = new_state.zones.duplicate(true)
+	var zone = zones.get(zone_id, {}).duplicate(true)
+
+	zone.status = FCWTypes.ZoneStatus.FALLEN
+	zones[zone_id] = zone
+	new_state.zones = zones
+
+	return new_state
+
+static func _begin_transit(state: Dictionary, from_zone: int, to_zone: int) -> Dictionary:
+	## Begin Herald transit to new zone
+	var new_state = state.duplicate(true)
+
+	new_state.herald_transit = {
+		"from_zone": from_zone,
+		"to_zone": to_zone,
+		"turns_remaining": FCWTypes.HERALD_TRAVEL_TIME,
+		"total_turns": FCWTypes.HERALD_TRAVEL_TIME
+	}
+
+	# Update current zone to destination immediately for next week's attack
+	new_state.herald_current_zone = to_zone
+	new_state.herald_attack_target = to_zone
+
+	return new_state
+
+static func _reset_weekly_activity(state: Dictionary) -> Dictionary:
+	## Reset weekly activity counters
+	var new_state = state.duplicate(true)
+	new_state.weekly_activity = {
+		"ships_built": {},
+		"ships_transited": {},
+		"burns_detected": {},
+		"combat_events": {},
+		"evacuations": {},
+	}
+	return new_state
+
+# ============================================================================
+# DRAMATIC EVENT MESSAGES
+# ============================================================================
+# These messages appear in the event log during major Herald events.
+# They convey the human cost and stakes of each moment.
+
+static func _get_attack_messages(zone_id: int, zone: Dictionary) -> Array:
+	## Get dramatic messages for Herald attack on a zone
+	var zone_name = FCWTypes.get_zone_name(zone_id)
+	var pop = zone.get("population", 0)
+	var messages: Array = []
+
+	# Opening message
+	messages.append("━━━ PRIORITY ALERT ━━━")
+
+	match zone_id:
+		FCWTypes.ZoneId.KUIPER:
+			messages.append("KUIPER STATION: \"They're here. The Herald— it's not stopping to—\"")
+			messages.append("TRANSMISSION LOST - Kuiper Belt monitoring stations offline.")
+			if pop > 0:
+				messages.append("%s souls unaccounted for in outer system." % FCWTypes.format_population(pop))
+
+		FCWTypes.ZoneId.SATURN:
+			messages.append("TITAN COLONY: \"Massive energy signature approaching! All stations, this is not a drill—\"")
+			messages.append("SATURN COMMAND: \"Begin emergency evacuation! Get everyone to the—\" [SIGNAL LOST]")
+			if pop > 0:
+				messages.append("Saturn system population: %s. Evacuation status: UNKNOWN." % FCWTypes.format_population(pop))
+
+		FCWTypes.ZoneId.JUPITER:
+			messages.append("EUROPA BASE: \"God help us. It's bigger than the images showed.\"")
+			messages.append("GANYMEDE STATION: \"All available ships, break orbit NOW! Do not engage!\"")
+			messages.append("IO MINING CONSORTIUM: \"We can see it from here. The sky is burning.\"")
+			if pop > 0:
+				messages.append("Jupiter system: %s civilians in the engagement zone." % FCWTypes.format_population(pop))
+
+		FCWTypes.ZoneId.ASTEROID_BELT:
+			messages.append("CERES CONTROL: \"The Herald is sweeping through the belt. Stations are going dark one by one.\"")
+			messages.append("MINING GUILD: \"There's nowhere to hide out here. Please... someone...\"")
+			if pop > 0:
+				messages.append("Belt colonies: %s miners and families." % FCWTypes.format_population(pop))
+
+		FCWTypes.ZoneId.MARS:
+			messages.append("OLYMPUS MONS COMMAND: \"This is it. Everyone we couldn't evacuate... they're counting on us.\"")
+			messages.append("MARS COLONIAL AUTHORITY: \"To all ships: protect the transports at any cost.\"")
+			messages.append("VALLES MARINERIS: \"Tell Earth we held the line as long as we could.\"")
+			if pop > 0:
+				messages.append("Mars population at risk: %s human beings." % FCWTypes.format_population(pop))
+
+		FCWTypes.ZoneId.EARTH:
+			messages.append("EARTH DEFENSE COMMAND: \"This is humanity's last stand.\"")
+			messages.append("UNITED NATIONS: \"To everyone who made it out... carry our memory to the stars.\"")
+			messages.append("GLOBAL BROADCAST: \"Stay with your families. We love you all.\"")
+			if pop > 0:
+				messages.append("Earth. Population: %s. Home." % FCWTypes.format_population(pop))
+
+	return messages
+
+static func _get_movement_messages(state: Dictionary, from_zone: int, to_zone: int) -> Array:
+	## Get messages for Herald movement between zones
+	var from_name = FCWTypes.get_zone_name(from_zone)
+	var to_name = FCWTypes.get_zone_name(to_zone)
+	var sig = state.zone_signatures.get(to_zone, 0.0)
+	var messages: Array = []
+
+	messages.append("━━━ HERALD MOVEMENT DETECTED ━━━")
+
+	if sig >= FCWTypes.HERALD_SKIP_THRESHOLD:
+		messages.append("DEEP SPACE NETWORK: \"It's changing course. Heading directly for %s.\"" % to_name)
+		messages.append("INTELLIGENCE: \"It detected our activity. Signature level: %.0f%%\"" % (sig * 100))
+	elif sig >= FCWTypes.HERALD_MIN_SIG_TO_ATTRACT:
+		messages.append("TRACKING STATION: \"Herald departing %s. New heading: %s.\"" % [from_name, to_name])
+		messages.append("ANALYSIS: \"It's following emissions from %s sector.\"" % to_name)
+	else:
+		messages.append("OBSERVATORY: \"Herald continuing inward from %s toward %s.\"" % [from_name, to_name])
+		messages.append("COMMAND: \"Default trajectory. It hasn't detected our main operations... yet.\"")
+
+	# Warning for high-value targets
+	if to_zone == FCWTypes.ZoneId.MARS:
+		messages.append("MARS DEFENSE: \"All hands, prepare for engagement. This is not a drill.\"")
+	elif to_zone == FCWTypes.ZoneId.EARTH:
+		messages.append("EARTH COMMAND: \"DEFCON 1. May God have mercy on us all.\"")
+
+	return messages
+
+static func get_signature_warning_messages(state: Dictionary) -> Array:
+	## Get warning messages if signatures are dangerously high
+	var messages: Array = []
+	var sigs = state.zone_signatures
+	var herald_zone = state.herald_current_zone
+
+	# Check adjacent zones for high signatures
+	var adjacent = FCWTypes.get_zone_adjacent(herald_zone)
+	for zone_id in adjacent:
+		var sig = sigs.get(zone_id, 0.0)
+		var zone_name = FCWTypes.get_zone_name(zone_id)
+
+		if sig >= 0.6:
+			messages.append("⚠ CRITICAL: %s signature at %.0f%% - Herald will likely target next!" % [zone_name, sig * 100])
+		elif sig >= 0.3:
+			messages.append("⚠ WARNING: %s signature rising (%.0f%%) - reduce activity!" % [zone_name, sig * 100])
+
+	# Check skip zones
+	var skippable = FCWTypes.get_zone_skip_targets(herald_zone)
+	for zone_id in skippable:
+		var sig = sigs.get(zone_id, 0.0)
+		var zone_name = FCWTypes.get_zone_name(zone_id)
+
+		if sig >= FCWTypes.HERALD_SKIP_THRESHOLD:
+			messages.append("⚠ DANGER: %s signature (%.0f%%) high enough for Herald to skip zones!" % [zone_name, sig * 100])
+
+	return messages
+
+static func format_signature_report(state: Dictionary) -> String:
+	## Format zone signatures for UI display
+	var report = "=== DETECTION SIGNATURES ===\n"
+	var sigs = state.zone_signatures
+	var herald_zone = state.herald_current_zone
+
+	# Sort zones by signature (highest first)
+	var zone_list: Array = []
+	for zone_id in sigs:
+		zone_list.append({"id": zone_id, "sig": sigs[zone_id]})
+	zone_list.sort_custom(func(a, b): return a.sig > b.sig)
+
+	for entry in zone_list:
+		var zone_name = FCWTypes.get_zone_name(entry.id)
+		var sig = entry.sig
+		var bar = ""
+		var bar_len = int(sig * 20)
+		for i in range(bar_len):
+			bar += "█"
+		for i in range(20 - bar_len):
+			bar += "░"
+
+		var marker = ""
+		if entry.id == herald_zone:
+			marker = " ◄ HERALD"
+		elif sig >= FCWTypes.HERALD_SKIP_THRESHOLD:
+			marker = " ⚠ HIGH"
+		elif sig >= FCWTypes.HERALD_MIN_SIG_TO_ATTRACT:
+			marker = " !"
+
+		report += "%s: [%s] %.0f%%%s\n" % [zone_name.substr(0, 8).pad_zeros(8), bar, sig * 100, marker]
+
+	return report

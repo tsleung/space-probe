@@ -314,6 +314,82 @@ const DETECTION_ZONE_MEDIUM = 0.05     # More visible zone
 const DETECTION_ZONE_HIGH = 0.10       # Danger zone visualization
 
 # ============================================================================
+# HERALD TIMELINE MODEL
+# ============================================================================
+# The Herald advances weekly, choosing targets based on detection signatures.
+# Players can manipulate signatures to lead Herald away from Earth.
+
+# Zone adjacency - which zones Herald can reach from each position
+# Key insight: Herald can "skip" zones if detection is high enough
+const ZONE_ADJACENCY = {
+	ZoneId.KUIPER: {
+		"adjacent": [ZoneId.SATURN, ZoneId.JUPITER],  # Can reach Saturn or Jupiter
+		"skip": [],  # No skip from starting position
+	},
+	ZoneId.SATURN: {
+		"adjacent": [ZoneId.JUPITER, ZoneId.ASTEROID_BELT],
+		"skip": [ZoneId.MARS],  # Can skip to Mars if sig > threshold
+	},
+	ZoneId.JUPITER: {
+		"adjacent": [ZoneId.SATURN, ZoneId.ASTEROID_BELT],
+		"skip": [ZoneId.MARS],  # Can skip to Mars if sig > threshold
+	},
+	ZoneId.ASTEROID_BELT: {
+		"adjacent": [ZoneId.JUPITER, ZoneId.MARS],
+		"skip": [],
+	},
+	ZoneId.MARS: {
+		"adjacent": [ZoneId.ASTEROID_BELT, ZoneId.EARTH],
+		"skip": [],  # Earth is adjacent, no skip needed
+	},
+	ZoneId.EARTH: {
+		"adjacent": [],  # End of the line
+		"skip": [],
+	},
+}
+
+# Zone orbital order (higher = further from Sun)
+# Used for "inward bias" - Herald prefers moving toward Sun
+const ZONE_ORBIT_ORDER = {
+	ZoneId.KUIPER: 6,
+	ZoneId.SATURN: 5,
+	ZoneId.JUPITER: 4,
+	ZoneId.ASTEROID_BELT: 3,
+	ZoneId.MARS: 2,
+	ZoneId.EARTH: 1,
+}
+
+# Default inward path (if no strong detection, Herald follows this)
+const ZONE_DEFAULT_NEXT = {
+	ZoneId.KUIPER: ZoneId.JUPITER,       # Default: straight to Jupiter
+	ZoneId.SATURN: ZoneId.ASTEROID_BELT, # Saturn → Asteroid Belt
+	ZoneId.JUPITER: ZoneId.ASTEROID_BELT,# Jupiter → Asteroid Belt
+	ZoneId.ASTEROID_BELT: ZoneId.MARS,   # Asteroid Belt → Mars
+	ZoneId.MARS: ZoneId.EARTH,           # Mars → Earth
+	ZoneId.EARTH: -1,                    # End
+}
+
+# Signature contribution weights
+# These determine how much each activity adds to zone detection
+const SIG_POPULATION = 0.00000001       # Per person (10B people = 0.1)
+const SIG_STATIONED_SHIP = 0.02         # Per ship stationed
+const SIG_PRODUCTION = 0.10             # Per ship built this week
+const SIG_TRANSIT = 0.15                # Per ship transiting through
+const SIG_ACTIVE_BURN = 0.30            # Per ship burning (very visible!)
+const SIG_COMBAT = 0.50                 # Per combat event (explosions)
+const SIG_EVACUATION = 0.20             # Per 1M people evacuating
+
+# Herald behavior constants
+const HERALD_SIG_DECAY = 0.6            # Signatures decay 40% per week
+const HERALD_SKIP_THRESHOLD = 0.4       # Must have this sig to skip zones
+const HERALD_INWARD_BIAS = 0.15         # Preference for moving toward Sun
+const HERALD_MIN_SIG_TO_ATTRACT = 0.1   # Below this, zone doesn't attract
+
+# Herald movement timing
+const HERALD_ATTACK_DURATION = 0        # Weeks to attack a zone (instant)
+const HERALD_TRAVEL_TIME = 1            # Weeks to travel between zones
+
+# ============================================================================
 # ENTITY SYSTEM
 # ============================================================================
 
@@ -371,7 +447,8 @@ static func create_warship(ship_type: int, position: Vector2, count: int = 1) ->
 static func create_transport(position: Vector2, souls_aboard: int, name: String = "") -> Dictionary:
 	## Create a civilian transport/evacuation ship
 	if name.is_empty():
-		name = COLONY_SHIP_NAMES[randi() % COLONY_SHIP_NAMES.size()]
+		# Deterministic name selection based on next entity ID
+		name = COLONY_SHIP_NAMES[(_next_entity_id + 1) % COLONY_SHIP_NAMES.size()]
 	return create_entity({
 		"entity_type": EntityType.TRANSPORT,
 		"faction": Faction.HUMAN,
@@ -415,6 +492,52 @@ static func create_herald_ship(position: Vector2, combat_power: float) -> Dictio
 
 # Herald entity constant ID - used to find the main Herald in entities array
 const HERALD_ENTITY_ID = "herald_main"
+
+# Capital ship names for the UNN fleet
+const CAPITAL_SHIP_NAMES = {
+	ShipType.CRUISER: ["UNN Defiant", "UNN Resolute", "UNN Valiant", "UNN Indomitable", "UNN Vigilant"],
+	ShipType.CARRIER: ["CVN Prometheus", "CVN Atlas", "CVN Titan"],
+	ShipType.DREADNOUGHT: ["BB Armstrong", "BB Gagarin", "BB Korolev"]
+}
+
+static func create_capital_ship(ship_type: int, zone_id: int, name: String, game_time: float = 0.0) -> Dictionary:
+	## Create a named capital ship entity stationed at a zone
+	var zone_pos = get_zone_position(zone_id, game_time)
+	var ship_def = SHIP_DEFS.get(ship_type, SHIP_DEFS[ShipType.CRUISER])
+	var thrust = SHIP_THRUST.get(ship_type, 0.03)
+
+	return create_entity({
+		"entity_type": EntityType.WARSHIP,
+		"faction": Faction.HUMAN,
+		"ship_type": ship_type,
+		"position": zone_pos,
+		"acceleration": thrust,
+		"combat_power": ship_def.combat_power,
+		"hull": 100.0,
+		"count": 1,
+		"name": name,
+		"origin": zone_id,
+		"destination": -1,
+		"movement_state": MovementState.ORBITING
+	})
+
+static func _create_initial_fleet_entities(game_time: float = 0.0) -> Array:
+	## Create the starting UNN capital ships as entities
+	## These are the named ships that appear on the map
+	var entities = []
+
+	# Earth defense fleet - main force
+	entities.append(create_capital_ship(ShipType.CRUISER, ZoneId.EARTH, "UNN Defiant", game_time))
+	entities.append(create_capital_ship(ShipType.CRUISER, ZoneId.EARTH, "UNN Resolute", game_time))
+	entities.append(create_capital_ship(ShipType.CARRIER, ZoneId.EARTH, "CVN Prometheus", game_time))
+
+	# Mars garrison
+	entities.append(create_capital_ship(ShipType.CRUISER, ZoneId.MARS, "UNN Valiant", game_time))
+
+	# Outer system patrol
+	entities.append(create_capital_ship(ShipType.CRUISER, ZoneId.JUPITER, "UNN Vigilant", game_time))
+
+	return entities
 
 static func _create_herald_entity() -> Dictionary:
 	## Create the main Herald entity for initial state
@@ -483,6 +606,13 @@ static func get_all_zone_positions(game_time: float) -> Dictionary:
 		positions[zone_id] = get_zone_position(zone_id, game_time)
 	return positions
 
+static func get_zone_orbital_radius(zone_id: int) -> float:
+	## Get the orbital radius (semi-major axis) of a zone in AU
+	var orbital = ZONE_ORBITAL_DATA.get(zone_id)
+	if not orbital:
+		return 0.0
+	return orbital.semi_major_axis
+
 # Detection calculation moved to FCWHeraldAI.calc_detection_probability()
 # See scripts/first_contact_war/fcw_herald_ai.gd for the detection system
 
@@ -527,8 +657,8 @@ static func create_initial_state() -> Dictionary:
 		},
 		"zones": _create_initial_zones(),
 
-		# New unified entity system - includes Herald as an entity
-		"entities": [_create_herald_entity()],  # Array of FCWEntity dictionaries
+		# New unified entity system - Herald + capital ships
+		"entities": [_create_herald_entity()] + _create_initial_fleet_entities(),  # Array of FCWEntity dictionaries
 
 		# Legacy fleet system (kept for backward compatibility during migration)
 		"fleet": {
@@ -561,6 +691,27 @@ static func create_initial_state() -> Dictionary:
 			"known_routes": {},      # route_key -> observation_count
 			"last_detected": {},     # entity_id -> {position, velocity, time}
 			"activity_zones": {}     # zone_id -> activity_level (0-1)
+		},
+
+		# Zone detection signatures (Herald uses these to choose targets)
+		# Higher signature = more likely Herald moves there
+		# Decays each week, player can manipulate via decoys/stealth
+		"zone_signatures": {
+			ZoneId.KUIPER: 0.0,
+			ZoneId.SATURN: 0.0,
+			ZoneId.JUPITER: 0.0,
+			ZoneId.ASTEROID_BELT: 0.0,
+			ZoneId.MARS: 0.0,
+			ZoneId.EARTH: 0.1,  # Earth always has baseline (civilization)
+		},
+
+		# Weekly activity tracking (resets each week, contributes to signatures)
+		"weekly_activity": {
+			"ships_built": {},       # zone_id -> count
+			"ships_transited": {},   # zone_id -> count
+			"burns_detected": {},    # zone_id -> count
+			"combat_events": {},     # zone_id -> count
+			"evacuations": {},       # zone_id -> lives evacuated
 		},
 
 		# Events that occurred this tick (cleared each tick, used for signal emission)
@@ -688,13 +839,17 @@ const COLONY_SHIP_NAMES = [
 	"Horizon", "Eternal", "Vanguard", "Promise", "Aurora"
 ]
 
+static var _next_colony_ship_id: int = 0
+
 static func create_colony_ship(souls_aboard: int) -> Dictionary:
 	## Create a colony ship transit order
+	_next_colony_ship_id += 1
 	return {
 		"souls_aboard": souls_aboard,
 		"turns_remaining": COLONY_SHIP_TRAVEL_TIME,
 		"total_turns": COLONY_SHIP_TRAVEL_TIME,
-		"name": COLONY_SHIP_NAMES[randi() % COLONY_SHIP_NAMES.size()],
+		# Deterministic name selection based on colony ship ID
+		"name": COLONY_SHIP_NAMES[_next_colony_ship_id % COLONY_SHIP_NAMES.size()],
 		"intercepted": false
 	}
 
@@ -710,6 +865,30 @@ static func _merge(base: Dictionary, overrides: Dictionary) -> Dictionary:
 
 static func get_zone_name(zone_id: int) -> String:
 	return ZONE_NAMES.get(zone_id, "Unknown")
+
+static func get_zone_orbit_order(zone_id: int) -> int:
+	## Get orbital order (higher = further from Sun)
+	return ZONE_ORBIT_ORDER.get(zone_id, 0)
+
+static func get_zone_adjacent(zone_id: int) -> Array:
+	## Get zones Herald can reach from this zone (adjacent)
+	var adj = ZONE_ADJACENCY.get(zone_id, {})
+	return adj.get("adjacent", [])
+
+static func get_zone_skip_targets(zone_id: int) -> Array:
+	## Get zones Herald can skip to (requires high signature)
+	var adj = ZONE_ADJACENCY.get(zone_id, {})
+	return adj.get("skip", [])
+
+static func get_zone_default_next(zone_id: int) -> int:
+	## Get default next zone if no strong detection
+	return ZONE_DEFAULT_NEXT.get(zone_id, -1)
+
+static func get_all_reachable_zones(zone_id: int) -> Array:
+	## Get all zones Herald could potentially reach (adjacent + skip)
+	var result = get_zone_adjacent(zone_id).duplicate()
+	result.append_array(get_zone_skip_targets(zone_id))
+	return result
 
 static func get_ship_name(ship_type: int) -> String:
 	return SHIP_DEFS.get(ship_type, {}).get("name", "Unknown")

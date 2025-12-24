@@ -11,6 +11,10 @@ const FCWBattleSystem = preload("res://scripts/first_contact_war/fcw_battle_syst
 const FCWBattleView = preload("res://scripts/first_contact_war/fcw_battle_view.gd")
 const FCWPlanetView = preload("res://scripts/first_contact_war/fcw_planet_view.gd")
 
+# AI Infrastructure (deterministic simulation)
+const FCWActionEnumerator = preload("res://scripts/first_contact_war/fcw_action_enumerator.gd")
+const FCWStateEvaluator = preload("res://scripts/first_contact_war/fcw_state_evaluator.gd")
+
 # ============================================================================
 # CONSTANTS
 # ============================================================================
@@ -36,9 +40,6 @@ const SPEED_NAMES = ["PAUSED", "SLOW", "NORMAL", "FAST", "VERY FAST", "TURBO", "
 # Map panel - visual solar system
 @onready var map_panel: PanelContainer = $MainContainer/GameArea/MapPanel
 var solar_map: FCWSolarMap
-
-# Resources panel
-@onready var resources_container: VBoxContainer = $MainContainer/GameArea/SidePanel/ResourcesPanel/ResourcesContainer
 
 # Fleet panel
 @onready var fleet_list: ItemList = $MainContainer/GameArea/SidePanel/FleetPanel/VBox/FleetList
@@ -508,6 +509,10 @@ func _connect_signals() -> void:
 	new_game_btn.pressed.connect(_on_new_game)
 	menu_btn.pressed.connect(_on_main_menu)
 
+	# Entity route selection from solar map
+	if solar_map:
+		solar_map.entity_destination_selected.connect(_on_entity_destination_selected)
+
 # ============================================================================
 # UI SYNC
 # ============================================================================
@@ -521,7 +526,6 @@ func _sync_ui() -> void:
 	if not store or not is_inside_tree():
 		return
 	_sync_header()
-	_sync_resources()
 	_sync_fleet()
 	_sync_map()
 	_sync_event_log()
@@ -538,41 +542,133 @@ func _sync_header() -> void:
 	# Format time display using new time system: "WEEK X, DAY Y - HH:00"
 	var time_str = store.get_formatted_time()
 
+	# Calculate threat level for header styling
+	var threat_level = _calculate_threat_level()
+
 	# During peace, show calm info; after detection, show threat info
 	if week < PEACE_TURNS:
 		turn_label.text = "%s | Solar System at Peace" % time_str
 		lives_label.text = "CIVILIAN TRAFFIC: Normal"
 		threat_label.text = "STATUS: All Clear"
+		_apply_header_urgency(0)  # No urgency
 	else:
-		var eta = store.estimate_turns_until_earth()
-		turn_label.text = "%s | ~%d weeks until Earth" % [time_str, eta]
+		# === LEFT: Time display with Herald ETA in days ===
+		var herald_eta_days = _calculate_herald_eta_days()
+		var target = store.get_herald_target()
+		var target_name = FCWTypes.get_zone_name(target)
 
+		if herald_eta_days <= 0:
+			turn_label.text = "%s | Herald at %s!" % [time_str, target_name]
+		else:
+			turn_label.text = "%s | Herald → %s: %dd" % [time_str, target_name, herald_eta_days]
+
+		# === CENTER: Evacuation progress with tier ===
 		var lives = store.get_lives_evacuated()
 		var tier = FCWTypes.get_victory_tier(lives)
 		var tier_name = FCWTypes.get_victory_tier_name(tier)
-		lives_label.text = "EVACUATED: %s [%s]" % [FCWTypes.format_population(lives), tier_name]
+		lives_label.text = "EVAC: %s [%s]" % [FCWTypes.format_population(lives), tier_name]
 
+		# === RIGHT: Threat level indicator ===
 		var threat = store.get_herald_strength()
-		var target = store.get_herald_target()
 		var target_defense = store.get_zone_defense(target)
-		var status = "HOLDING" if target_defense >= threat else "FALLING"
-		threat_label.text = "HERALD: %d → %s (%s)" % [threat, FCWTypes.get_zone_name(target), status]
 
-func _sync_resources() -> void:
-	if not store or not resources_container:
-		return
-	# Clear and rebuild
-	for child in resources_container.get_children():
-		if child is Label and child.name != "Title":
-			child.queue_free()
+		var status_text: String
+		if target == FCWTypes.ZoneId.EARTH:
+			status_text = "EARTH THREATENED"
+		elif target_defense >= threat * 1.2:
+			status_text = "HOLDING"
+		elif target_defense >= threat * 0.8:
+			status_text = "CONTESTED"
+		else:
+			status_text = "FALLING"
 
-	var res = store.get_resources()
-	var resource_order = ["ore", "steel", "energy", "electronics", "rare", "weapons"]
+		threat_label.text = "THREAT: %s | %s" % [_get_threat_level_name(threat_level), status_text]
 
-	for res_name in resource_order:
-		var label = Label.new()
-		label.text = "%s: %d" % [res_name.capitalize(), res.get(res_name, 0)]
-		resources_container.add_child(label)
+		# Apply urgency styling to header
+		_apply_header_urgency(threat_level)
+
+## Calculate Herald ETA in days to current target
+func _calculate_herald_eta_days() -> int:
+	var transit = store.get_herald_transit()
+	if transit.is_empty():
+		return 0  # Already at target
+
+	# Transit remaining is in weeks, convert to days
+	var weeks_remaining = transit.get("turns_remaining", 0)
+	return weeks_remaining * 7
+
+## Calculate threat level (0-3) based on game state
+func _calculate_threat_level() -> int:
+	var target = store.get_herald_target()
+	var herald_transit = store.get_herald_transit()
+	var herald_strength = store.get_herald_strength()
+	var target_defense = store.get_zone_defense(target)
+
+	# Level 3: Earth is the target
+	if target == FCWTypes.ZoneId.EARTH:
+		return 3
+
+	# Level 2: Herald is attacking an inhabited zone and we can't hold
+	if herald_transit.is_empty() and target_defense < herald_strength * 0.8:
+		return 2
+
+	# Level 1: Herald is close (within 2 zones of Earth)
+	var zones_from_earth = _zones_from_earth(target)
+	if zones_from_earth <= 2:
+		return 1
+
+	return 0
+
+## Get how many zones away from Earth a zone is
+func _zones_from_earth(zone_id: int) -> int:
+	match zone_id:
+		FCWTypes.ZoneId.EARTH:
+			return 0
+		FCWTypes.ZoneId.MARS:
+			return 1
+		FCWTypes.ZoneId.ASTEROID_BELT, FCWTypes.ZoneId.JUPITER, FCWTypes.ZoneId.SATURN:
+			return 2
+		FCWTypes.ZoneId.KUIPER:
+			return 3
+		_:
+			return 4
+
+## Get threat level name
+func _get_threat_level_name(level: int) -> String:
+	match level:
+		0:
+			return "LOW"
+		1:
+			return "ELEVATED"
+		2:
+			return "HIGH"
+		3:
+			return "CRITICAL"
+		_:
+			return "UNKNOWN"
+
+## Apply visual urgency to header based on threat level
+func _apply_header_urgency(level: int) -> void:
+	var header = $MainContainer/Header
+
+	match level:
+		0:  # Normal - standard colors
+			turn_label.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+			lives_label.add_theme_color_override("font_color", Color(0.7, 0.9, 0.7))
+			threat_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.9))
+		1:  # Elevated - yellow tint
+			turn_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7))
+			lives_label.add_theme_color_override("font_color", Color(0.8, 0.9, 0.7))
+			threat_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
+		2:  # High - orange tint
+			turn_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.5))
+			lives_label.add_theme_color_override("font_color", Color(0.9, 0.8, 0.6))
+			threat_label.add_theme_color_override("font_color", Color(1.0, 0.6, 0.3))
+		3:  # Critical - red with pulse effect
+			var pulse = sin(Time.get_ticks_msec() / 300.0) * 0.2 + 0.8
+			turn_label.add_theme_color_override("font_color", Color(1.0, 0.4 * pulse, 0.4 * pulse))
+			lives_label.add_theme_color_override("font_color", Color(1.0, 0.6, 0.6))
+			threat_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.3))
 
 func _sync_fleet() -> void:
 	if not store or not fleet_list:
@@ -959,39 +1055,143 @@ func _process_peace_week(week: int) -> void:
 		_ai_build_ships(week, 50)  # Low herald strength estimate for early building
 
 func _run_ai_turn() -> void:
-	## STRATEGIC AI - Multiple behaviors with visual feedback
-	## Behaviors: Emergency Response, Blockade Formation, Rapid Reinforcement, Strategic Evacuation
+	## STRATEGIC AI - Phase-adaptive with action evaluation
+	## Uses FCWStateEvaluator for game phase detection and action ranking
+	## Uses FCWActionEnumerator for valid action discovery
+	##
+	## Strategy by Phase:
+	## - EARLY: Build fleet aggressively, minimize detection signature
+	## - MID: Mars blockade + start evacuation, balanced defense
+	## - LATE: Maximize evacuation, sacrifice outer zones
+	## - ENDGAME: Pure evacuation, all ships protect transports
 
-	var herald_target = store.get_herald_target()
-	var herald_strength = store.get_herald_strength()
-	var turn = store.get_turn()
+	var state = store.get_state()
+	var phase = FCWStateEvaluator.get_game_phase(state)
 
-	# --- PHASE 1: SHIP BUILDING (Smart priorities) ---
-	_ai_build_ships(turn, herald_strength)
+	# Phase-adaptive strategy
+	match phase:
+		FCWStateEvaluator.GamePhase.EARLY:
+			_ai_early_game(state)
+		FCWStateEvaluator.GamePhase.MID:
+			_ai_mid_game(state)
+		FCWStateEvaluator.GamePhase.LATE:
+			_ai_late_game(state)
+		FCWStateEvaluator.GamePhase.ENDGAME:
+			_ai_endgame(state)
 
-	# --- PHASE 2: STRATEGIC ASSESSMENT ---
+func _ai_early_game(state: Dictionary) -> void:
+	## EARLY PHASE: Herald at Kuiper/outer zones
+	## Strategy: Build fleet aggressively, minimize activity signature
+	var herald_strength = state.get("herald_strength", 100)
+
+	# Build ships using ranked evaluation
+	_execute_ranked_build_actions(state)
+
+	# Minimal fleet movement to avoid detection
+	# Only reinforce if zone is about to fall
+	var herald_target = state.get("herald_attack_target", FCWTypes.ZoneId.KUIPER)
 	var target_defense = store.get_zone_defense(herald_target)
 	var defense_ratio = float(target_defense) / maxf(herald_strength, 1)
-	var is_critical = defense_ratio < 0.8  # Will likely fall
-	var is_marginal = defense_ratio < 1.2  # Might fall
 
-	# --- PHASE 3: EMERGENCY RESPONSE (Critical zones) ---
-	if is_critical and herald_target != FCWTypes.ZoneId.EARTH:
+	if defense_ratio < 0.5:  # Only emergency response in early game
 		_ai_emergency_response(herald_target, herald_strength - target_defense)
 
-	# --- PHASE 4: REINFORCE MARGINAL ZONES ---
-	elif is_marginal and herald_target != FCWTypes.ZoneId.EARTH:
-		_ai_reinforce_zone(herald_target, int(herald_strength * 1.3) - target_defense)
+func _ai_mid_game(state: Dictionary) -> void:
+	## MID PHASE: Herald at Jupiter/Asteroid Belt
+	## Strategy: Mars blockade + start evacuation, balanced defense
+	var herald_strength = state.get("herald_strength", 100)
+	var herald_target = state.get("herald_attack_target", FCWTypes.ZoneId.JUPITER)
 
-	# --- PHASE 5: BLOCKADE AT MARS (Chokepoint strategy) ---
+	# Continue building
+	_execute_ranked_build_actions(state)
+
+	# Establish Mars blockade
 	if herald_target in [FCWTypes.ZoneId.JUPITER, FCWTypes.ZoneId.ASTEROID_BELT, FCWTypes.ZoneId.SATURN]:
 		_ai_establish_blockade(FCWTypes.ZoneId.MARS)
 
-	# --- PHASE 6: EVACUATION FLEET AT EARTH ---
+	# Standard defense response
+	var target_defense = store.get_zone_defense(herald_target)
+	var defense_ratio = float(target_defense) / maxf(herald_strength, 1)
+
+	if defense_ratio < 0.8 and herald_target != FCWTypes.ZoneId.EARTH:
+		_ai_emergency_response(herald_target, herald_strength - target_defense)
+	elif defense_ratio < 1.2 and herald_target != FCWTypes.ZoneId.EARTH:
+		_ai_reinforce_zone(herald_target, int(herald_strength * 1.3) - target_defense)
+
+	# Start evacuation preparations
 	_ai_evacuation_fleet()
 
-	# --- PHASE 7: REDISTRIBUTE FROM SAFE ZONES ---
+func _ai_late_game(state: Dictionary) -> void:
+	## LATE PHASE: Herald at Mars/inner zones
+	## Strategy: Maximize evacuation, sacrifice outer zones
+	var herald_strength = state.get("herald_strength", 100)
+	var herald_target = state.get("herald_attack_target", FCWTypes.ZoneId.MARS)
+
+	# Still build if possible (every ship matters)
+	_execute_ranked_build_actions(state)
+
+	# Primary focus: evacuation
+	_ai_evacuation_fleet()
+
+	# Defense is secondary - only if Earth is directly threatened
+	if herald_target == FCWTypes.ZoneId.EARTH:
+		var earth_defense = store.get_zone_defense(FCWTypes.ZoneId.EARTH)
+		if earth_defense < herald_strength:
+			_ai_emergency_response(FCWTypes.ZoneId.EARTH, herald_strength - earth_defense)
+
+	# Redistribute from all zones to Earth
 	_ai_redistribute_fleet(herald_target)
+
+func _ai_endgame(state: Dictionary) -> void:
+	## ENDGAME PHASE: Earth directly threatened
+	## Strategy: Pure evacuation, all ships protect transports
+	var herald_strength = state.get("herald_strength", 100)
+
+	# No more building - focus resources on evacuation
+	# (Building takes time we don't have)
+
+	# All carriers to Earth for evacuation
+	_ai_evacuation_fleet()
+
+	# All combat ships to Earth for transport protection
+	var earth_defense = store.get_zone_defense(FCWTypes.ZoneId.EARTH)
+	if earth_defense < herald_strength * 1.5:
+		_ai_emergency_response(FCWTypes.ZoneId.EARTH, herald_strength - earth_defense)
+
+	# Pull from everywhere
+	_ai_redistribute_fleet(FCWTypes.ZoneId.EARTH)
+
+func _execute_ranked_build_actions(state: Dictionary) -> void:
+	## Use action enumeration + evaluation for ship building
+	var capacity = store.get_production_capacity()
+	if capacity <= 0:
+		return
+
+	# Get all valid build actions
+	var all_actions = FCWActionEnumerator.get_valid_actions(state)
+	var build_actions = all_actions.filter(func(a): return a.get("type") == FCWReducer.ActionType.BUILD_SHIP)
+
+	if build_actions.is_empty():
+		return
+
+	# Rank by state evaluation
+	var ranked = FCWStateEvaluator.rank_actions(state, build_actions)
+
+	# Execute top actions within capacity
+	var built = 0
+	for entry in ranked:
+		if built >= capacity:
+			break
+		var action = entry.action
+		var ship_type = action.get("ship_type", 0)
+		store.dispatch_build_ship(ship_type)
+		built += 1
+
+		# Log significant builds
+		if ship_type == FCWTypes.ShipType.DREADNOUGHT:
+			_add_to_event_log("Dreadnought commissioned for defense", false)
+		elif ship_type == FCWTypes.ShipType.CARRIER:
+			_add_to_event_log("Carrier commissioned for evacuation", false)
 
 func _ai_build_ships(_turn: int, herald_strength: int) -> void:
 	## Need-based ship building: analyze strategic situation and build accordingly
@@ -1645,6 +1845,29 @@ func _on_zone_fallen(zone_id: int) -> void:
 	_set_paused(true)
 	_sync_speed_display()
 	_show_zone_fallen_overlay(zone_id, lives_lost)
+
+func _on_entity_destination_selected(entity_id: String, destination_zone: int, route_type: String) -> void:
+	## Handle entity route selection from solar map
+	## This is the player sending a capital ship to a new destination
+	print("Route selected: %s → zone %d via %s" % [entity_id, destination_zone, route_type])
+
+	# Dispatch the route change to store
+	store.dispatch_set_entity_destination(entity_id, destination_zone, route_type)
+
+	# Log the event
+	var entity = store.get_entity(entity_id)
+	if not entity.is_empty():
+		var entity_name = entity.get("name", "Fleet")
+		var dest_name = FCWTypes.get_zone_name(destination_zone)
+		var route_desc = "direct burn" if route_type == "direct" else ("stealth coast" if route_type == "coast" else "gravity assist")
+		store.dispatch({
+			"type": "LOG_EVENT",
+			"message": "%s departing for %s via %s" % [entity_name, dest_name, route_desc],
+			"is_critical": true
+		})
+
+	# Sync UI
+	_sync_ui()
 
 func _on_game_over(victory_tier: int) -> void:
 	_set_paused(true)

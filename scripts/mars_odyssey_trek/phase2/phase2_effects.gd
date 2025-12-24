@@ -272,37 +272,269 @@ func _on_continue_pressed() -> void:
 # ============================================================================
 
 func spawn_sparks(pos: Vector2, count: int = 10) -> void:
-	## Spawn spark particles at position
+	## Spawn spark particles at position (orange/yellow electrical sparks)
 	for i in range(count):
-		_spawn_particle(pos, Color(1.0, 0.8, 0.3), 0.5)
+		var color = Color(1.0, lerp(0.5, 0.9, randf()), 0.2)
+		_spawn_particle(pos, color, randf_range(0.3, 0.6), randf_range(1.5, 3.0))
 
 func spawn_debris(pos: Vector2, count: int = 5) -> void:
-	## Spawn debris particles at position
+	## Spawn debris particles at position (gray tumbling chunks)
 	for i in range(count):
-		_spawn_particle(pos, Color(0.5, 0.5, 0.5), 1.0, 3.0)
+		_spawn_debris_chunk(pos)
 
 func spawn_steam(pos: Vector2, count: int = 8) -> void:
-	## Spawn steam/gas particles at position
+	## Spawn steam/gas particles at position (white, rising)
 	for i in range(count):
 		_spawn_particle(pos, Color(0.9, 0.9, 1.0, 0.5), 1.5, 2.0, true)
+
+func spawn_smoke(pos: Vector2, count: int = 6, duration: float = 2.0) -> void:
+	## Spawn smoke particles (gray, slowly rising, expanding)
+	for i in range(count):
+		var delay = randf() * 0.5
+		await get_tree().create_timer(delay).timeout
+		_spawn_smoke_particle(pos, duration)
+
+func spawn_fire(pos: Vector2, duration: float = 3.0) -> void:
+	## Spawn fire effect at position (flickering orange/red)
+	var fire_node = _create_fire_effect(pos)
+	add_child(fire_node)
+
+	await get_tree().create_timer(duration).timeout
+	var tween = create_tween()
+	tween.tween_property(fire_node, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(fire_node.queue_free)
+
+func spawn_explosion(pos: Vector2, size: float = 1.0) -> void:
+	## Spawn explosion effect (flash + expanding ring + debris)
+	# Initial flash
+	_spawn_flash(pos, Color(1.0, 0.9, 0.5), 30.0 * size, 0.1)
+
+	# Expanding ring
+	_spawn_shockwave(pos, size)
+
+	# Debris and sparks
+	spawn_debris(pos, int(8 * size))
+	spawn_sparks(pos, int(15 * size))
+
+	# Screen shake
+	shake_screen(8.0 * size, 0.4)
+
+func spawn_electrical_arc(from_pos: Vector2, to_pos: Vector2, duration: float = 0.2) -> void:
+	## Spawn electrical arc between two points (blue-white zigzag)
+	var arc = _create_electrical_arc(from_pos, to_pos)
+	add_child(arc)
+
+	await get_tree().create_timer(duration).timeout
+	arc.queue_free()
+
+func spawn_welding_sparks(pos: Vector2) -> void:
+	## Spawn welding effect (bright white sparks cascading down)
+	for i in range(12):
+		var color = Color(1.0, 1.0, lerp(0.8, 1.0, randf()))
+		var spark_pos = pos + Vector2(randf_range(-5, 5), 0)
+		_spawn_welding_spark(spark_pos, color)
+
+func spawn_frost(pos: Vector2, radius: float = 30.0) -> void:
+	## Spawn frost/ice effect (blue-white particles on surface)
+	for i in range(8):
+		var offset = Vector2(randf_range(-radius, radius), randf_range(-radius / 2, radius / 2))
+		var color = Color(0.7, 0.9, 1.0, 0.8)
+		_spawn_frost_particle(pos + offset, color)
+
+func spawn_blood(pos: Vector2, count: int = 5) -> void:
+	## Spawn blood/injury particles (red droplets)
+	for i in range(count):
+		var color = Color(0.8, 0.1, 0.1, 0.9)
+		_spawn_particle(pos, color, 0.8, 2.0)
+
+# ============================================================================
+# PARTICLE HELPERS
+# ============================================================================
 
 func _spawn_particle(pos: Vector2, color: Color, lifetime: float, size: float = 2.0, floats: bool = false) -> void:
 	var particle = ColorRect.new()
 	particle.color = color
 	particle.size = Vector2(size, size)
-	particle.position = pos
+	particle.position = pos - Vector2(size / 2, size / 2)
 	add_child(particle)
 
 	# Random velocity
 	var velocity = Vector2(randf_range(-50, 50), randf_range(-80, -20) if floats else randf_range(-50, 50))
-	var gravity = 0.0 if floats else 100.0
 
 	# Animate and remove
 	var tween = create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(particle, "position", pos + velocity * lifetime, lifetime)
+	tween.tween_property(particle, "position", particle.position + velocity * lifetime, lifetime)
 	tween.tween_property(particle, "modulate:a", 0.0, lifetime)
 	tween.chain().tween_callback(particle.queue_free)
+
+func _spawn_debris_chunk(pos: Vector2) -> void:
+	var chunk = ColorRect.new()
+	var size = randf_range(3, 8)
+	chunk.color = Color(0.4, 0.4, 0.45)
+	chunk.size = Vector2(size, size)
+	chunk.position = pos - Vector2(size / 2, size / 2)
+	chunk.pivot_offset = Vector2(size / 2, size / 2)
+	add_child(chunk)
+
+	var velocity = Vector2(randf_range(-80, 80), randf_range(-100, 50))
+	var rotation_speed = randf_range(-720, 720)
+	var lifetime = randf_range(0.8, 1.5)
+
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(chunk, "position", chunk.position + velocity * lifetime + Vector2(0, 50 * lifetime * lifetime), lifetime)
+	tween.tween_property(chunk, "rotation_degrees", rotation_speed * lifetime, lifetime)
+	tween.tween_property(chunk, "modulate:a", 0.0, lifetime).set_delay(lifetime * 0.5)
+	tween.chain().tween_callback(chunk.queue_free)
+
+func _spawn_smoke_particle(pos: Vector2, duration: float) -> void:
+	var smoke = ColorRect.new()
+	var size = randf_range(4, 8)
+	smoke.color = Color(0.3, 0.3, 0.35, 0.6)
+	smoke.size = Vector2(size, size)
+	smoke.position = pos - Vector2(size / 2, size / 2)
+	add_child(smoke)
+
+	var rise_height = randf_range(30, 60)
+	var drift = randf_range(-20, 20)
+	var expand = randf_range(1.5, 2.5)
+
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(smoke, "position", smoke.position + Vector2(drift, -rise_height), duration)
+	tween.tween_property(smoke, "scale", Vector2(expand, expand), duration)
+	tween.tween_property(smoke, "modulate:a", 0.0, duration)
+	tween.chain().tween_callback(smoke.queue_free)
+
+func _spawn_flash(pos: Vector2, color: Color, radius: float, duration: float) -> void:
+	var flash = Node2D.new()
+	flash.position = pos
+	add_child(flash)
+
+	var draw_radius = radius
+
+	flash.draw.connect(func():
+		flash.draw_circle(Vector2.ZERO, draw_radius, color)
+	)
+	flash.queue_redraw()
+
+	var tween = create_tween()
+	tween.tween_property(flash, "modulate:a", 0.0, duration)
+	tween.tween_callback(flash.queue_free)
+
+func _spawn_shockwave(pos: Vector2, size: float) -> void:
+	var ring = Node2D.new()
+	ring.position = pos
+	add_child(ring)
+
+	var ring_radius = 10.0
+	var ring_width = 4.0
+	var ring_color = Color(1.0, 0.8, 0.4, 0.8)
+
+	ring.draw.connect(func():
+		ring.draw_arc(Vector2.ZERO, ring_radius, 0, TAU, 32, ring_color, ring_width)
+	)
+
+	var target_radius = 60.0 * size
+	var duration = 0.3
+
+	var tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_method(func(r): ring_radius = r; ring.queue_redraw(), 10.0, target_radius, duration)
+	tween.tween_method(func(a): ring_color.a = a; ring.queue_redraw(), 0.8, 0.0, duration)
+	tween.chain().tween_callback(ring.queue_free)
+
+func _create_fire_effect(pos: Vector2) -> Node2D:
+	var fire = Node2D.new()
+	fire.position = pos
+
+	# Create multiple flame layers
+	for i in range(3):
+		var flame = ColorRect.new()
+		var size = lerp(12.0, 6.0, float(i) / 2.0)
+		flame.size = Vector2(size, size * 1.5)
+		flame.position = Vector2(-size / 2, -size * 1.5 + i * 3)
+		flame.color = Color(
+			lerp(1.0, 1.0, float(i) / 2.0),
+			lerp(0.3, 0.7, float(i) / 2.0),
+			0.1,
+			lerp(0.9, 0.5, float(i) / 2.0)
+		)
+		fire.add_child(flame)
+
+		# Flicker animation
+		var tween = create_tween().set_loops()
+		tween.tween_property(flame, "scale:y", randf_range(0.8, 1.2), randf_range(0.1, 0.2))
+		tween.tween_property(flame, "scale:y", 1.0, randf_range(0.1, 0.2))
+
+	return fire
+
+func _create_electrical_arc(from_pos: Vector2, to_pos: Vector2) -> Line2D:
+	var arc = Line2D.new()
+	arc.width = 2.0
+	arc.default_color = Color(0.6, 0.8, 1.0)
+	arc.joint_mode = Line2D.LINE_JOINT_ROUND
+
+	# Create zigzag path
+	var points: PackedVector2Array = []
+	var segments = 8
+	var perpendicular = (to_pos - from_pos).orthogonal().normalized()
+
+	for i in range(segments + 1):
+		var t = float(i) / segments
+		var base_point = from_pos.lerp(to_pos, t)
+		var offset = perpendicular * randf_range(-10, 10) if i > 0 and i < segments else Vector2.ZERO
+		points.append(base_point + offset)
+
+	arc.points = points
+
+	# Glow effect (thicker, more transparent line behind)
+	var glow = Line2D.new()
+	glow.width = 6.0
+	glow.default_color = Color(0.4, 0.6, 1.0, 0.3)
+	glow.points = points
+	arc.add_child(glow)
+	glow.z_index = -1
+
+	return arc
+
+func _spawn_welding_spark(pos: Vector2, color: Color) -> void:
+	var spark = ColorRect.new()
+	spark.color = color
+	spark.size = Vector2(2, 2)
+	spark.position = pos
+	add_child(spark)
+
+	# Cascade downward with gravity
+	var velocity = Vector2(randf_range(-30, 30), randf_range(-60, -20))
+	var lifetime = randf_range(0.4, 0.8)
+
+	var tween = create_tween()
+	tween.set_parallel(true)
+	# Parabolic path (gravity effect)
+	tween.tween_property(spark, "position:x", pos.x + velocity.x * lifetime, lifetime)
+	tween.tween_method(
+		func(t): spark.position.y = pos.y + velocity.y * t + 150 * t * t,
+		0.0, lifetime, lifetime
+	)
+	tween.tween_property(spark, "modulate:a", 0.0, lifetime).set_delay(lifetime * 0.6)
+	tween.chain().tween_callback(spark.queue_free)
+
+func _spawn_frost_particle(pos: Vector2, color: Color) -> void:
+	var frost = ColorRect.new()
+	frost.color = color
+	frost.size = Vector2(3, 3)
+	frost.position = pos
+	frost.modulate.a = 0.0
+	add_child(frost)
+
+	# Fade in and stay
+	var tween = create_tween()
+	tween.tween_property(frost, "modulate:a", 0.8, 0.3)
+	tween.tween_interval(2.0)
+	tween.tween_property(frost, "modulate:a", 0.0, 1.0)
+	tween.tween_callback(frost.queue_free)
 
 # ============================================================================
 # IMPACT EFFECTS

@@ -4,9 +4,18 @@
 **Primary Tension:** Resource Management vs Crew Morale
 **Design Inspiration:** FTL meets The Martian's transit sequences
 
+> **Detailed References:**
+> - [Phase 2 Complete Systems](mot/phase-2-systems.md) - Full mechanics reference
+> - [CRISIS Mode](mot/realtime-crisis-system.md) - Overcooked-style emergency management
+> - [Control Surfaces](mot/control-surfaces.md) - Interactive ship systems
+
 ## Overview
 
 The journey to Mars. Six months (minimum) in a metal tube with four people. The ship you built in Phase 1 now reveals its strengths and weaknesses. This phase is about managing the slow burn of resources and sanity while responding to crises.
+
+Phase 2 operates in two modes:
+1. **Normal Mode** - Turn-based event management (Oregon Trail / FTL style)
+2. **CRISIS Mode** - Real-time emergency management (Overcooked / Apollo 13 style)
 
 ## The Submarine Captain Fantasy
 
@@ -287,3 +296,67 @@ The transition to Phase 3:
 - Crew personality combinations
 - Multiple valid resource strategies
 - Optional speed records (can you do it in 5 months?)
+
+---
+
+## Advanced Systems
+
+### Control Surfaces
+
+The ship has 15 interactive control surfaces that crew can manipulate:
+
+| Category | Surfaces | Effect |
+|----------|----------|--------|
+| Defense | Shield Emitter | Damage reduction (costs power) |
+| Propulsion | Engine Throttle | Speed vs fuel trade-off |
+| Life Support | O2 Recycler, Water Recycler | Resource production |
+| Power | Reactor Core, Coolant, Solar Panels | Power generation and heat |
+| Navigation | Nav Computer, External Sensors | Course and event warning |
+| Other | Comms, Medical Console, Cargo Loader, Doors | Various effects |
+
+Each surface has WORKING/USING/BROKEN states. See [Control Surfaces](mot/control-surfaces.md) for full details.
+
+### CRISIS Mode
+
+When major failures occur, the game enters CRISIS mode:
+
+- **Duration:** 45-120 seconds of real-time crisis management
+- **Mechanics:** Tile-based movement, item fetching, multi-step repairs
+- **Pressure:** AI-controlled crew barely cope (by design)
+- **Victory:** Resolve all crises before catastrophic failure
+
+Key features:
+- A* pathfinding with crew blocking
+- Items must be fetched from cargo bay
+- Specialist crew fix crises faster
+- Panic behavior when overwhelmed
+
+See [CRISIS Mode](mot/realtime-crisis-system.md) for full mechanics.
+
+### Hull Events
+
+External hazards that damage the ship:
+
+| Event | Damage | Visual |
+|-------|--------|--------|
+| Asteroid Impact | Room damage, surface breaks | Explosion, debris |
+| Solar Flare | Power surge, electronics damage | Yellow screen wash |
+| Micrometeorite | Minor hull damage | Small sparks |
+| Space Debris | Variable damage | Tumbling objects |
+
+External sensors (when boosted) provide early warning.
+
+### Power Balance
+
+All systems draw or generate power:
+
+```
+Net Power = (Reactor + Solar + Emergency) - (All Surface Drains)
+
+Positive: Batteries charge
+Zero: Balanced
+Negative: Batteries drain
+Below -5: CRITICAL - systems fail
+```
+
+Trade-offs are constant: shields vs sensors vs healing vs propulsion.

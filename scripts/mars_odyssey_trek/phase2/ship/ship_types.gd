@@ -34,7 +34,9 @@ enum CrewState {
 	MOVING,     # Walking/running to destination
 	WORKING,    # Performing task at location
 	RESTING,    # In quarters recovering
-	EMERGENCY   # Responding to crisis (running)
+	EMERGENCY,  # Responding to crisis (running)
+	EVA,        # Outside ship on spacewalk
+	TETHERED,   # Drifting on tether (needs rescue)
 }
 
 # ============================================================================
@@ -48,7 +50,9 @@ enum TaskType {
 	REROUTE_POWER,  # Power system work
 	TREAT_PATIENT,  # Medical care
 	REST,           # Recover fatigue
-	RETRIEVE_SUPPLIES  # Get supplies from cargo
+	RETRIEVE_SUPPLIES,  # Get supplies from cargo
+	EVA_REPAIR,     # Exterior repair work
+	EVA_RESCUE,     # Rescue tethered crewmate
 }
 
 # Task durations in seconds (game time)
@@ -59,15 +63,39 @@ const TASK_DURATIONS = {
 	TaskType.REROUTE_POWER: 20.0,
 	TaskType.TREAT_PATIENT: 25.0,
 	TaskType.REST: 60.0,
-	TaskType.RETRIEVE_SUPPLIES: 15.0
+	TaskType.RETRIEVE_SUPPLIES: 15.0,
+	TaskType.EVA_REPAIR: 8.0,     # Work time at exterior location
+	TaskType.EVA_RESCUE: 5.0,     # Time to retrieve tethered crew
 }
 
 # ============================================================================
-# MOVEMENT
+# MOVEMENT (Continuous - Legacy)
 # ============================================================================
 
 const CREW_WALK_SPEED = 50.0   # pixels/second normal
 const CREW_RUN_SPEED = 120.0   # pixels/second emergency
+
+# ============================================================================
+# TILE-BASED MOVEMENT (CRISIS Mode)
+# ============================================================================
+
+const TILE_SIZE = 16  # pixels per tile
+
+# Movement timing (seconds per tile step)
+const TILE_WALK_TIME = 0.4   # seconds per tile walking
+const TILE_RUN_TIME = 0.25   # seconds per tile running
+
+# Grid dimensions
+const GRID_WIDTH = 32   # tiles
+const GRID_HEIGHT = 12  # tiles
+
+# Grid origin (top-left of ship interior in world coords)
+const GRID_ORIGIN = Vector2(155, 180)
+
+# Action timing (CRISIS mode)
+const PICKUP_TIME = 0.5       # seconds to pick up item
+const DROP_TIME = 0.5         # seconds to drop item
+const WORK_START_TIME = 0.3   # seconds to begin working
 
 # ============================================================================
 # ROOM DEFINITIONS

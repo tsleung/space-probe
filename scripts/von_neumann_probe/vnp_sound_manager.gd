@@ -30,6 +30,9 @@ var _cached_explosion_small: AudioStreamWAV = null
 var _cached_explosion_big: AudioStreamWAV = null
 var _cached_click: AudioStreamWAV = null
 var _cached_capture: AudioStreamWAV = null
+var _cached_hellstorm_warning: AudioStreamWAV = null
+var _cached_arc_storm: AudioStreamWAV = null
+var _cached_void_tear: AudioStreamWAV = null
 
 func _ready():
 	_create_sound_pools()
@@ -55,6 +58,9 @@ func _precache_sounds():
 	_cached_explosion_big = _generate_explosion(true)
 	_cached_click = _generate_click()
 	_cached_capture = _generate_capture()
+	_cached_hellstorm_warning = _generate_hellstorm_warning()
+	_cached_arc_storm = _generate_arc_storm()
+	_cached_void_tear = _generate_void_tear()
 
 
 func _create_player() -> AudioStreamPlayer:
@@ -108,7 +114,7 @@ func play_pdc():
 func play_turbolaser():
 	var player = _get_available_player(weapon_players)
 	player.stream = _cached_turbolaser
-	player.volume_db = linear_to_db(master_volume * 0.5)
+	player.volume_db = linear_to_db(master_volume * 0.45)  # Reduced for mix balance
 	player.pitch_scale = randf_range(0.95, 1.05)
 	player.play()
 
@@ -124,10 +130,10 @@ func play_explosion(size: int):
 	var player = _get_available_player(explosion_players)
 	if size >= VnpTypes.ShipSize.LARGE:
 		player.stream = _cached_explosion_big
-		player.volume_db = linear_to_db(master_volume * 0.5)
+		player.volume_db = linear_to_db(master_volume * 0.4)  # Reduced to prevent clipping in intense battles
 	else:
 		player.stream = _cached_explosion_small
-		player.volume_db = linear_to_db(master_volume * 0.4)
+		player.volume_db = linear_to_db(master_volume * 0.3)  # Reduced for mix headroom
 	player.pitch_scale = randf_range(0.85, 1.15)
 	player.play()
 
@@ -143,6 +149,27 @@ func play_ui_click():
 	var player = _get_available_player(ui_players)
 	player.stream = _cached_click
 	player.volume_db = linear_to_db(master_volume * 0.3)
+	player.play()
+
+
+func play_hellstorm_warning():
+	var player = _get_available_player(explosion_players)
+	player.stream = _cached_hellstorm_warning
+	player.volume_db = linear_to_db(master_volume * 0.45)  # Balanced with other base weapons
+	player.play()
+
+
+func play_arc_storm():
+	var player = _get_available_player(explosion_players)
+	player.stream = _cached_arc_storm
+	player.volume_db = linear_to_db(master_volume * 0.45)  # Balanced with other base weapons
+	player.play()
+
+
+func play_void_tear():
+	var player = _get_available_player(explosion_players)
+	player.stream = _cached_void_tear
+	player.volume_db = linear_to_db(master_volume * 0.45)  # Balanced for mix
 	player.play()
 
 
@@ -382,3 +409,99 @@ func _create_wav(samples: PackedByteArray, sample_rate: int) -> AudioStreamWAV:
 	wav.mix_rate = sample_rate
 	wav.stereo = false
 	return wav
+
+
+# === BASE WEAPON SOUNDS ===
+
+func _generate_hellstorm_warning() -> AudioStreamWAV:
+	# Descending air raid siren - ominous incoming bombardment
+	var sample_rate = 22050
+	var duration = 0.5
+	var samples = PackedByteArray()
+	var num_samples = int(sample_rate * duration)
+
+	var start_freq = PENTA[12]  # High
+	var end_freq = PENTA[5]     # Mid
+
+	for i in range(num_samples):
+		var t = float(i) / sample_rate
+		var progress = t / duration
+
+		# Envelope: builds then sustains
+		var envelope = min(progress * 4, 1.0) * 0.4
+
+		# Descending whistle with wobble
+		var freq = lerp(start_freq, end_freq, progress * progress)
+		var wobble = sin(t * 12) * freq * 0.03
+
+		var sample = sin(t * (freq + wobble) * TAU) * envelope
+		# Add harmonic for richness
+		sample += sin(t * freq * 2 * TAU) * envelope * 0.2
+
+		samples.append(int(clamp(sample * 127, -128, 127)) + 128)
+
+	return _create_wav(samples, sample_rate)
+
+
+func _generate_arc_storm() -> AudioStreamWAV:
+	# Electrical crackling with rising charge
+	var sample_rate = 22050
+	var duration = 0.4
+	var samples = PackedByteArray()
+	var num_samples = int(sample_rate * duration)
+
+	var base_freq = PENTA[8]
+
+	for i in range(num_samples):
+		var t = float(i) / sample_rate
+		var progress = t / duration
+
+		# Build up then release
+		var envelope = sin(progress * PI) * 0.5
+
+		# Multiple frequency components for electrical feel
+		var sample = sin(t * base_freq * TAU) * 0.5
+		sample += sin(t * base_freq * 1.5 * TAU) * 0.3  # Dissonant for electricity
+		sample += sin(t * base_freq * 2.1 * TAU) * 0.2  # More dissonance
+
+		# Add crackle (noise bursts)
+		if randf() < 0.1:
+			sample += (randf() - 0.5) * 0.8
+
+		sample *= envelope
+		samples.append(int(clamp(sample * 127, -128, 127)) + 128)
+
+	return _create_wav(samples, sample_rate)
+
+
+func _generate_void_tear() -> AudioStreamWAV:
+	# Deep rumble with reverse reverb feel - reality tearing
+	var sample_rate = 22050
+	var duration = 0.6
+	var samples = PackedByteArray()
+	var num_samples = int(sample_rate * duration)
+
+	var sub_freq = PENTA[0] * 0.5  # Very low
+
+	for i in range(num_samples):
+		var t = float(i) / sample_rate
+		var progress = t / duration
+
+		# Reverse envelope - builds to climax at end
+		var envelope = pow(progress, 2) * 0.5
+
+		# Deep rumble
+		var sample = sin(t * sub_freq * TAU) * 0.6
+		sample += sin(t * sub_freq * 1.5 * TAU) * 0.3
+
+		# Add unsettling high harmonics that fade in
+		sample += sin(t * PENTA[10] * TAU) * progress * 0.2
+		sample += sin(t * PENTA[11] * TAU) * progress * 0.15
+
+		# Subtle noise for texture
+		sample += (randf() - 0.5) * 0.1 * progress
+
+		sample *= envelope
+		samples.append(int(clamp(sample * 127, -128, 127)) + 128)
+
+	return _create_wav(samples, sample_rate)

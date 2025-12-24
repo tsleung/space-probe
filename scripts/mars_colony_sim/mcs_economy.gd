@@ -10,20 +10,34 @@ const _MCSTypes = preload("res://scripts/mars_colony_sim/mcs_types.gd")
 const _MCSPopulation = preload("res://scripts/mars_colony_sim/mcs_population.gd")
 
 # ============================================================================
-# CONSTANTS
+# DEFAULT CONSTANTS (used if no balance dict provided)
 # ============================================================================
 
 # Per-colonist consumption per year (with advanced recycling/efficiency tech)
-const FOOD_PER_COLONIST = 50.0  # Highly efficient future farming
-const WATER_PER_COLONIST = 20.0  # 90% recycling
-const OXYGEN_PER_COLONIST = 5.0  # Closed-loop life support
-const POWER_PER_COLONIST = 2.0  # Efficient systems
+const DEFAULT_FOOD_PER_COLONIST = 50.0  # Highly efficient future farming
+const DEFAULT_WATER_PER_COLONIST = 20.0  # 90% recycling
+const DEFAULT_OXYGEN_PER_COLONIST = 5.0  # Closed-loop life support
+const DEFAULT_POWER_PER_COLONIST = 2.0  # Efficient systems
+
+## Get consumption rates from balance dict or use defaults
+static func get_consumption_rates(balance: Dictionary = {}) -> Dictionary:
+	var consumption = balance.get("consumption", {})
+	var difficulty = balance.get("difficulty", {})
+	var multiplier = difficulty.get("consumption_multiplier", 1.0)
+
+	return {
+		"food": consumption.get("food_per_colonist_per_year", DEFAULT_FOOD_PER_COLONIST) * multiplier,
+		"water": consumption.get("water_per_colonist_per_year", DEFAULT_WATER_PER_COLONIST) * multiplier,
+		"oxygen": consumption.get("oxygen_per_colonist_per_year", DEFAULT_OXYGEN_PER_COLONIST) * multiplier,
+		"power": consumption.get("power_per_colonist", DEFAULT_POWER_PER_COLONIST) * multiplier
+	}
 
 # ============================================================================
 # RESOURCE PRODUCTION & CONSUMPTION
 # ============================================================================
 
-## Calculate yearly production from all buildings
+## Calculate yearly production from all buildings (TIER-AWARE)
+## Higher tiers = more production, fewer workers needed
 static func calc_yearly_production(buildings: Array, colonists: Array, _resources: Dictionary = {}) -> Dictionary:
 	var production: Dictionary = {}
 
@@ -32,22 +46,42 @@ static func calc_yearly_production(buildings: Array, colonists: Array, _resource
 			continue
 
 		var efficiency = calc_building_efficiency(building, colonists)
-		var building_def = _MCSTypes.get_building_definition(building.type)
+		var tier = building.get("tier", 1)
+		var building_type = building.get("type", 0)
 
-		var produces = building_def.get("produces", {})
+		# Get tier-based stats if available, otherwise fall back to base definition
+		var tier_stats = _MCSTypes.get_tier_stats(building_type, tier)
+
+		# Tier-based production (from BUILDING_TIER_STATS)
+		var produces = tier_stats.get("production", {})
 		for resource_name in produces:
 			var base_amount = produces[resource_name]
 			var actual = base_amount * efficiency
 			production[resource_name] = production.get(resource_name, 0.0) + actual
 
-		# Power generation
-		if building_def.has("power_generation"):
-			production["power"] = production.get("power", 0.0) + building_def.power_generation * efficiency
+		# Fall back to building definition if no tier production defined
+		if produces.is_empty():
+			var building_def = _MCSTypes.get_building_definition(building_type)
+			var base_produces = building_def.get("produces", {})
+			for resource_name in base_produces:
+				var base_amount = base_produces[resource_name]
+				var actual = base_amount * efficiency
+				production[resource_name] = production.get(resource_name, 0.0) + actual
+
+		# Tier-based power generation
+		if tier_stats.has("power_gen"):
+			production["power"] = production.get("power", 0.0) + tier_stats.power_gen * efficiency
+		else:
+			# Fall back to building definition
+			var building_def = _MCSTypes.get_building_definition(building_type)
+			if building_def.has("power_generation"):
+				production["power"] = production.get("power", 0.0) + building_def.power_generation * efficiency
 
 	return production
 
 ## Calculate yearly consumption from buildings and colonists
-static func calc_yearly_consumption(colonists_or_buildings, buildings_or_none = null) -> Dictionary:
+## balance: Optional balance dict - if provided, uses those rates with difficulty multiplier
+static func calc_yearly_consumption(colonists_or_buildings, buildings_or_none = null, balance: Dictionary = {}) -> Dictionary:
 	var colonists: Array
 	var buildings: Array
 
@@ -67,15 +101,16 @@ static func calc_yearly_consumption(colonists_or_buildings, buildings_or_none = 
 		buildings = buildings_or_none if buildings_or_none else []
 
 	var consumption: Dictionary = {}
+	var rates = get_consumption_rates(balance)
 
-	# Colonist consumption
+	# Colonist consumption (with difficulty multiplier applied via rates)
 	var alive_count = _MCSPopulation.count_alive(colonists)
-	consumption["food"] = alive_count * FOOD_PER_COLONIST
-	consumption["water"] = alive_count * WATER_PER_COLONIST
-	consumption["oxygen"] = alive_count * OXYGEN_PER_COLONIST
+	consumption["food"] = alive_count * rates.food
+	consumption["water"] = alive_count * rates.water
+	consumption["oxygen"] = alive_count * rates.oxygen
 
 	# Building power consumption
-	var total_power = alive_count * POWER_PER_COLONIST
+	var total_power = alive_count * rates.power
 	for building in buildings:
 		if not building.is_operational or building.is_under_construction:
 			continue
@@ -115,17 +150,28 @@ static func apply_yearly_resources(resources: Dictionary, production: Dictionary
 # BUILDING OPERATIONS
 # ============================================================================
 
-## Calculate building efficiency (0.0 - 1.0)
+## Calculate building efficiency (0.0 - 1.0) - TIER-AWARE
+## Higher tiers need fewer workers for same efficiency
 static func calc_building_efficiency(building: Dictionary, colonists: Array) -> float:
 	if not building.is_operational:
 		return 0.0
 
 	var efficiency = building.condition / 100.0
 
-	# Worker staffing
-	var building_def = _MCSTypes.get_building_definition(building.type)
-	var required = building_def.get("required_workers", 0)
+	# Get tier-based worker requirements (higher tiers = fewer workers)
+	var tier = building.get("tier", 1)
+	var building_type = building.get("type", 0)
+	var tier_stats = _MCSTypes.get_tier_stats(building_type, tier)
 
+	# Use tier-based workers if defined, otherwise fall back to building definition
+	var required: int
+	if tier_stats.has("workers"):
+		required = tier_stats.workers
+	else:
+		var building_def = _MCSTypes.get_building_definition(building_type)
+		required = building_def.get("required_workers", 0)
+
+	# Worker staffing efficiency
 	if required > 0:
 		var assigned = building.assigned_workers.size()
 		if assigned < required:
@@ -261,17 +307,34 @@ static func auto_assign_workers(colonists: Array, buildings: Array) -> Dictionar
 # BALANCE CALCULATIONS
 # ============================================================================
 
-## Calculate power balance
-static func calc_power_balance(buildings: Array, colonists: Array) -> Dictionary:
+## Calculate power balance (TIER-AWARE)
+## Higher tiers generate more power and use less power
+static func calc_power_balance(buildings: Array, colonists: Array, balance: Dictionary = {}) -> Dictionary:
+	var rates = get_consumption_rates(balance)
 	var generation = 0.0
-	var consumption = _MCSPopulation.count_alive(colonists) * POWER_PER_COLONIST
+	var consumption = _MCSPopulation.count_alive(colonists) * rates.power
 
 	for building in buildings:
 		if not building.is_operational or building.is_under_construction:
 			continue
-		var building_def = _MCSTypes.get_building_definition(building.type)
-		generation += building_def.get("power_generation", 0.0) * calc_building_efficiency(building, colonists)
-		consumption += building_def.get("power_consumption", 0.0)
+
+		var tier = building.get("tier", 1)
+		var building_type = building.get("type", 0)
+		var tier_stats = _MCSTypes.get_tier_stats(building_type, tier)
+		var building_def = _MCSTypes.get_building_definition(building_type)
+		var efficiency = calc_building_efficiency(building, colonists)
+
+		# Tier-based power generation
+		if tier_stats.has("power_gen"):
+			generation += tier_stats.power_gen * efficiency
+		elif building_def.has("power_generation"):
+			generation += building_def.power_generation * efficiency
+
+		# Tier-based power consumption (higher tiers use less power)
+		if tier_stats.has("power"):
+			consumption += tier_stats.power
+		else:
+			consumption += building_def.get("power_consumption", 0.0)
 
 	return {
 		"generation": generation,
@@ -279,12 +342,21 @@ static func calc_power_balance(buildings: Array, colonists: Array) -> Dictionary
 		"balance": generation - consumption
 	}
 
-## Calculate housing balance
+## Calculate housing balance (TIER-AWARE)
+## Higher tiers have more housing capacity
 static func calc_housing_balance(buildings: Array, colonists: Array) -> Dictionary:
 	var capacity = 0
 	for building in buildings:
 		if building.is_operational and not building.is_under_construction:
-			capacity += building.housing_capacity
+			var tier = building.get("tier", 1)
+			var building_type = building.get("type", 0)
+			var tier_stats = _MCSTypes.get_tier_stats(building_type, tier)
+
+			# Use tier-based housing capacity if defined
+			if tier_stats.has("housing_capacity"):
+				capacity += tier_stats.housing_capacity
+			else:
+				capacity += building.get("housing_capacity", 0)
 
 	var population = _MCSPopulation.count_alive(colonists)
 	return {

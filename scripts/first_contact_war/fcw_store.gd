@@ -42,16 +42,56 @@ signal intercept_started(pursuer: Dictionary, target: Dictionary)
 var _state: Dictionary = {}
 var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
+## Determinism support
+var _seed: int = -1
+var _action_history: Array = []
+var _tick_count: int = 0
+
 # ============================================================================
 # LIFECYCLE
 # ============================================================================
 
 func _ready() -> void:
-	_rng.randomize()
+	# Don't randomize here - let start_new_game handle seeding
+	pass
 
-func start_new_game() -> void:
+func start_new_game(seed: int = -1) -> void:
+	## Start a new game with optional seed for determinism
+	## If seed == -1, generates a random seed (non-deterministic start)
+	## If seed is provided, game will be fully deterministic
+	if seed == -1:
+		_rng.randomize()
+		_seed = _rng.randi()
+	else:
+		_seed = seed
+
+	_rng.seed = _seed
+	_action_history = []
+	_tick_count = 0
 	_state = FCWTypes.create_initial_state()
 	state_changed.emit(_state)
+
+func get_seed() -> int:
+	## Get the seed used for this game (for replay)
+	return _seed
+
+func get_action_history() -> Array:
+	## Get the full action history (for replay)
+	return _action_history.duplicate(true)
+
+func get_tick_count() -> int:
+	## Get current tick count
+	return _tick_count
+
+func get_recording() -> Dictionary:
+	## Get a complete recording of this game for replay/analysis
+	const FCWReplayManager = preload("res://scripts/first_contact_war/fcw_replay_manager.gd")
+	return FCWReplayManager.create_recording(_seed, _action_history, _state)
+
+func save_recording(filepath: String) -> bool:
+	## Save recording to file
+	const FCWReplayManager = preload("res://scripts/first_contact_war/fcw_replay_manager.gd")
+	return FCWReplayManager.save_recording(get_recording(), filepath)
 
 # ============================================================================
 # DISPATCH
@@ -60,6 +100,15 @@ func start_new_game() -> void:
 func dispatch(action: Dictionary) -> void:
 	var old_state = _state
 	_state = FCWReducer.reduce(_state, action)
+
+	# Track action for replay (store without random_values to save space, they're regenerated from seed)
+	var recorded_action = action.duplicate(true)
+	if recorded_action.has("random_values"):
+		recorded_action.erase("random_values")  # Random values are deterministic from seed
+	_action_history.append({
+		"tick": _tick_count,
+		"action": recorded_action
+	})
 
 	# Emit specific signals based on changes
 	_emit_change_signals(old_state, _state, action)
@@ -70,13 +119,14 @@ func dispatch_tick() -> void:
 	## Advance game time by 1 hour (the base time unit)
 	## This is the primary way time advances in the game
 	var random_values: Array = []
-	for i in range(10):
+	for i in range(20):  # Generate more random values for all needs
 		random_values.append(_rng.randf())
 
 	var old_state = _state
 	var old_time = old_state.get("game_time", 0.0)
 
 	dispatch(FCWReducer.action_tick(random_values))
+	_tick_count += 1
 
 	var new_time = _state.get("game_time", 0.0)
 

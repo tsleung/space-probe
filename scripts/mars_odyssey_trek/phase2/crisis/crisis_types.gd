@@ -66,6 +66,7 @@ const BASE_SPAWN_CHANCE = 0.15
 # ============================================================================
 
 # Each crisis type's properties
+# CRISIS mode adds: requires_item, is_station_task, crisis_work_time
 const CRISIS_DEFINITIONS = {
 	CrisisType.O2_LEAK: {
 		"name": "O2 Leak",
@@ -75,7 +76,11 @@ const CRISIS_DEFINITIONS = {
 		"fix_time": 6.0,
 		"best_crew": CrewRole.SCIENTIST,
 		"icon": "O2",
-		"sound": "hiss"
+		"sound": "hiss",
+		# CRISIS mode properties
+		"requires_item": "spare_part",
+		"is_station_task": false,
+		"crisis_work_time": 4.0  # Work time after item delivered
 	},
 	CrisisType.POWER_FLUCTUATION: {
 		"name": "Power Fluctuation",
@@ -85,7 +90,11 @@ const CRISIS_DEFINITIONS = {
 		"fix_time": 5.0,
 		"best_crew": CrewRole.ENGINEER,
 		"icon": "PWR",
-		"sound": "electrical"
+		"sound": "electrical",
+		# CRISIS mode: station task (no item needed)
+		"requires_item": "",
+		"is_station_task": true,
+		"crisis_work_time": 5.0  # Console work time
 	},
 	CrisisType.WATER_RECYCLER: {
 		"name": "Water Recycler Jam",
@@ -95,7 +104,11 @@ const CRISIS_DEFINITIONS = {
 		"fix_time": 7.0,
 		"best_crew": CrewRole.SCIENTIST,
 		"icon": "H2O",
-		"sound": "gurgle"
+		"sound": "gurgle",
+		# CRISIS mode properties
+		"requires_item": "spare_part",
+		"is_station_task": false,
+		"crisis_work_time": 4.0
 	},
 	CrisisType.HULL_STRESS: {
 		"name": "Hull Stress",
@@ -106,7 +119,11 @@ const CRISIS_DEFINITIONS = {
 		"best_crew": CrewRole.ENGINEER,
 		"icon": "HULL",
 		"sound": "creak",
-		"special": "breach_risk"  # Can cause sudden O2 loss
+		"special": "breach_risk",  # Can cause sudden O2 loss
+		# CRISIS mode properties
+		"requires_item": "patch_kit",
+		"is_station_task": false,
+		"crisis_work_time": 5.0
 	},
 	CrisisType.MEDICAL_EMERGENCY: {
 		"name": "Medical Emergency",
@@ -116,7 +133,11 @@ const CRISIS_DEFINITIONS = {
 		"fix_time": 5.0,
 		"best_crew": CrewRole.MEDICAL,
 		"icon": "MED",
-		"sound": "alarm"
+		"sound": "alarm",
+		# CRISIS mode properties
+		"requires_item": "med_kit",
+		"is_station_task": false,
+		"crisis_work_time": 4.0
 	},
 	CrisisType.NAVIGATION_DRIFT: {
 		"name": "Navigation Drift",
@@ -126,7 +147,11 @@ const CRISIS_DEFINITIONS = {
 		"fix_time": 8.0,
 		"best_crew": CrewRole.COMMANDER,
 		"icon": "NAV",
-		"sound": "beep"
+		"sound": "beep",
+		# CRISIS mode: station task (no item needed)
+		"requires_item": "",
+		"is_station_task": true,
+		"crisis_work_time": 4.0
 	},
 	CrisisType.COMMS_FAILURE: {
 		"name": "Comms Failure",
@@ -136,7 +161,11 @@ const CRISIS_DEFINITIONS = {
 		"fix_time": 6.0,
 		"best_crew": CrewRole.COMMANDER,
 		"icon": "COM",
-		"sound": "static"
+		"sound": "static",
+		# CRISIS mode: station task (no item needed)
+		"requires_item": "",
+		"is_station_task": true,
+		"crisis_work_time": 3.0
 	},
 	CrisisType.FIRE: {
 		"name": "Fire!",
@@ -147,7 +176,11 @@ const CRISIS_DEFINITIONS = {
 		"best_crew": CrewRole.ENGINEER,
 		"icon": "FIRE",
 		"sound": "fire",
-		"special": "spreads"  # Can spread to adjacent rooms
+		"special": "spreads",  # Can spread to adjacent rooms
+		# CRISIS mode properties
+		"requires_item": "extinguisher",
+		"is_station_task": false,
+		"crisis_work_time": 3.0
 	},
 	CrisisType.EQUIPMENT_FAULT: {
 		"name": "Equipment Fault",
@@ -157,7 +190,11 @@ const CRISIS_DEFINITIONS = {
 		"fix_time": 6.0,
 		"best_crew": CrewRole.ENGINEER,
 		"icon": "EQPT",
-		"sound": "mechanical"
+		"sound": "mechanical",
+		# CRISIS mode properties
+		"requires_item": "spare_part",
+		"is_station_task": false,
+		"crisis_work_time": 4.0
 	},
 	CrisisType.FOOD_CONTAMINATION: {
 		"name": "Food Contamination",
@@ -167,7 +204,11 @@ const CRISIS_DEFINITIONS = {
 		"fix_time": 8.0,
 		"best_crew": CrewRole.SCIENTIST,
 		"icon": "FOOD",
-		"sound": "squelch"
+		"sound": "squelch",
+		# CRISIS mode properties
+		"requires_item": "sanitizer",
+		"is_station_task": false,
+		"crisis_work_time": 4.0
 	}
 }
 
@@ -194,7 +235,7 @@ const SEVERITY_COLORS = {
 # ============================================================================
 
 # Multiplier for fix time when crew matches best_crew
-const SPECIALIST_BONUS = 0.5  # 50% faster
+const SPECIALIST_BONUS = 0.2  # 20% faster (1.2x)
 
 # Commander provides this bonus to adjacent crew
 const COMMANDER_ADJACENT_BONUS = 0.25  # 25% faster
@@ -261,7 +302,7 @@ static func get_crew_efficiency(crisis: Dictionary, crew_role: String) -> float:
 	var role_enum = _role_string_to_enum(crew_role)
 
 	if role_enum == best_crew:
-		return 1.0 + SPECIALIST_BONUS  # 1.5x speed
+		return 1.0 + SPECIALIST_BONUS  # 1.2x speed
 	elif role_enum == CrewRole.COMMANDER:
 		return 1.0 + COMMANDER_ADJACENT_BONUS  # 1.25x speed
 	else:
@@ -288,3 +329,32 @@ static func get_random_room() -> ShipTypes.RoomType:
 		ShipTypes.RoomType.CARGO_BAY
 	]
 	return rooms[randi() % rooms.size()]
+
+# ============================================================================
+# CRISIS MODE HELPERS
+# ============================================================================
+
+static func crisis_requires_item(crisis_type: CrisisType) -> bool:
+	## Check if crisis needs an item to fix (vs station task)
+	var def = CRISIS_DEFINITIONS.get(crisis_type, {})
+	var item = def.get("requires_item", "")
+	return item != ""
+
+static func get_required_item(crisis_type: CrisisType) -> String:
+	## Get the item type string needed to fix this crisis
+	var def = CRISIS_DEFINITIONS.get(crisis_type, {})
+	return def.get("requires_item", "")
+
+static func is_station_task(crisis_type: CrisisType) -> bool:
+	## Check if crisis is a station task (no item needed)
+	var def = CRISIS_DEFINITIONS.get(crisis_type, {})
+	return def.get("is_station_task", false)
+
+static func get_crisis_work_time(crisis_type: CrisisType) -> float:
+	## Get the work time for CRISIS mode (after reaching location/delivering item)
+	var def = CRISIS_DEFINITIONS.get(crisis_type, {})
+	return def.get("crisis_work_time", 4.0)
+
+static func get_crisis_room(crisis: Dictionary) -> ShipTypes.RoomType:
+	## Get the room where a crisis is happening
+	return crisis.get("room", ShipTypes.RoomType.ENGINEERING)

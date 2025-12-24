@@ -15,7 +15,8 @@ const MAX_ACTIVE_PARTICLES = 30  # Limit simultaneous particle effects
 var team: int = -1
 var weapon_type: int = -1
 var damage: float = 0
-var target_id: int = -1
+var target_id = -1  # Can be int (ship) or String (factory)
+var is_factory_target: bool = false  # True if targeting a factory
 var store = null      # Passed via init for dispatch
 var vnp_main = null   # Passed via init for screen shake
 
@@ -62,6 +63,7 @@ func init(data: Dictionary):
 	weapon_type = data.get("weapon_type", VnpTypes.WeaponType.GUN)
 	damage = data.get("damage", 10)
 	target_id = data.get("target_id", -1)
+	is_factory_target = data.get("is_factory_target", false)
 	store = data.get("store", null)
 	vnp_main = data.get("vnp_main", null)
 
@@ -87,6 +89,7 @@ func _reset_state():
 	is_ready = false
 	active = false
 	lifetime = 2.0
+	is_factory_target = false
 
 	# Clear trail
 	trail_points.clear()
@@ -114,7 +117,7 @@ func deactivate():
 
 	# Clean up any child visual elements and timers added during setup
 	for child in get_children():
-		if child.name == "RailGlow" or child.name == "TurboGlow":
+		if child.name in ["RailGlow", "RailCore", "TurboGlow", "TurboCore", "MissileEngine"]:
 			child.queue_free()
 		elif child is Timer:
 			child.stop()
@@ -165,23 +168,32 @@ func _setup_railgun():
 	lifetime = 1.5
 	max_pierces = 3
 
-	# Sharp elongated slug
+	# Larger, more visible sharp elongated slug
 	$Polygon2D.polygon = PackedVector2Array([
-		Vector2(-10, -2), Vector2(14, -1), Vector2(18, 0), Vector2(14, 1), Vector2(-10, 2)
+		Vector2(-14, -3), Vector2(18, -2), Vector2(24, 0), Vector2(18, 2), Vector2(-14, 3)
 	])
 
-	# Add a glow outline
+	# Add bright glow outline - more visible
 	var rail_color = VnpTypes.get_weapon_color(team, VnpTypes.WeaponType.GUN)
 	var glow = Line2D.new()
 	glow.name = "RailGlow"
-	glow.width = 4.0
-	glow.default_color = Color(rail_color.r, rail_color.g, rail_color.b, 0.4)
-	glow.add_point(Vector2(-10, 0))
-	glow.add_point(Vector2(18, 0))
+	glow.width = 8.0  # Wider glow
+	glow.default_color = Color(rail_color.r, rail_color.g, rail_color.b, 0.6)
+	glow.add_point(Vector2(-14, 0))
+	glow.add_point(Vector2(24, 0))
 	glow.z_index = -1
 	add_child(glow)
 
-	_create_line_trail(2.0)
+	# Add a bright core line
+	var core = Line2D.new()
+	core.name = "RailCore"
+	core.width = 3.0
+	core.default_color = Color(rail_color.r * 1.5, rail_color.g * 1.5, rail_color.b * 1.5, 1.0)
+	core.add_point(Vector2(-14, 0))
+	core.add_point(Vector2(24, 0))
+	add_child(core)
+
+	_create_line_trail(4.0)  # Thicker trail
 
 
 func _setup_missile(data: Dictionary):
@@ -193,10 +205,12 @@ func _setup_missile(data: Dictionary):
 	arc_t = 0.0
 
 	# Get target position
-	var store = _get_store()
-	if store:
-		var state = store.get_state()
-		if state.ships.has(target_id):
+	var local_store = _get_store()
+	if local_store:
+		var state = local_store.get_state()
+		if is_factory_target and state.has("factories") and state.factories.has(target_id):
+			arc_target = state.factories[target_id].position
+		elif state.ships.has(target_id):
 			arc_target = state.ships[target_id].position
 		else:
 			arc_target = arc_start + direction * 400
@@ -212,62 +226,83 @@ func _setup_missile(data: Dictionary):
 		perp = -perp
 	arc_peak = (arc_start + arc_target) / 2 + perp * dist * arc_height_mult
 
-	# Thinner, sleeker missile shape
+	# Larger, more visible missile shape
 	$Polygon2D.polygon = PackedVector2Array([
-		Vector2(-8, -2), Vector2(6, -1.5), Vector2(10, 0),
-		Vector2(6, 1.5), Vector2(-8, 2), Vector2(-6, 0)
+		Vector2(-12, -3), Vector2(8, -2), Vector2(14, 0),
+		Vector2(8, 2), Vector2(-12, 3), Vector2(-8, 0)
 	])
-	$Polygon2D.scale = Vector2(1.0, 1.0)
+	$Polygon2D.scale = Vector2(1.2, 1.2)
+
+	# Add engine glow at back of missile
+	var missile_color = VnpTypes.get_weapon_color(team, VnpTypes.WeaponType.MISSILE)
+	var engine_glow = Polygon2D.new()
+	engine_glow.name = "MissileEngine"
+	engine_glow.polygon = PackedVector2Array([
+		Vector2(-14, -2), Vector2(-10, 0), Vector2(-14, 2), Vector2(-18, 0)
+	])
+	engine_glow.color = Color(missile_color.r * 1.5, missile_color.g * 1.2, missile_color.b * 0.8, 0.9)
+	add_child(engine_glow)
 
 	# Smaller explosion radius for salvo missiles
 	explosion_radius = 80.0
 
-	# Missiles use particle smoke trail instead of line trail
+	# Missiles use smoke trail - thicker for visibility
 	_create_smoke_trail()
 
 
 func _setup_turbolaser(data: Dictionary):
 	# TURBOLASER: Slow, huge, devastating bolt - Star Destroyer style
 	turbolaser_speed = data.get("turbolaser_speed", 180)
-	turbolaser_size = data.get("turbolaser_size", 12)
+	turbolaser_size = data.get("turbolaser_size", 12) * 1.5  # 50% larger
 	speed = turbolaser_speed
 	lifetime = 4.0  # Long lifetime since slow
 
-	# Big elongated bolt shape
+	# Big elongated bolt shape - larger for visibility
 	$Polygon2D.polygon = PackedVector2Array([
-		Vector2(-turbolaser_size, -turbolaser_size * 0.4),
-		Vector2(turbolaser_size * 0.6, -turbolaser_size * 0.25),
+		Vector2(-turbolaser_size, -turbolaser_size * 0.5),
+		Vector2(turbolaser_size * 0.6, -turbolaser_size * 0.3),
 		Vector2(turbolaser_size, 0),
-		Vector2(turbolaser_size * 0.6, turbolaser_size * 0.25),
-		Vector2(-turbolaser_size, turbolaser_size * 0.4),
+		Vector2(turbolaser_size * 0.6, turbolaser_size * 0.3),
+		Vector2(-turbolaser_size, turbolaser_size * 0.5),
 	])
 
-	# Make the bolt glow subtly bright
-	$Polygon2D.modulate = Color(1.2, 1.2, 1.2, 1.0)
+	# Make the bolt glow brightly
+	$Polygon2D.modulate = Color(1.4, 1.4, 1.4, 1.0)
 
-	# Subtle trail
-	_create_line_trail(turbolaser_size * 0.4)
+	# Thicker trail for visibility
+	_create_line_trail(turbolaser_size * 0.6)
 
 	# Add a trailing glow effect
 	_create_turbolaser_glow()
 
 
 func _create_turbolaser_glow():
-	# Simple glow halo - no particles
+	# Bright glow halo
 	var turbo_color = VnpTypes.get_weapon_color(team, VnpTypes.WeaponType.TURBOLASER)
 
-	# Outer glow ring
+	# Outer glow ring - larger and brighter
 	var glow = Line2D.new()
 	glow.name = "TurboGlow"
-	glow.width = turbolaser_size * 0.8
-	glow.default_color = Color(turbo_color.r, turbo_color.g, turbo_color.b, 0.3)
+	glow.width = turbolaser_size * 1.2
+	glow.default_color = Color(turbo_color.r, turbo_color.g, turbo_color.b, 0.5)
 	var points = []
 	for i in range(9):
 		var angle = i * (PI * 2 / 8)
-		points.append(Vector2(cos(angle), sin(angle)) * turbolaser_size * 0.6)
+		points.append(Vector2(cos(angle), sin(angle)) * turbolaser_size * 0.8)
 	glow.points = PackedVector2Array(points)
 	glow.z_index = -1
 	add_child(glow)
+
+	# Add a bright core glow
+	var core_glow = Polygon2D.new()
+	core_glow.name = "TurboCore"
+	var core_points = []
+	for i in range(9):
+		var angle = i * (PI * 2 / 8)
+		core_points.append(Vector2(cos(angle), sin(angle)) * turbolaser_size * 0.4)
+	core_glow.polygon = PackedVector2Array(core_points)
+	core_glow.color = Color(turbo_color.r * 1.5, turbo_color.g * 1.5, turbo_color.b * 1.5, 0.8)
+	add_child(core_glow)
 
 
 func _create_glow_texture(radius: float) -> GradientTexture2D:
@@ -336,8 +371,8 @@ func _update_trail():
 
 
 func _create_smoke_trail():
-	# Simple line trail for missiles - same as other weapons
-	_create_line_trail(3.0)
+	# Thicker, more visible line trail for missiles
+	_create_line_trail(6.0)
 
 
 func _start_lifetime_timer():
@@ -403,15 +438,17 @@ func _move_railgun(delta):
 
 
 func _move_missile(delta):
-	var store = _get_store()
-	if not store:
+	var local_store = _get_store()
+	if not local_store:
 		_return_to_pool()
 		return
 
-	var state = store.get_state()
+	var state = local_store.get_state()
 
 	# Update target if still alive
-	if state.ships.has(target_id):
+	if is_factory_target and state.has("factories") and state.factories.has(target_id):
+		arc_target = state.factories[target_id].position
+	elif state.ships.has(target_id):
 		arc_target = state.ships[target_id].position
 
 	# Progress along arc
@@ -478,9 +515,52 @@ func _hit_railgun(ship):
 		})
 
 	_spawn_impact(global_position, 0.5)
+	_spawn_railgun_sparks(global_position)
 
 	if pierced_ships.size() >= max_pierces:
 		_return_to_pool()
+
+
+func _spawn_railgun_sparks(pos: Vector2):
+	# Impact sparks for railgun hits - small metallic debris
+	var rail_color = VnpTypes.get_weapon_color(team, VnpTypes.WeaponType.GUN)
+	var spark_count = 6
+
+	for i in range(spark_count):
+		var angle = randf() * TAU
+		var length = randf_range(8, 18)
+
+		# Spark line
+		var spark = Line2D.new()
+		spark.width = 2.0
+		spark.default_color = Color(1.0, 0.95, 0.85, 0.9)  # Hot metal white
+		spark.add_point(Vector2.ZERO)
+		spark.add_point(Vector2(cos(angle), sin(angle)) * length)
+		spark.global_position = pos
+		get_tree().root.add_child(spark)
+
+		# Animate flying outward
+		var end_pos = pos + Vector2(cos(angle), sin(angle)) * randf_range(25, 50)
+		var spark_tween = create_tween()
+		spark_tween.set_parallel(true)
+		spark_tween.tween_property(spark, "global_position", end_pos, randf_range(0.12, 0.22))
+		spark_tween.tween_property(spark, "modulate:a", 0.0, randf_range(0.15, 0.25))
+		spark_tween.tween_callback(func(): spark.queue_free())
+
+	# Small flash at impact point
+	var flash = Polygon2D.new()
+	flash.polygon = PackedVector2Array([
+		Vector2(-8, 0), Vector2(0, -8), Vector2(8, 0), Vector2(0, 8)
+	])
+	flash.color = Color(rail_color.r * 1.3, rail_color.g * 1.2, rail_color.b, 0.9)
+	flash.global_position = pos
+	flash.scale = Vector2(0.3, 0.3)
+	get_tree().root.add_child(flash)
+
+	var flash_tween = create_tween()
+	flash_tween.tween_property(flash, "scale", Vector2(1.2, 1.2), 0.06)
+	flash_tween.parallel().tween_property(flash, "modulate:a", 0.0, 0.08)
+	flash_tween.tween_callback(func(): flash.queue_free())
 
 
 func _hit_turbolaser(ship):
@@ -576,7 +656,7 @@ func _explode():
 	# Smaller screen shake per missile (3 missiles = cumulative effect)
 	main.shake_screen(12.0)
 
-	# Area damage
+	# Area damage to ships
 	var state = store.get_state()
 	for ship_id in state.ships:
 		var ship_data = state.ships[ship_id]
@@ -590,6 +670,21 @@ func _explode():
 				"ship_id": ship_id,
 				"damage": int(damage * falloff)
 			})
+
+	# Area damage to factories
+	if state.has("factories"):
+		for factory_id in state.factories:
+			var factory_data = state.factories[factory_id]
+			if factory_data.team == team:
+				continue
+			var dist = global_position.distance_to(factory_data.position)
+			if dist <= explosion_radius:
+				var falloff = 1.0 - (dist / explosion_radius) * 0.5
+				store.dispatch({
+					"type": "DAMAGE_FACTORY",
+					"factory_id": factory_id,
+					"damage": int(damage * falloff * 1.5)  # Bonus damage vs structures
+				})
 
 
 func _spawn_explosion_particles(parent, amount, life, vel_min, vel_max, scale_min, scale_max, color_start, color_end):

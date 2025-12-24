@@ -111,6 +111,12 @@ func reduce(state, action):
 			if new_state["ships"].has(ship_id):
 				new_state["ships"][ship_id]["health"] -= action["damage"]
 				if new_state["ships"][ship_id]["health"] <= 0:
+					# Check if this is a Progenitor drone dying - adds instability to the cycle
+					var ship_type = new_state["ships"][ship_id].get("type", -1)
+					if ship_type == VnpTypes.ShipType.PROGENITOR_DRONE:
+						# Killing a drone adds instability toward Progenitor fragmentation
+						var instability_gain = VnpTypes.CONVERGENCE_TIMING.get("instability_per_drone_kill", 3.0)
+						new_state["convergence"]["instability"] += instability_gain
 					new_state["ships"].erase(ship_id)
 		
 		"ADD_ENERGY":

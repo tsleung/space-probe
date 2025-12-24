@@ -33,6 +33,7 @@ enum ActionType {
 	DEMOLISH_BUILDING,
 	REPAIR_BUILDING,
 	UPGRADE_BUILDING,
+	PROGRESS_UPGRADES,  # Tick upgrade progress each year
 
 	# Resources
 	UPDATE_RESOURCE,
@@ -91,6 +92,8 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 			return _reduce_repair_building(state, action)
 		ActionType.UPGRADE_BUILDING:
 			return _reduce_upgrade_building(state, action)
+		ActionType.PROGRESS_UPGRADES:
+			return _reduce_progress_upgrades(state, action)
 		ActionType.UPDATE_RESOURCE:
 			return _reduce_update_resource(state, action)
 		ActionType.APPLY_PRODUCTION:
@@ -128,11 +131,12 @@ static func reduce(state: Dictionary, action: Dictionary) -> Dictionary:
 # ACTION CREATORS (pure functions that create action dictionaries)
 # ============================================================================
 
-static func action_start_new_colony(founders: Array, seed_value: int = 0) -> Dictionary:
+static func action_start_new_colony(founders: Array, seed_value: int = 0, balance: Dictionary = {}) -> Dictionary:
 	return {
 		"type": ActionType.START_NEW_COLONY,
 		"founders": founders,
-		"seed": seed_value if seed_value > 0 else int(Time.get_unix_time_from_system())
+		"seed": seed_value if seed_value > 0 else int(Time.get_unix_time_from_system()),
+		"balance": balance
 	}
 
 static func action_advance_year(random_values: Array) -> Dictionary:
@@ -196,6 +200,11 @@ static func action_upgrade_building(building_id: String) -> Dictionary:
 	return {
 		"type": ActionType.UPGRADE_BUILDING,
 		"building_id": building_id
+	}
+
+static func action_progress_upgrades() -> Dictionary:
+	return {
+		"type": ActionType.PROGRESS_UPGRADES
 	}
 
 static func action_update_resource(resource_type: int, delta: float) -> Dictionary:
@@ -301,6 +310,10 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 	new_state.colony_phase = _MCSTypes.ColonyPhase.ACT_1_FOUNDERS
 	new_state.current_year = 1
 
+	# Store balance configuration for use by economy functions
+	var balance = action.get("balance", {})
+	new_state["balance"] = balance
+
 	# Add founders
 	for founder in action.founders:
 		new_state.colonists.append(founder)
@@ -309,14 +322,14 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 	# EPIC STARTING BUILDINGS - More for faster visual progression!
 	# =========================================================================
 
-	# 4 Hab Pods for housing
+	# 4 Hab Pods for housing (capacity comes from BUILDING_TIER_STATS: T1 = 4 each)
 	for i in range(4):
 		var hab = _MCSTypes.create_building({
 			"type": _MCSTypes.BuildingType.HAB_POD,
 			"id": "hab_%03d" % (i + 1),
 			"is_operational": true,
 			"construction_progress": 1.0,
-			"housing_capacity": 16
+			"constructed_year": 1  # Enables upgrades from year 2+
 		})
 		new_state.buildings.append(hab)
 
@@ -326,7 +339,8 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 			"type": _MCSTypes.BuildingType.GREENHOUSE,
 			"id": "farm_%03d" % (i + 1),
 			"is_operational": true,
-			"construction_progress": 1.0
+			"construction_progress": 1.0,
+			"constructed_year": 1
 		})
 		new_state.buildings.append(farm)
 
@@ -336,7 +350,8 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 			"type": _MCSTypes.BuildingType.SOLAR_ARRAY,
 			"id": "solar_%03d" % (i + 1),
 			"is_operational": true,
-			"construction_progress": 1.0
+			"construction_progress": 1.0,
+			"constructed_year": 1
 		})
 		new_state.buildings.append(power)
 
@@ -346,7 +361,8 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 			"type": _MCSTypes.BuildingType.WATER_EXTRACTOR,
 			"id": "water_%03d" % (i + 1),
 			"is_operational": true,
-			"construction_progress": 1.0
+			"construction_progress": 1.0,
+			"constructed_year": 1
 		})
 		new_state.buildings.append(water)
 
@@ -355,7 +371,8 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 		"type": _MCSTypes.BuildingType.OXYGENATOR,
 		"id": "oxy_001",
 		"is_operational": true,
-		"construction_progress": 1.0
+		"construction_progress": 1.0,
+		"constructed_year": 1
 	})
 	new_state.buildings.append(oxygenator)
 
@@ -364,7 +381,8 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 		"type": _MCSTypes.BuildingType.WORKSHOP,
 		"id": "workshop_001",
 		"is_operational": true,
-		"construction_progress": 1.0
+		"construction_progress": 1.0,
+		"constructed_year": 1
 	})
 	new_state.buildings.append(workshop)
 
@@ -373,20 +391,25 @@ static func _reduce_start_new_colony(_state: Dictionary, action: Dictionary) -> 
 		"type": _MCSTypes.BuildingType.MEDICAL_BAY,
 		"id": "medical_001",
 		"is_operational": true,
-		"construction_progress": 1.0
+		"construction_progress": 1.0,
+		"constructed_year": 1
 	})
 	new_state.buildings.append(medical)
 
 	# =========================================================================
-	# EPIC STARTING RESOURCES - Generous for rapid expansion!
+	# STARTING RESOURCES - Read from balance.json with difficulty multiplier
 	# =========================================================================
-	new_state.resources.food = 10000.0          # 5+ years supply
-	new_state.resources.water = 5000.0
-	new_state.resources.oxygen = 2500.0
-	new_state.resources.fuel = 800.0
-	new_state.resources.building_materials = 3000.0  # Lots for building!
-	new_state.resources.machine_parts = 800.0
-	new_state.resources.medicine = 200.0
+	var starting = balance.get("starting_conditions", {}).get("starting_resources", {})
+	var difficulty = balance.get("difficulty", {})
+	var resource_mult = difficulty.get("starting_resource_multiplier", 1.0)
+
+	new_state.resources.food = starting.get("food", 10000.0) * resource_mult
+	new_state.resources.water = starting.get("water", 5000.0) * resource_mult
+	new_state.resources.oxygen = starting.get("oxygen", 2500.0) * resource_mult
+	new_state.resources.fuel = starting.get("fuel", 800.0) * resource_mult
+	new_state.resources.building_materials = starting.get("building_materials", 3000.0) * resource_mult
+	new_state.resources.machine_parts = starting.get("machine_parts", 800.0) * resource_mult
+	new_state.resources.medicine = starting.get("medicine", 200.0) * resource_mult
 
 	# Initialize log
 	new_state.mission_log = [{
@@ -446,6 +469,7 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 		})
 
 	# === ECONOMY PHASE ===
+	var balance = state.get("balance", {})
 	var production = _MCSEconomy.calc_yearly_production(
 		buildings,
 		updates["colonists"],
@@ -453,7 +477,8 @@ static func _reduce_advance_year(state: Dictionary, action: Dictionary) -> Dicti
 	)
 	var consumption = _MCSEconomy.calc_yearly_consumption(
 		updates["colonists"],
-		buildings
+		buildings,
+		balance
 	)
 
 	var resource_result = _MCSEconomy.apply_yearly_resources(
@@ -558,8 +583,9 @@ static func _reduce_advance_week(state: Dictionary, action: Dictionary) -> Dicti
 	var buildings = state.get("buildings", []).duplicate(true)
 
 	# === WEEKLY RESOURCE TICK (1/52 of yearly rates) ===
+	var balance = state.get("balance", {})
 	var weekly_production = _MCSEconomy.calc_yearly_production(buildings, colonists, resources)
-	var weekly_consumption = _MCSEconomy.calc_yearly_consumption(colonists, buildings)
+	var weekly_consumption = _MCSEconomy.calc_yearly_consumption(colonists, buildings, balance)
 
 	# Apply 1/52 of production and consumption
 	for key in weekly_production.keys():
@@ -923,27 +949,107 @@ static func _reduce_repair_building(state: Dictionary, action: Dictionary) -> Di
 	})
 
 static func _reduce_upgrade_building(state: Dictionary, action: Dictionary) -> Dictionary:
-	"""Upgrade a building to the next tier (taller, more capacity)"""
+	"""START upgrading a building - costs resources, gradual process with construction visuals"""
 	var building_id = action.get("building_id", "")
+	var resources = state.get("resources", {}).duplicate(true)
 	var new_buildings: Array = []
+	var upgrade_started = false
 
 	for building in state.get("buildings", []):
-		if building.get("id", "") == building_id:
+		if building.get("id", "") == building_id and not upgrade_started:
 			var tier = building.get("tier", 1)
-			if tier < 5:  # Max tier is 5
-				var upgraded = building.duplicate(true)
-				upgraded["tier"] = tier + 1
-				# Boost stats with each tier
-				upgraded["housing_capacity"] = int(upgraded.get("housing_capacity", 0) * 1.3)
-				upgraded["worker_capacity"] = int(upgraded.get("worker_capacity", 0) * 1.2)
-				upgraded["efficiency"] = minf(upgraded.get("efficiency", 100.0) + 5.0, 150.0)
-				new_buildings.append(upgraded)
-			else:
+			var already_upgrading = building.get("upgrading", false)
+			var target_tier = tier + 1
+
+			if tier >= 5 or already_upgrading:
+				# Can't upgrade past tier 5 or already upgrading
 				new_buildings.append(building)
+				continue
+
+			# Check upgrade cost
+			var costs = _MCSTypes.get_upgrade_cost(target_tier)
+			var can_afford = true
+			for resource_name in costs.keys():
+				if resources.get(resource_name, 0) < costs[resource_name]:
+					can_afford = false
+					break
+
+			if not can_afford:
+				# Can't afford upgrade
+				new_buildings.append(building)
+				continue
+
+			# Deduct costs
+			for resource_name in costs.keys():
+				resources[resource_name] = resources.get(resource_name, 0) - costs[resource_name]
+
+			# Start upgrade
+			var upgraded = building.duplicate(true)
+			upgraded["upgrading"] = true
+			upgraded["upgrade_progress"] = 0.0
+			upgraded["target_tier"] = target_tier
+			new_buildings.append(upgraded)
+			upgrade_started = true
 		else:
 			new_buildings.append(building)
 
-	return _with_field(state, "buildings", new_buildings)
+	return _with_fields(state, {
+		"buildings": new_buildings,
+		"resources": resources
+	})
+
+static func _reduce_progress_upgrades(state: Dictionary, _action: Dictionary) -> Dictionary:
+	"""Progress all building upgrades - tier-based durations, stats come from BUILDING_TIER_STATS"""
+	var new_buildings: Array = []
+	var upgrade_log: Array = []
+
+	for building in state.get("buildings", []):
+		if building.get("upgrading", false):
+			var upgraded = building.duplicate(true)
+			var target_tier = upgraded.get("target_tier", 2)
+
+			# Get tier-based duration (higher tiers take longer)
+			var duration = _MCSTypes.get_upgrade_duration(target_tier)
+			var upgrade_speed = 1.0 / maxf(duration, 1)  # Progress per year
+
+			var progress = upgraded.get("upgrade_progress", 0.0) + upgrade_speed
+
+			if progress >= 1.0:
+				# Upgrade complete! Apply the tier change
+				var old_tier = upgraded.get("tier", 1)
+				upgraded["tier"] = target_tier
+				upgraded["upgrading"] = false
+				upgraded["upgrade_progress"] = 1.0
+				upgraded.erase("target_tier")
+
+				# Stats now come from BUILDING_TIER_STATS (no manual boosts needed)
+				# The economy functions will automatically use tier-based values
+				upgrade_log.append({
+					"building_type": _MCSTypes.get_building_name(upgraded.get("type", 0)),
+					"old_tier": old_tier,
+					"new_tier": target_tier
+				})
+			else:
+				upgraded["upgrade_progress"] = progress
+
+			new_buildings.append(upgraded)
+		else:
+			new_buildings.append(building)
+
+	var new_state = _with_field(state, "buildings", new_buildings)
+
+	# Log completed upgrades
+	if not upgrade_log.is_empty():
+		var log = new_state.get("mission_log", []).duplicate()
+		for upgrade in upgrade_log:
+			log.append({
+				"year": state.get("current_year", 1),
+				"message": "%s upgraded to Tier %d!" % [upgrade.building_type, upgrade.new_tier],
+				"log_type": "success"
+			})
+		new_state = _with_field(new_state, "mission_log", log)
+
+	return new_state
 
 static func _reduce_update_resource(state: Dictionary, action: Dictionary) -> Dictionary:
 	var new_resources = state.get("resources", {}).duplicate(true)
@@ -967,7 +1073,8 @@ static func _reduce_apply_production(state: Dictionary, _action: Dictionary) -> 
 static func _reduce_apply_consumption(state: Dictionary, _action: Dictionary) -> Dictionary:
 	var colonists = state.get("colonists", [])
 	var buildings = state.get("buildings", [])
-	var consumption = _MCSEconomy.calc_yearly_consumption(colonists, buildings)
+	var balance = state.get("balance", {})
+	var consumption = _MCSEconomy.calc_yearly_consumption(colonists, buildings, balance)
 
 	var new_resources = state.get("resources", {}).duplicate(true)
 	for key in consumption.keys():

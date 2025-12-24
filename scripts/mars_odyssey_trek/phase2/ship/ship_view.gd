@@ -7,6 +7,8 @@ class_name ShipView
 const ShipTypes = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_types.gd")
 const ShipRoom = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_room.gd")
 const CrewMember = preload("res://scripts/mars_odyssey_trek/phase2/ship/crew_member.gd")
+const ShipNavigation = preload("res://scripts/mars_odyssey_trek/phase2/ship/ship_navigation.gd")
+const EVAController = preload("res://scripts/mars_odyssey_trek/phase2/ship/eva_controller.gd")
 
 # ============================================================================
 # SIGNALS
@@ -36,6 +38,8 @@ const SHIP_PADDING = 15
 var rooms: Dictionary = {}  # RoomType -> ShipRoom
 var crew: Dictionary = {}   # role -> CrewMember
 var navigation_region: NavigationRegion2D
+var ship_nav: ShipNavigation  # Graph-based pathfinding
+var eva_ctrl: EVAController   # EVA mechanics controller
 
 # ============================================================================
 # EVA STATE
@@ -53,9 +57,49 @@ var eva_airlock_position: Vector2
 func _ready() -> void:
 	_create_navigation_region()
 	_create_ship_layout()
+	_setup_navigation_graph()
+	_setup_eva_controller()
 	_create_crew()
 	_create_eva_tether()
 	_position_crew_at_stations()
+
+func _setup_eva_controller() -> void:
+	## Initialize the EVA controller with exterior surfaces
+	eva_ctrl = EVAController.new()
+	eva_ctrl.name = "EVAController"
+	add_child(eva_ctrl)
+	eva_ctrl.setup(self, ship_nav)
+
+	# Connect EVA signals
+	eva_ctrl.eva_started.connect(_on_eva_started)
+	eva_ctrl.eva_completed.connect(_on_eva_completed)
+	eva_ctrl.crew_drifted.connect(_on_crew_drifted)
+	eva_ctrl.rescue_completed.connect(_on_rescue_completed)
+
+func _on_eva_started(crew_role: String, target: int) -> void:
+	print("[SHIP] EVA started: %s -> %s" % [crew_role, ShipNavigation.get_exterior_name(target)])
+
+func _on_eva_completed(crew_role: String, success: bool) -> void:
+	print("[SHIP] EVA completed: %s (success=%s)" % [crew_role, success])
+
+func _on_crew_drifted(crew_role: String) -> void:
+	print("[SHIP] ALERT: %s drifted on tether!" % crew_role.capitalize())
+	flash_all_rooms(Color(1.0, 0.5, 0.0))  # Orange warning flash
+
+func _on_rescue_completed(victim_role: String) -> void:
+	print("[SHIP] %s safely rescued" % victim_role.capitalize())
+	flash_all_rooms(Color(0.3, 0.8, 0.3))  # Green success flash
+
+func _setup_navigation_graph() -> void:
+	## Initialize the waypoint-based navigation system
+	ship_nav = ShipNavigation.new()
+
+	# Collect room positions
+	var room_positions: Dictionary = {}
+	for room_type in rooms:
+		room_positions[room_type] = rooms[room_type].global_position
+
+	ship_nav.setup(layout_center, room_positions)
 
 func _process(delta: float) -> void:
 	# Update EVA tether position
@@ -206,9 +250,11 @@ func _position_crew_at_stations() -> void:
 		var home_room = rooms.get(home_room_type)
 
 		if home_room:
-			member.global_position = home_room.get_work_position()
+			# Start at a random spot in the room for variety
+			member.global_position = home_room.get_random_idle_position()
 			member.current_room = home_room_type
 			member.target_room = home_room_type
+			member.current_room_node = home_room  # Enable idle wandering
 
 # ============================================================================
 # CREW COMMANDS
@@ -219,7 +265,11 @@ func send_crew_to_room(role: String, room_type: ShipTypes.RoomType, emergency: b
 	var room = rooms.get(room_type)
 
 	if member and room:
-		member.move_to_room(room_type, room.get_work_position(), emergency)
+		# Get waypoint path through corridors
+		var waypoint_path = ship_nav.find_path(member.current_room, room_type)
+		# Add final destination (random spot in room)
+		waypoint_path.append(room.get_random_idle_position())
+		member.move_along_path(room_type, waypoint_path, room, emergency)
 
 func assign_task_to_crew(role: String, task_type: ShipTypes.TaskType) -> void:
 	var member = crew.get(role)
@@ -297,6 +347,13 @@ func get_crew_status() -> Dictionary:
 func get_room(room_type: ShipTypes.RoomType) -> ShipRoom:
 	return rooms.get(room_type)
 
+func get_room_position(room_type: int) -> Vector2:
+	## Get the center position of a room
+	var room = rooms.get(room_type)
+	if room:
+		return room.position
+	return layout_center  # Fallback to ship center
+
 func get_crew_member(role: String) -> CrewMember:
 	return crew.get(role)
 
@@ -315,6 +372,24 @@ func hide_repair_progress(room_type: ShipTypes.RoomType) -> void:
 	var room = rooms.get(room_type)
 	if room and room.has_method("hide_repair_progress"):
 		room.hide_repair_progress()
+
+func start_eva(crew_role: String, target_waypoint: int = -1) -> void:
+	## Start an EVA for the specified crew member
+	## If target_waypoint is -1, picks a random exterior target
+	if target_waypoint == -1:
+		target_waypoint = ShipNavigation.get_random_exterior_target()
+	eva_ctrl.start_eva(crew_role, target_waypoint)
+
+func complete_eva(crew_role: String, success: bool = true) -> void:
+	## Complete an active EVA
+	eva_ctrl.complete_eva(crew_role, success)
+
+func check_eva_drift(crew_role: String) -> bool:
+	## Check if crew drifts during EVA work (call after work is done)
+	return eva_ctrl.check_for_drift(crew_role)
+
+func is_crew_on_eva(crew_role: String) -> bool:
+	return eva_ctrl.is_on_eva(crew_role)
 
 func trigger_eva_visual(crew_role: String) -> void:
 	## Visual effect for EVA - crew member goes "outside" the ship with tether

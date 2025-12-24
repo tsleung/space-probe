@@ -241,8 +241,22 @@ static func choose_building(state: Dictionary, personality: Personality, random_
 			"priority": 75
 		})
 
-	# Factory for large colonies (requires industrial base)
-	if pop_count > 60 and building_count > 25 and current_year > 25:
+	# Factory EARLY - critical for building_materials production!
+	# Without a factory, the colony cannot sustain upgrades or construction
+	var has_factory = false
+	for b in buildings:
+		if b.type == _MCSTypes.BuildingType.FACTORY:
+			has_factory = true
+			break
+
+	if not has_factory and current_year >= 3:
+		# First factory is CRITICAL - high priority
+		priorities.append({
+			"type": _MCSTypes.BuildingType.FACTORY,
+			"priority": 95  # Very high - almost as important as power/housing
+		})
+	elif current_year >= 10 and building_count > 20:
+		# Additional factories for larger colonies
 		priorities.append({
 			"type": _MCSTypes.BuildingType.FACTORY,
 			"priority": 72
@@ -485,34 +499,93 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 			actions.append("Repaired: %s" % _MCSTypes.get_building_name(building.get("type", 0)))
 			state = store.get_state()  # Refresh state
 
-	# 3. UPGRADE EXISTING BUILDINGS - Taller, more impressive!
-	var upgraded_this_year = 0
-	var max_upgrades = 3 + rng.randi() % 4  # 3-6 upgrades per year (more aggressive!)
+	# 3. UPGRADE EXISTING BUILDINGS - THE OPTIMAL STRATEGY!
+	# Upgrades are almost always better than new construction:
+	# - Cheaper than building new (30-200 vs 40-800 materials)
+	# - Faster production boost (existing building, just improving)
+	# - Worker efficiency gains at T4+ (automation!)
+	# - No new land/power footprint
 	var buildings = state.get("buildings", [])
 	var current_year = state.get("current_year", 0)
+	var resources = state.get("resources", {})
+	var upgraded_this_year = 0
+	var max_upgrades = maxi(10, buildings.size() / 2)  # Scale with colony size, minimum 10
 
+	# Calculate which buildings give best ROI for upgrading
+	var upgrade_candidates: Array = []
 	for building in buildings:
+		var tier = building.get("tier", 1)
+		var already_upgrading = building.get("upgrading", false)
+		if tier >= 5 or already_upgrading:
+			continue
+
+		var target_tier = tier + 1
+		var roi = _calculate_upgrade_roi(building, state)
+		var costs = _MCSTypes.get_upgrade_cost(target_tier)
+
+		# Check if we can afford this upgrade
+		var can_afford = true
+		for resource_name in costs.keys():
+			if resources.get(resource_name, 0) < costs[resource_name]:
+				can_afford = false
+				break
+
+		if can_afford and roi > 0:
+			upgrade_candidates.append({
+				"building": building,
+				"roi": roi,
+				"costs": costs
+			})
+
+	# Sort by ROI (highest first) - best value upgrades first
+	upgrade_candidates.sort_custom(func(a, b):
+		return a.roi > b.roi)
+
+	for candidate in upgrade_candidates:
 		if upgraded_this_year >= max_upgrades:
 			break
+
+		var building = candidate.building
 		var tier = building.get("tier", 1)
-		# Default constructed_year to year 1 if not set (legacy buildings)
 		var constructed_year = building.get("constructed_year", 1)
 		var age = current_year - constructed_year
-		# Upgrade every 3 years per tier (faster upgrades for visual impact)
-		if tier < 5 and age >= (tier * 3) and rng.randf() < 0.6:
+
+		# Minimal age requirements - upgrades are optimal, do them ASAP!
+		# T1→T2: 1 year (settle in), T2→T3: 1 year, T3→T4: 2 years, T4→T5: 3 years
+		var upgrade_age_requirement = [0, 1, 1, 2, 3]
+		var required_age = upgrade_age_requirement[tier] if tier < 5 else 999
+
+		# ALWAYS upgrade if eligible - upgrades are the optimal strategy!
+		if age >= required_age:
 			var building_id = building.get("id", "")
 			if store.has_method("upgrade_building"):
 				store.upgrade_building(building_id)
-				actions.append("Upgraded: %s to Tier %d" % [_MCSTypes.get_building_name(building.get("type", 0)), tier + 1])
+				actions.append("UPGRADE: %s -> Tier %d (ROI: %.1f)" % [
+					_MCSTypes.get_building_name(building.get("type", 0)),
+					tier + 1,
+					candidate.roi
+				])
 				state = store.get_state()
+				resources = state.get("resources", {})  # Refresh resources after spending
 				upgraded_this_year += 1
 
 	# 4. BUILD SUPERSTRUCTURES - One every 5 years, targeting 10 by year 50
-	if current_year >= 5 and current_year % 5 == 0:
+	# Count existing superstructures
+	var superstructure_count = 0
+	for b in buildings:
+		var btype = b.get("type", -1)
+		if btype in [_MCSTypes.BuildingType.MASS_DRIVER, _MCSTypes.BuildingType.FUSION_REACTOR, _MCSTypes.BuildingType.SPACE_ELEVATOR]:
+			superstructure_count += 1
+
+	# How many should we have by now? (1 per 5 years, starting at year 5)
+	var target_count = maxi(0, current_year / 5)
+
+	# Build if we're behind schedule
+	if current_year >= 5 and superstructure_count < target_count:
 		var superstructure = _choose_superstructure(state, rng.randf())
 		if superstructure >= 0:
 			var cost = _get_building_cost(superstructure)
-			var resources = state.get("resources", {})
+			resources = state.get("resources", {})  # Refresh from state
 			var can_afford = true
 			for resource_name in cost:
 				if resources.get(resource_name, 0.0) < cost[resource_name]:
@@ -520,7 +593,7 @@ static func run_ai_turn(store: Node, personality: Personality, rng: RandomNumber
 					break
 			if can_afford:
 				store.start_construction(superstructure)
-				actions.append("SUPERSTRUCTURE: Started %s (Year %d milestone)" % [_MCSTypes.get_building_name(superstructure), current_year])
+				actions.append("SUPERSTRUCTURE: Started %s (catching up - have %d, need %d)" % [_MCSTypes.get_building_name(superstructure), superstructure_count, target_count])
 				state = store.get_state()
 
 	# 5. BUILD NEW - Slow early growth, earn your colony!
@@ -643,6 +716,91 @@ static func _choose_superstructure(state: Dictionary, random_value: float) -> in
 		return candidates[int(random_value * candidates.size()) % candidates.size()]
 
 	return build_order[0]  # Default to mass driver
+
+## Calculate ROI (Return on Investment) for upgrading a building
+## UPGRADES ARE OPTIMAL - heavily weighted to encourage upgrading over new construction
+## Benefits: Production boost, worker savings, power efficiency, housing density
+static func _calculate_upgrade_roi(building: Dictionary, state: Dictionary) -> float:
+	var tier = building.get("tier", 1)
+	if tier >= 5:
+		return 0.0
+
+	var target_tier = tier + 1
+	var building_type = building.get("type", 0)
+
+	# Get current and next tier stats
+	var current_stats = _MCSTypes.get_tier_stats(building_type, tier)
+	var next_stats = _MCSTypes.get_tier_stats(building_type, target_tier)
+
+	var value_score = 0.0
+
+	# Production increase value - HIGH WEIGHTS (upgrades boost existing production!)
+	var current_prod = current_stats.get("production", {})
+	var next_prod = next_stats.get("production", {})
+	for resource_name in next_prod.keys():
+		var current_val = current_prod.get(resource_name, 0)
+		var next_val = next_prod[resource_name]
+		var increase = next_val - current_val
+
+		# Weight production by resource importance - ALL BOOSTED
+		match resource_name:
+			"food": value_score += increase * 3.0       # Was 1.0
+			"water": value_score += increase * 3.5      # Was 1.2
+			"oxygen": value_score += increase * 3.0     # Was 1.0
+			"machine_parts": value_score += increase * 5.0   # Was 2.0 - critical!
+			"building_materials": value_score += increase * 4.0  # Was 1.5
+			_: value_score += increase * 2.0            # Was 0.5
+
+	# Power generation increase - MUCH MORE VALUABLE
+	var current_power = current_stats.get("power_gen", 0)
+	var next_power = next_stats.get("power_gen", 0)
+	if next_power > current_power:
+		value_score += (next_power - current_power) * 3.0  # Was 0.8
+
+	# Power consumption DECREASE is also valuable
+	var current_power_use = current_stats.get("power", 0)
+	var next_power_use = next_stats.get("power", 0)
+	if next_power_use < current_power_use:
+		value_score += (current_power_use - next_power_use) * 2.0
+
+	# Worker savings - THE BIGGEST WIN for automation!
+	var current_workers = current_stats.get("workers", 0)
+	var next_workers = next_stats.get("workers", 0)
+	var workers_saved = current_workers - next_workers
+	if workers_saved > 0:
+		# Each worker saved is EXTREMELY valuable - they can work elsewhere
+		var colonists = state.get("colonists", [])
+		var pop = _MCSPopulation.count_alive(colonists)
+		# Workers become more valuable as colony grows
+		var worker_scarcity = clampf(pop / 50.0, 1.0, 5.0)  # Was /100, 0.5-3.0
+		value_score += workers_saved * 100.0 * worker_scarcity  # Was 50.0
+
+	# Housing capacity increase - MAJOR VALUE (density is king!)
+	var current_housing = current_stats.get("housing_capacity", 0)
+	var next_housing = next_stats.get("housing_capacity", 0)
+	if next_housing > current_housing:
+		value_score += (next_housing - current_housing) * 15.0  # Was 5.0
+
+	# Health/education/research boosts
+	for stat_name in ["health_boost", "education_capacity", "research_boost"]:
+		var current_val = current_stats.get(stat_name, 0)
+		var next_val = next_stats.get(stat_name, 0)
+		if next_val > current_val:
+			value_score += (next_val - current_val) * 3.0
+
+	# BONUS: Higher tier upgrades are more impactful (T4, T5 unlocks automation)
+	var tier_bonus = [1.0, 1.0, 1.2, 1.5, 2.0]  # T5 upgrades double value
+	value_score *= tier_bonus[tier]
+
+	# Calculate cost
+	var costs = _MCSTypes.get_upgrade_cost(target_tier)
+	var total_cost = costs.get("building_materials", 0) + costs.get("machine_parts", 0) * 2.0
+
+	# ROI = value / cost (higher = better investment)
+	if total_cost <= 0:
+		return value_score * 100.0  # Free upgrade = very high ROI
+
+	return value_score / total_cost
 
 static func _has_critical_need(state: Dictionary) -> bool:
 	var colonists = state.get("colonists", [])

@@ -48,7 +48,7 @@ Von Neumann Probe is an automated real-time space battle spectacle built in Godo
 |------|---------|------|------|-------|--------|------|
 | **Defender** | PDC Interception | 80 | 0 | 160 | 100 | Shoots down missiles (40% intercept) |
 | **Shielder** | Shield Bubble | 90 | 10 | 140 | 80 | Protects nearby allies |
-| **Graviton** | Gravity Well | 120 | 40 | 80 | 180 | Deflects railguns (85% deflect) |
+| **Graviton** | Gravity Well | 120 | 40 | 80 | 180 | Deflects railguns (90% deflect) |
 
 ### Defense Structures
 
@@ -181,28 +181,81 @@ Click ship type buttons in the doctrine panel to adjust production weights:
 
 ## Visual Effects System
 
+### Design Philosophy
+
+Visual effects are designed for maximum spectacle - "12 out of 10" intensity. All effects use multi-layer rendering with glow layers, hot cores, and particle debris for dramatic impact.
+
 ### Projectile Trails
 
-Each weapon type has distinctive visual treatment (all using Line2D for performance):
+Each weapon type has distinctive multi-layer visual treatment:
 
-- **Railgun**: Line2D trail with faction-colored gradient, glow outline
-- **Laser**: Instant beam with glow
-- **Missile**: Line2D trail, curved bezier arc flight path
-- **Turbolaser**: Large bolt with Line2D ring glow, slow movement
+**Railgun**
+- Large 24px slug polygon with gradient fill
+- 8px wide outer glow trail (faction color, 30% opacity)
+- 4px main trail with gradient (faction color → transparent)
+- 2px bright core line (white-hot center)
+- Power surge flash at barrel on fire
+
+**Missile**
+- 1.2x scaled missile body with engine glow polygon
+- 6px smoke trail with wavy path
+- Faction-colored engine exhaust glow
+- Trailing debris particles
+
+**Turbolaser**
+- 50% larger bolt than base size
+- Core glow polygon (bright faction color)
+- Outer glow ring
+- Slow, imposing movement
+
+**Laser Beam**
+- 36px wide outer glow (faction color, 25% opacity)
+- 18px main beam with gradient
+- 6px white-hot core beam
+- Burn impact effect at target
+- Pulsing intensity animation
 
 ### Engine Trails
 
-Ships have simplified Line2D engine trails:
-- Single gradient line from solid to transparent
+Ships have multi-layer engine trails:
+- Outer glow line (faction color, low opacity)
+- Main trail with gradient (solid → transparent)
 - Small spark polygon at exhaust point
 - Trail length scales with ship size (20-35 units)
 
-### Defensive Ship Effects
+### Defensive Ship Effects (Spectacular)
 
-Support ships use simple Line2D rings instead of particles:
-- **PDC Kill Zone**: Single range ring
-- **Shield Bubble**: Simple circle outline
-- **Gravity Well**: Two concentric rings (inner + outer)
+Support ships have elaborate animated effects:
+
+**Shield Bubble (Shielder)**
+- Outer ring with pulse animation
+- Inner glow ring
+- Hexagonal energy pattern grid
+- Rotating shimmer animation
+- Hexagon rotation effect
+
+**Gravity Well (Graviton)**
+- Spinning outer ring
+- Inner ring with opposite rotation
+- Two spiral arm tendrils
+- Dark core with bright rim
+- Continuous rotation animation
+- Deflection sparks when projectiles curve
+
+**PDC Kill Zone (Defender)**
+- Outer pulsing range ring
+- Inner targeting ring
+- Rotating radar sweep line with gradient
+- Crosshair overlay (4 lines)
+- Tracer shower when intercepting missiles
+
+### Deflection Effects
+
+When Graviton deflects railguns:
+- Ripple ring expanding from deflection point
+- Spark burst (8-12 particles)
+- Deflection arc line showing curved path
+- Purple tint on deflected projectile
 
 ### Faction-Colored Effects
 
@@ -214,24 +267,120 @@ Enemy:   Hot white → Bright orange → Deep red
 Nemesis: Pink-white → Hot magenta → Deep purple
 ```
 
-### Explosions
+### Ship Death Explosions (5-Layer System)
 
-Death explosions scale with ship size:
+Death explosions are dramatic multi-layer effects:
 
-| Ship Size | Shake Intensity | Explosion Scale | Notes |
-|-----------|-----------------|-----------------|-------|
-| Small | 10 | 2.0x | Frigate, Harvester |
-| Medium | 25 | 3.5x | Destroyer, Defender, Shielder |
-| Large | 50 | 6.0x | Cruiser, Graviton |
-| Massive | 100 | 12.0x | Star Base - secondary explosions + shockwave |
+1. **Initial Flash**: Blinding white burst, expands rapidly
+2. **Fire Core**: Faction-colored explosion polygon, irregular edges
+3. **Shockwave Ring**: Expanding Line2D circle with fade
+4. **Sparks**: 12-16 directional debris lines flying outward
+5. **Smoke Plume**: Rising, expanding smoke polygon
 
-### Explosion Layers (Missiles)
+| Ship Size | Shake Intensity | Flash Scale | Spark Count | Notes |
+|-----------|-----------------|-------------|-------------|-------|
+| Small | 10 | 40px | 8 | Frigate, Harvester |
+| Medium | 25 | 60px | 12 | Destroyer, Defender, Shielder |
+| Large | 50 | 90px | 16 | Cruiser, Graviton |
+| Massive | 100 | 150px | 24 | Star Base - secondary explosions |
 
-1. **Flash**: Brief bright white/faction burst
-2. **Fire**: Main explosion with faction color gradient
-3. **Smoke**: Gray dissipating particles
-4. **Sparks**: Faction-colored debris
-5. **Shockwave Ring**: Expanding Line2D circle
+### Missile Explosions (5-Layer System)
+
+1. **Flash**: Brief bright white/faction burst with expansion
+2. **Fire**: Multi-polygon explosion with faction color gradient
+3. **Smoke**: Gray GPUParticles2D cloud
+4. **Sparks**: Faction-colored debris particles
+5. **Shockwave Ring**: Expanding Line2D circle with width fade
+
+### Base Weapon Effects
+
+Each faction has spectacular superweapon visuals:
+
+**Arc Storm (Player - Chain Lightning)**
+
+*Charge-Up Phase:*
+- Pulsing corona rings around base
+- 12-20 electricity tendrils gathering toward center
+- Multi-layer tendrils (glow + main + core)
+- Central energy orb buildup with flash
+
+*Main Effect:*
+- Jagged lightning arcs between chain targets
+- Triple-layer per arc (outer glow + main + hot core)
+- Secondary arcs branching randomly
+- Scales with charge count (5-13 chain targets)
+
+*Impact Effects:*
+- Central flash burst at each hit
+- Double EMP shockwave rings expanding
+- Triple-layer electric sparks (glow + main + core)
+- Residual static arcs lingering
+
+**Hellstorm (Enemy - Orbital Bombardment)**
+
+*Warning Phase:*
+- Pulsing target zone ring
+- Double pulse animation
+
+*Meteor Effects:*
+- Outer corona glow on each meteor
+- Detailed irregular meteor body polygon
+- White-hot inner core
+- Main fire trail with gradient
+- Outer glow trail (5x width)
+- Smoke trail with drift
+- Trailing debris/sparks
+- Scales: 7-19 impacts based on charges
+
+*Impact Effects:*
+- Initial blinding flash (diamond shape)
+- Multi-polygon fireball with irregular edges
+- Inner fire core
+- Triple expanding shockwave rings
+- Fire jets with glow layers (12-21 jets)
+- Flying debris pieces with spin
+- Lingering ground fire with pulse animation
+- Rising smoke plume
+
+**Void Tear (Nemesis - Reality Rift)**
+
+*Warning Phase:*
+- Pulsing event horizon ring
+- Reality distortion (stretched stars pulled toward center)
+- Multi-layer reality cracks (glow + main + core)
+
+*Main Rift:*
+- Jagged glowing edges (left + right)
+- Pure dark void center polygon
+- Swirling void particles spiraling inward
+- Radial pull effect lines
+
+*Damage Phase:*
+- Rift pulses and damages over time
+- Screen shake on each damage tick
+
+*Implosion Effects:*
+- Pre-collapse energy surge (brightens)
+- Violent collapse animation
+- Singularity flash burst
+- Four expanding shockwave rings (color gradient)
+- Triple-layer void energy sparks
+- Wobbly reality distortion ripples
+- Lingering dark void residue particles
+
+### Screen Shake
+
+Shake intensity scales with event significance:
+
+| Event | Intensity | Duration |
+|-------|-----------|----------|
+| Small explosion | 10 | 0.2s |
+| Medium explosion | 25 | 0.3s |
+| Large explosion | 50 | 0.4s |
+| Star Base death | 100 | 0.5s |
+| Arc Storm impact | 20-80 | 0.3s (per charge) |
+| Hellstorm impact | 8-18 | 0.2s (per meteor) |
+| Void Tear implosion | 50-150 | 0.5s |
 
 ### Rate Limiting
 
@@ -295,13 +444,16 @@ Support ships (Defender, Shielder, Graviton) automatically escort combat ships:
 
 ### Graviton Deflection
 
-When enemy railguns enter Graviton's gravity well:
+When enemy railguns enter Graviton's gravity well (200 unit radius):
 
-- 85% chance to deflect
-- Railgun curves around Graviton
-- Creates visual deflection trail (purple-tinted)
+- 90% chance to deflect
+- Railgun curves around Graviton with dramatic arc
+- Visual effects include:
+  - Expanding ripple shockwave from deflection point
+  - Second delayed ripple wave
+  - Curved deflection trail on the projectile
 - Sparks at deflection point
-- Deflected projectiles deal 30% damage
+- Deflected projectiles are destroyed (removed from play)
 
 ---
 
@@ -322,6 +474,20 @@ Player can direct their fleet by clicking:
 ---
 
 ## AI Controller
+
+### Target Fleet Composition
+
+The AI aims for a balanced fleet composition:
+
+| Ship Type | Target % | Rationale |
+|-----------|----------|-----------|
+| Frigate | 22% | Fast assault, equal DPS/cost to Destroyer |
+| Destroyer | 22% | Sniper, equal DPS/cost to Frigate |
+| Cruiser | 20% | Artillery, viable at reduced cost (75e+20m) |
+| Defender | 12% | Anti-missile coverage for fleet |
+| Shielder | 10% | Shield bubble support (cheaper at 75e+5m) |
+| Graviton | 9% | Railgun deflection (cheaper at 100e+30m) |
+| Harvester | 5% | Resource gathering (at least 1 maintained) |
 
 ### Build Decision Loop
 
@@ -505,6 +671,87 @@ After fragmentation, the player becomes the new largest network. Somewhere, a di
 
 ---
 
+## Map Expansion System
+
+### Center-Anchored Design
+
+The map expands symmetrically around a fixed `gameplay_center` point. This ensures:
+
+- Bases and early-game structures stay in the same relative position
+- Camera naturally follows the action in the center
+- New territory appears equally in all directions
+- Starfield background always covers the visible area
+
+### Expansion Mechanics
+
+| Element | Value | Description |
+|---------|-------|-------------|
+| **Interval** | 10 seconds | Time between expansion phases |
+| **Scale Increase** | +0.3x per phase | Map grows 30% larger each expansion |
+| **Max Phases** | 10 | Final scale is WORLD_SCALE + 3.0 |
+| **Countdown** | 3 seconds | Visual warning before expansion |
+
+### Camera Limits
+
+Camera limits are computed symmetrically around `gameplay_center`:
+
+```
+limit_left  = gameplay_center.x - world_size.x / 2
+limit_right = gameplay_center.x + world_size.x / 2
+limit_top   = gameplay_center.y - world_size.y / 2
+limit_bottom = gameplay_center.y + world_size.y / 2
+```
+
+### Expansion Points
+
+New asteroid fields spawn at fixed angles from `gameplay_center`:
+- 2 new points per expansion phase
+- Positioned at opposite sides of the map
+- Angle rotates slightly each phase for variety
+
+### Visual Effects
+
+- **Countdown Ring**: Pulsing ring shows time until expansion
+- **Shockwave**: Expanding ring visual when map grows
+- **Camera Zoom**: Smooth zoom-out to show new territory
+- **Screen Shake**: Impact shake on expansion
+
+---
+
+## Factory System
+
+### Overview
+
+Factories are the core production facilities that each team can build. They are the primary elimination target - destroying all enemy factories and ships wins the game.
+
+### Factory Mechanics
+
+| Element | Description |
+|---------|-------------|
+| **Builder** | Harvester ship builds factories anywhere on the map |
+| **Build Time** | 2.0 seconds (fast - limiting factor is resources, not time) |
+| **Production** | Ships spawn from factories based on AI build decisions |
+| **Health** | Factories are destructible by enemy ships |
+| **Targeting** | Combat ships prioritize enemy factories when no ships in range |
+
+### Elimination Mechanics
+
+A player is eliminated when they lose **all factories AND all ships**. Ships can always build new factories given resources, so total elimination requires:
+
+1. Destroying all enemy factories
+2. Destroying all remaining enemy ships (especially Harvesters who can rebuild)
+
+### Factory Targeting Behavior
+
+Combat ships follow this targeting priority:
+1. **Ships in weapon range** - Engage if enemy ships are within attack range
+2. **Enemy factories** - If no ships in range, find nearest enemy factory to attack
+3. **Strategic points** - Fall back to capturing territory
+
+Missiles from ships and base weapons deal AOE damage to factories within blast radius.
+
+---
+
 ## Outpost Building (Under Development)
 
 ### Concept
@@ -538,6 +785,29 @@ After:  *watches outposts consumed one by one* "No... my empire..."
 
 ---
 
+## Planned Improvements (Under Development)
+
+### Ship Tactical Behavior - Kiting vs Diving
+
+Ships should adapt tactics based on range advantage:
+
+| Ship | Range | Speed | Intended Tactic |
+|------|-------|-------|-----------------|
+| Frigate | 200 | 280 | DIVE - close gap fast against Cruisers |
+| Destroyer | 400 | 180 | KITE - stay at range, snipe targets |
+| Cruiser | 500 | 100 | KITE - rain missiles from afar, never stop |
+
+**Current Issue**: Destroyers orbit instead of kiting. Cruisers brake to stop instead of maintaining distance.
+
+**Planned Fix**: Range-aware tactical logic where ships with range advantage maintain distance, ships at disadvantage rush in.
+
+### Cruiser Movement Fix
+
+**Current**: Large ships brake to Vector2.ZERO when near target.
+**Planned**: Orbit at range instead of stopping - continuous movement maintains tactical advantage.
+
+---
+
 ## Future Considerations
 
 - Speed controls (1x, 2x, 4x)
@@ -549,8 +819,10 @@ After:  *watches outposts consumed one by one* "No... my empire..."
 
 ---
 
-*Document Version: 1.2*
+*Document Version: 1.4*
 *Last Updated: December 2024*
+*Visual Effects: Enhanced to "12/10" spectacle level*
+*Recent Changes: Center-anchored expansion, factory targeting, Graviton deflection (90%)*
 
 ---
 
